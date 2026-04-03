@@ -15,9 +15,6 @@ def resolve_default_state(block: dict) -> int:
     default_state = block.get("defaultState")
 
     if isinstance(states, list) and states:
-        has_axis = any(isinstance(state, dict) and state.get("name") == "axis" for state in states)
-        if has_axis and default_state is not None:
-            return int(default_state)
         if min_state is not None:
             return int(min_state)
         if default_state is not None:
