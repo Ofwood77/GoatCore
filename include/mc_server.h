@@ -6,8 +6,9 @@
 #include <stddef.h>
 #include "mc_inventory.h"
 
-#define MC_PROTO_VERSION_1_21_1 767
-#define MC_GAME_VERSION "1.21.1"
+#define MC_PROTO_VERSION 775
+#define MC_PROTO_VERSION_1_21_1 MC_PROTO_VERSION
+#define MC_GAME_VERSION "26.1"
 
 typedef enum {
     MC_STATE_HANDSHAKING = 0,
@@ -25,6 +26,7 @@ typedef struct {
     bool online_mode;
     bool debug_packets;
     const char *registry_blob_path;
+    const char *tags_blob_path;
     const char *chunk_blob_path;
     const char *block_states_path;
     const char *world_path; /* optional: path to world dir containing region/ */

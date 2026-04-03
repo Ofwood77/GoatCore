@@ -23,6 +23,7 @@
 #define PKT_CONFIG_KNOWN_PACKS_CB MC_PKT_CONFIGURATION_CLIENTBOUND_SELECT_KNOWN_PACKS
 #define PKT_CONFIG_KNOWN_PACKS_SB MC_PKT_CONFIGURATION_SERVERBOUND_SELECT_KNOWN_PACKS
 #define PKT_CONFIG_REGISTRY_DATA MC_PKT_CONFIGURATION_CLIENTBOUND_REGISTRY_DATA
+#define PKT_CONFIG_UPDATE_TAGS MC_PKT_CONFIGURATION_CLIENTBOUND_UPDATE_TAGS
 #define PKT_CONFIG_FINISH_CB MC_PKT_CONFIGURATION_CLIENTBOUND_FINISH_CONFIGURATION
 #define PKT_CONFIG_FINISH_ACK MC_PKT_CONFIGURATION_SERVERBOUND_FINISH_CONFIGURATION
 
@@ -145,18 +146,20 @@ static int read_string_payload(const uint8_t *data, size_t len, char *out, size_
 }
 
 int main(int argc, char **argv) {
-    if (argc < 5) {
-        fprintf(stderr, "usage: %s <host> <port> <registry_out> <chunk_out> [username]\n", argv[0]);
+    if (argc < 6) {
+        fprintf(stderr, "usage: %s <host> <port> <registry_out> <tags_out> <chunk_out> [username]\n", argv[0]);
         return 1;
     }
 
     const char *host = argv[1];
     const char *port = argv[2];
     const char *registry_out = argv[3];
-    const char *chunk_out = argv[4];
-    const char *username = (argc >= 6) ? argv[5] : "Recorder";
+    const char *tags_out = argv[4];
+    const char *chunk_out = argv[5];
+    const char *username = (argc >= 7) ? argv[6] : "Recorder";
 
     int registry_packets = 0;
+    bool tags_written = false;
     bool chunk_written = false;
 
     int fd = connect_tcp(host, port);
@@ -177,9 +180,17 @@ int main(int argc, char **argv) {
         close(fd);
         return 1;
     }
+    FILE *tags = fopen(tags_out, "wb");
+    if (!tags) {
+        fprintf(stderr, "failed to open tags output\n");
+        fclose(reg);
+        close(fd);
+        return 1;
+    }
     FILE *chunk = fopen(chunk_out, "wb");
     if (!chunk) {
         fprintf(stderr, "failed to open chunk output\n");
+        fclose(tags);
         fclose(reg);
         close(fd);
         return 1;
@@ -189,6 +200,7 @@ int main(int argc, char **argv) {
     memset(&c, 0, sizeof(c));
     c.fd = fd;
     if (buf_init(&c.in, MC_BUF_CAP) != 0 || buf_init(&c.out, MC_BUF_CAP) != 0) {
+        fclose(tags);
         fclose(reg);
         fclose(chunk);
         close(fd);
@@ -273,6 +285,10 @@ int main(int argc, char **argv) {
                     if (fwrite(frame.payload.data, 1, frame.payload.len, reg) != frame.payload.len) goto cleanup;
                     registry_packets++;
                     fprintf(stdout, "registry packet %d len=%zu\n", registry_packets, frame.payload.len);
+                } else if (frame.packet_id == PKT_CONFIG_UPDATE_TAGS) {
+                    if (fwrite(frame.payload.data, 1, frame.payload.len, tags) != frame.payload.len) goto cleanup;
+                    tags_written = true;
+                    fprintf(stdout, "captured update tags len=%zu\n", frame.payload.len);
                 } else if (frame.packet_id == 0x02) {
                     char reason[256];
                     if (read_string_payload(frame.payload.data, frame.payload.len, reason, sizeof(reason)) == 0) {
@@ -314,11 +330,12 @@ cleanup:
     buf_free(&c.in);
     buf_free(&c.out);
     fclose(reg);
+    fclose(tags);
     fclose(chunk);
     close(fd);
-    if (registry_packets == 0 || !chunk_written) {
+    if (registry_packets == 0 || !tags_written || !chunk_written) {
         fprintf(stderr, "no data captured. verify:\n");
-        fprintf(stderr, " - target is a vanilla 1.21.1 server (not mc_server)\n");
+        fprintf(stderr, " - target is a vanilla 26.1 server (not mc_server)\n");
         fprintf(stderr, " - online-mode=false\n");
         fprintf(stderr, " - network-compression-threshold=-1\n");
         fprintf(stderr, " - host/port are correct (try 127.0.0.1 if vanilla runs in WSL)\n");

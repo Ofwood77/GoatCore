@@ -9,6 +9,11 @@
 /mc_gen_bench
 /test_varint
 /test_nbt
+/test_nbt_arena
+/test_block_registry
+/test_block_entity_store
+/test_paletted_container
+/test_chunk_network_codec
 /test_anvil_roundtrip
 
 # Common build directories

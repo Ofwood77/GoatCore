@@ -182,11 +182,24 @@ int mc_chunk_store_read(const char *world_path, int32_t cx, int32_t cz, mc_chunk
         return -1;
     }
 
-    memset(out, 0, sizeof(*out));
-    out->cx = cx;
-    out->cz = cz;
-    for (size_t i = 0; i < MC_BLOCKS_PER_CHUNK; i++) {
-        out->blocks[i] = (int32_t)read_le32(raw + (i * sizeof(uint32_t)));
+    if (mc_chunk_init(out, cx, cz, 0) != 0) {
+        free(raw);
+        return -1;
+    }
+    for (int y = MC_WORLD_MIN_Y; y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT; y++) {
+        int y_index = y - MC_WORLD_MIN_Y;
+        for (int z = 0; z < MC_CHUNK_XZ; z++) {
+            for (int x = 0; x < MC_CHUNK_XZ; x++) {
+                size_t flat_index = ((size_t)y_index * MC_CHUNK_XZ + (size_t)z) * MC_CHUNK_XZ + (size_t)x;
+                int32_t state_id = (int32_t)read_le32(raw + (flat_index * sizeof(uint32_t)));
+                if (mc_chunk_set_block(out, x, y, z, (mc_global_state_id_t)state_id) != 0) {
+                    mc_chunk_destroy(out);
+                    free(raw);
+                    errno = EIO;
+                    return -1;
+                }
+            }
+        }
     }
     out->loaded = true;
     out->dirty = false;
@@ -213,8 +226,15 @@ int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk) {
     size_t raw_size = MC_BLOCKS_PER_CHUNK * sizeof(uint32_t);
     uint8_t *raw = (uint8_t *)malloc(raw_size ? raw_size : 1u);
     if (!raw) return -1;
-    for (size_t i = 0; i < MC_BLOCKS_PER_CHUNK; i++) {
-        write_le32(raw + (i * sizeof(uint32_t)), (uint32_t)chunk->blocks[i]);
+    for (int y = MC_WORLD_MIN_Y; y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT; y++) {
+        int y_index = y - MC_WORLD_MIN_Y;
+        for (int z = 0; z < MC_CHUNK_XZ; z++) {
+            for (int x = 0; x < MC_CHUNK_XZ; x++) {
+                size_t flat_index = ((size_t)y_index * MC_CHUNK_XZ + (size_t)z) * MC_CHUNK_XZ + (size_t)x;
+                mc_global_state_id_t state_id = mc_chunk_get_block(chunk, x, y, z);
+                write_le32(raw + (flat_index * sizeof(uint32_t)), (uint32_t)state_id);
+            }
+        }
     }
 
     uint32_t crc = crc32(0L, Z_NULL, 0);

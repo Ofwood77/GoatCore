@@ -38,6 +38,7 @@
 #define PKT_PLAY_PLAYER_INFO MC_PKT_PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE
 #define PKT_PLAY_KEEPALIVE_SB MC_PKT_PLAY_SERVERBOUND_KEEP_ALIVE
 #define PKT_PLAY_CONFIRM_TELEPORT MC_PKT_PLAY_SERVERBOUND_ACCEPT_TELEPORTATION
+#define PKT_PLAY_BLOCK_CHANGED_ACK MC_PKT_PLAY_CLIENTBOUND_BLOCK_CHANGED_ACK
 #define PKT_PLAY_BLOCK_UPDATE MC_PKT_PLAY_CLIENTBOUND_BLOCK_UPDATE
 #define PKT_PLAY_TILE_ENTITY_DATA MC_PKT_PLAY_CLIENTBOUND_BLOCK_ENTITY_DATA
 #define PKT_PLAY_SET_SLOT MC_PKT_PLAY_CLIENTBOUND_CONTAINER_SET_SLOT
@@ -88,11 +89,14 @@ static int buf_w_u16_be(mc_buf_t *b, uint16_t v);
 static int buf_w_varint(mc_buf_t *b, int32_t v);
 static void close_active_window(mc_conn_t *c, bool notify_client);
 static int container_block_entity_type(int32_t state_id);
+static const char *block_entity_name_for_state(int32_t state_id);
 static bool is_chest_state(int32_t state_id);
 static bool is_trapped_chest_state(int32_t state_id);
 static bool is_ender_chest_state(int32_t state_id);
 static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, const mc_chunk_t *chunk);
 static int send_chunk_container_repairs(mc_conn_t *c, const mc_chunk_t *chunk);
+static int paletted_word_count_for_network(int entry_count, int bits);
+static int encode_paletted_container_network(mc_buf_t *out, const int32_t *values, int entry_count, int palette_bits);
 
 static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     size_t n = 0;
@@ -147,6 +151,10 @@ static int w_u16_be(uint8_t *buf, size_t cap, size_t *pos, uint16_t v) {
     buf[*pos + 1] = (uint8_t)(v & 0xFF);
     *pos += 2;
     return 0;
+}
+
+static int w_lpvec3_zero(uint8_t *buf, size_t cap, size_t *pos) {
+    return w_ubyte(buf, cap, pos, 0);
 }
 
 static int w_u64(uint8_t *buf, size_t cap, size_t *pos, uint64_t v) {
@@ -366,16 +374,22 @@ static int send_player_abilities(mc_conn_t *c) {
 }
 
 static int send_sync_position(mc_conn_t *c, double x, double y, double z, float yaw, float pitch) {
-    uint8_t buf[128];
+    uint8_t buf[256];
     size_t pos = 0;
+    c->teleport_id += 1;
+    if (w_varint(buf, sizeof(buf), &pos, c->teleport_id) != 0) return -1;
+
+    /* 26.1 ClientboundPlayerPositionPacket = teleport id + PositionMoveRotation + Relative set.
+     * PositionMoveRotation carries absolute position, absolute delta movement, then yaw/pitch. */
     if (w_f64(buf, sizeof(buf), &pos, x) != 0) return -1;
     if (w_f64(buf, sizeof(buf), &pos, y) != 0) return -1;
     if (w_f64(buf, sizeof(buf), &pos, z) != 0) return -1;
+    if (w_f64(buf, sizeof(buf), &pos, 0.0) != 0) return -1;
+    if (w_f64(buf, sizeof(buf), &pos, 0.0) != 0) return -1;
+    if (w_f64(buf, sizeof(buf), &pos, 0.0) != 0) return -1;
     if (w_f32(buf, sizeof(buf), &pos, yaw) != 0) return -1;
     if (w_f32(buf, sizeof(buf), &pos, pitch) != 0) return -1;
-    if (w_byte(buf, sizeof(buf), &pos, 0) != 0) return -1; /* flags */
-    c->teleport_id += 1;
-    if (w_varint(buf, sizeof(buf), &pos, c->teleport_id) != 0) return -1;
+    if (w_i32(buf, sizeof(buf), &pos, 0) != 0) return -1; /* empty Relative set bitmask */
     if (conn_write_packet(c, PKT_PLAY_SYNC_POS, buf, pos, -1) != 0) return -1;
     c->x = x;
     c->y = y;
@@ -740,32 +754,166 @@ static void close_active_window_local(mc_conn_t *c) {
 }
 
 int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id) {
-    if (!ids) return -1;
-
-    int32_t mapped = mc_item_default_place_state(item_id);
-    const char *item_name = mc_minecraft_item_name(item_id);
-    if (!item_name) return mapped;
-    if (strcmp(item_name, "minecraft:chest") == 0) {
-        return mc_block_state_id("minecraft:chest[facing=north,type=single,waterlogged=false]", mapped);
-    }
-    if (strcmp(item_name, "minecraft:ender_chest") == 0) {
-        return mc_block_state_id("minecraft:ender_chest[facing=north,waterlogged=false]", mapped);
-    }
-    if (strcmp(item_name, "minecraft:trapped_chest") == 0) {
-        return mc_block_state_id("minecraft:trapped_chest[facing=north,type=single,waterlogged=false]", mapped);
-    }
-    if (strcmp(item_name, "minecraft:grass_block") == 0) return ids->grass_block_snowy_false;
-    if (strcmp(item_name, "minecraft:redstone") == 0) return ids->wire_power[0];
-    if (strcmp(item_name, "minecraft:redstone_lamp") == 0) return ids->lamp_lit[0];
-    if (strcmp(item_name, "minecraft:flint_and_steel") == 0) return ids->fire_age[0];
-    if (strcmp(item_name, "minecraft:water_bucket") == 0) return ids->water_level[0];
-    if (strcmp(item_name, "minecraft:lava_bucket") == 0) return ids->lava_level[0];
-    return mapped;
+    (void)ids;
+    return mc_item_default_place_state(item_id);
 }
 
 int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot) {
     if (!slot || !slot->present || slot->count <= 0) return -1;
     return proto_play_item_to_state(ids, slot->item_id);
+}
+
+static const char *face_direction_name(int32_t face) {
+    switch (face) {
+        case 0: return "down";
+        case 1: return "up";
+        case 2: return "north";
+        case 3: return "south";
+        case 4: return "west";
+        case 5: return "east";
+        default: return NULL;
+    }
+}
+
+static const char *axis_from_face(int32_t face) {
+    switch (face) {
+        case 0:
+        case 1:
+            return "y";
+        case 2:
+        case 3:
+            return "z";
+        case 4:
+        case 5:
+            return "x";
+        default:
+            return NULL;
+    }
+}
+
+static float normalize_yaw_degrees(float yaw) {
+    while (yaw < 0.0f) yaw += 360.0f;
+    while (yaw >= 360.0f) yaw -= 360.0f;
+    return yaw;
+}
+
+static const char *horizontal_facing_from_yaw(float yaw) {
+    yaw = normalize_yaw_degrees(yaw);
+    if (yaw >= 45.0f && yaw < 135.0f) return "west";
+    if (yaw >= 135.0f && yaw < 225.0f) return "north";
+    if (yaw >= 225.0f && yaw < 315.0f) return "east";
+    return "south";
+}
+
+static const char *opposite_direction_name(const char *dir) {
+    if (!dir) return NULL;
+    if (strcmp(dir, "north") == 0) return "south";
+    if (strcmp(dir, "south") == 0) return "north";
+    if (strcmp(dir, "west") == 0) return "east";
+    if (strcmp(dir, "east") == 0) return "west";
+    if (strcmp(dir, "up") == 0) return "down";
+    if (strcmp(dir, "down") == 0) return "up";
+    return NULL;
+}
+
+static const char *opposite_horizontal_facing_from_yaw(float yaw) {
+    return opposite_direction_name(horizontal_facing_from_yaw(yaw));
+}
+
+static const char *find_state_property_value(const char *key, const char *property, size_t *out_prefix_len, size_t *out_value_len) {
+    char needle[64];
+    const char *match = NULL;
+    int n = 0;
+
+    if (!key || !property) return NULL;
+
+    n = snprintf(needle, sizeof(needle), "[%s=", property);
+    if (n > 0 && (size_t)n < sizeof(needle)) match = strstr(key, needle);
+    if (!match) {
+        n = snprintf(needle, sizeof(needle), ",%s=", property);
+        if (n > 0 && (size_t)n < sizeof(needle)) match = strstr(key, needle);
+    }
+    if (!match) return NULL;
+
+    const char *value_start = match + n;
+    const char *value_end = value_start;
+    while (*value_end && *value_end != ',' && *value_end != ']') value_end++;
+    if (out_prefix_len) *out_prefix_len = (size_t)(value_start - key);
+    if (out_value_len) *out_value_len = (size_t)(value_end - value_start);
+    return value_start;
+}
+
+static bool state_key_has_property(const char *key, const char *property) {
+    return find_state_property_value(key, property, NULL, NULL) != NULL;
+}
+
+static bool rewrite_state_property(const char *key, const char *property, const char *value, char *out, size_t out_cap) {
+    size_t prefix_len = 0;
+    size_t value_len = 0;
+    const char *value_start = find_state_property_value(key, property, &prefix_len, &value_len);
+    if (!value_start || !value || !out || out_cap == 0) return false;
+
+    const char *value_end = value_start + value_len;
+    int n = snprintf(out, out_cap, "%.*s%s%s", (int)prefix_len, key, value, value_end);
+    return n >= 0 && (size_t)n < out_cap;
+}
+
+static int32_t state_id_with_property_value(int32_t state_id, const char *property, const char *value) {
+    const char *key = mc_block_state_key(state_id);
+    char candidate[512];
+    if (!key) return -1;
+    if (!rewrite_state_property(key, property, value, candidate, sizeof(candidate))) return -1;
+    return mc_block_state_id(candidate, -1);
+}
+
+static int32_t contextualize_placement_state(int32_t state_id, int32_t face, float yaw, float pitch) {
+    (void)pitch;
+
+    int32_t resolved = state_id;
+    const char *key = mc_block_state_key(resolved);
+    if (!key) return resolved;
+
+    if (state_key_has_property(key, "axis")) {
+        const char *axis = axis_from_face(face);
+        int32_t axis_state = axis ? state_id_with_property_value(resolved, "axis", axis) : -1;
+        if (axis_state >= 0) {
+            resolved = axis_state;
+            key = mc_block_state_key(resolved);
+            if (!key) return resolved;
+        }
+    }
+
+    if (state_key_has_property(key, "facing") && !state_key_has_property(key, "face")) {
+        int32_t facing_state = -1;
+        bool supports_up = state_id_with_property_value(resolved, "facing", "up") >= 0;
+        bool supports_down = state_id_with_property_value(resolved, "facing", "down") >= 0;
+
+        if (supports_up || supports_down) {
+            const char *face_dir = face_direction_name(face);
+            if (face_dir) facing_state = state_id_with_property_value(resolved, "facing", face_dir);
+            if (facing_state < 0 && face == 1 && supports_down) {
+                facing_state = state_id_with_property_value(resolved, "facing", "down");
+            }
+            if (facing_state < 0 && face == 0 && supports_up) {
+                facing_state = state_id_with_property_value(resolved, "facing", "up");
+            }
+        }
+
+        if (facing_state < 0) {
+            const char *player_facing = opposite_horizontal_facing_from_yaw(yaw);
+            if (player_facing) facing_state = state_id_with_property_value(resolved, "facing", player_facing);
+        }
+
+        if (facing_state >= 0) resolved = facing_state;
+    }
+
+    return resolved;
+}
+
+int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch) {
+    int32_t state_id = proto_play_slot_to_state(ids, slot);
+    if (state_id < 0) return state_id;
+    return contextualize_placement_state(state_id, face, yaw, pitch);
 }
 
 static int write_slot_item(mc_buf_t *b, const mc_slot_t *slot) {
@@ -918,10 +1066,7 @@ static int empty_compound_nbt(uint8_t **out, size_t *out_len) {
 
 static const char *container_block_entity_name(int32_t state_id) {
     state_id = mc_world_normalize_container_state_id(state_id);
-    if (is_chest_state(state_id)) return "minecraft:chest";
-    if (is_trapped_chest_state(state_id)) return "minecraft:trapped_chest";
-    if (is_ender_chest_state(state_id)) return "minecraft:ender_chest";
-    return NULL;
+    return block_entity_name_for_state(state_id);
 }
 
 static int empty_optional_nbt(uint8_t **out, size_t *out_len) {
@@ -1016,6 +1161,14 @@ static int send_block_update_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t 
     return rc;
 }
 
+static int send_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
+    if (!c) return -1;
+    uint8_t buf[8];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, sequence) != 0) return -1;
+    return conn_write_packet(c, PKT_PLAY_BLOCK_CHANGED_ACK, buf, pos, -1);
+}
+
 static int resend_authoritative_chunk_at(mc_conn_t *c, mc_world_t *world, int32_t x, int32_t z) {
     if (!c || !world) return -1;
     int32_t cx = (x >= 0) ? (x / CHUNK_XZ) : ((x - (CHUNK_XZ - 1)) / CHUNK_XZ);
@@ -1080,11 +1233,62 @@ static bool is_ender_chest_state(int32_t state_id) {
     return state_key_is_prefix(state_id, "minecraft:ender_chest[");
 }
 
+static bool block_state_has_block_entity(int32_t state_id) {
+    if (state_id < 0) return false;
+
+    if ((size_t)state_id < GLOBAL_BLOCK_STATES_COUNT) {
+        return (GLOBAL_BLOCK_STATES[state_id].flags & MC_BLOCK_FLAG_HAS_BLOCK_ENTITY) != 0u;
+    }
+
+    const char *key = mc_block_state_key(state_id);
+    if (!key) return false;
+
+    const char *props = strchr(key, '[');
+    size_t base_len = props ? (size_t)(props - key) : strlen(key);
+    if (base_len == 0) return false;
+
+    for (size_t i = 0; i < GLOBAL_BLOCK_COUNT; i++) {
+        const mc_block_desc_t *desc = &GLOBAL_BLOCKS[i];
+        if (!desc->name) continue;
+        if (strlen(desc->name) != base_len) continue;
+        if (strncmp(desc->name, key, base_len) != 0) continue;
+        for (mc_global_state_id_t sid = desc->min_state_id; sid <= desc->max_state_id; sid++) {
+            if ((size_t)sid < GLOBAL_BLOCK_STATES_COUNT &&
+                (GLOBAL_BLOCK_STATES[sid].flags & MC_BLOCK_FLAG_HAS_BLOCK_ENTITY) != 0u) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return false;
+}
+
+static const char *block_entity_name_for_state(int32_t state_id) {
+    if (!block_state_has_block_entity(state_id)) return NULL;
+
+    if ((size_t)state_id < GLOBAL_BLOCK_STATES_COUNT) {
+        const mc_block_properties_t *props = &GLOBAL_BLOCK_STATES[state_id];
+        if (props->block_index < GLOBAL_BLOCK_COUNT) {
+            const mc_block_desc_t *desc = &GLOBAL_BLOCKS[props->block_index];
+            if (desc->name && *desc->name) return desc->name;
+        }
+    }
+
+    const char *key = mc_block_state_key(state_id);
+    if (!key) return NULL;
+    const char *props = strchr(key, '[');
+    static char name_buf[128];
+    size_t base_len = props ? (size_t)(props - key) : strlen(key);
+    if (base_len == 0 || base_len >= sizeof(name_buf)) return NULL;
+    memcpy(name_buf, key, base_len);
+    name_buf[base_len] = '\0';
+    return name_buf;
+}
+
 static int container_block_entity_type(int32_t state_id) {
-    if (is_chest_state(state_id)) return mc_minecraft_block_entity_type_id("minecraft:chest");
-    if (is_trapped_chest_state(state_id)) return mc_minecraft_block_entity_type_id("minecraft:trapped_chest");
-    if (is_ender_chest_state(state_id)) return mc_minecraft_block_entity_type_id("minecraft:ender_chest");
-    return -1;
+    const char *name = block_entity_name_for_state(state_id);
+    return name ? mc_minecraft_block_entity_type_id(name) : -1;
 }
 
 static int32_t container_drop_item_id(int32_t state_id) {
@@ -1139,6 +1343,7 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
         if (have_container) mc_container_instance_clear(&container);
         return -1;
     }
+    (void)mc_world_remove_block_entity(world, x, y, z);
     if (mc_world_flush_block(world, x, y, z) != 0) {
         if (have_container) mc_container_instance_clear(&container);
         return -1;
@@ -1331,15 +1536,13 @@ static int send_player_spawn(mc_conn_t *viewer, mc_conn_t *subject) {
         w_f64(buf, sizeof(buf), &pos, subject->z) != 0) {
         return -1;
     }
+    if (w_lpvec3_zero(buf, sizeof(buf), &pos) != 0) return -1;
     if (w_byte(buf, sizeof(buf), &pos, (int8_t)angle_byte(subject->pitch)) != 0 ||
         w_byte(buf, sizeof(buf), &pos, (int8_t)angle_byte(subject->yaw)) != 0 ||
         w_byte(buf, sizeof(buf), &pos, (int8_t)angle_byte(subject->pitch)) != 0) {
         return -1;
     }
     if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1;
-    if (w_u16_be(buf, sizeof(buf), &pos, 0) != 0) return -1;
-    if (w_u16_be(buf, sizeof(buf), &pos, 0) != 0) return -1;
-    if (w_u16_be(buf, sizeof(buf), &pos, 0) != 0) return -1;
     return conn_write_packet(viewer, PKT_PLAY_SPAWN_ENTITY, buf, pos, -1);
 }
 
@@ -1818,6 +2021,10 @@ static int buf_w_varint(mc_buf_t *b, int32_t v) {
     return buf_write(b, tmp, n);
 }
 
+static int buf_w_i64_be(mc_buf_t *b, int64_t v) {
+    return buf_w_u64_be(b, (uint64_t)v);
+}
+
 static int popcount_u64(uint64_t v) {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_popcountll(v);
@@ -1829,20 +2036,6 @@ static int popcount_u64(uint64_t v) {
     }
     return c;
 #endif
-}
-
-static mc_nbt_tag_t *nbt_new(mc_nbt_type_t type, const char *name) {
-    mc_nbt_tag_t *t = (mc_nbt_tag_t *)calloc(1, sizeof(*t));
-    if (!t) return NULL;
-    t->type = type;
-    if (name) {
-        t->name = strdup(name);
-        if (!t->name) {
-            free(t);
-            return NULL;
-        }
-    }
-    return t;
 }
 
 static int build_motion_blocking_heightmaps(mc_world_t *world, const mc_chunk_t *chunk, uint8_t **out, size_t *out_len) {
@@ -1865,9 +2058,7 @@ static int build_motion_blocking_heightmaps(mc_world_t *world, const mc_chunk_t 
         for (int lx = 0; lx < 16; lx++) {
             int32_t highest = MC_WORLD_MIN_Y - 1;
             for (int32_t y = top_y; y >= MC_WORLD_MIN_Y; y--) {
-                int y_index = y - MC_WORLD_MIN_Y;
-                int idx = (y_index * 16 + lz) * 16 + lx;
-                int32_t sid = chunk->blocks[idx];
+                int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
                 if (sid == ids->air || sid == cave_air_id || sid == void_air_id) continue;
                 highest = y;
                 break;
@@ -1887,29 +2078,45 @@ static int build_motion_blocking_heightmaps(mc_world_t *world, const mc_chunk_t 
         return -1;
     }
 
-    mc_nbt_tag_t *root = nbt_new(MC_NBT_TAG_COMPOUND, NULL);
-    mc_nbt_tag_t *mb = nbt_new(MC_NBT_TAG_LONG_ARRAY, "MOTION_BLOCKING");
-    if (!root || !mb) {
-        mc_nbt_free(root);
-        mc_nbt_free(mb);
+    mc_buf_t b;
+    if (buf_init(&b, 512) != 0) {
         free(longs);
         return -1;
     }
-    mb->payload.long_array.length = long_count;
-    mb->payload.long_array.data = longs;
 
-    root->payload.compound.length = 1;
-    root->payload.compound.children = (mc_nbt_tag_t **)calloc(1, sizeof(*root->payload.compound.children));
-    if (!root->payload.compound.children) {
-        mc_nbt_free(root);
-        mc_nbt_free(mb);
+    /* 26.1 network format uses a StreamCodec map, not unnamed NBT:
+     * VarInt map_size, then for each entry:
+     *   VarInt heightmap_type_id,
+     *   VarInt long_count,
+     *   long[long_count] big-endian.
+     * We only emit MOTION_BLOCKING (id=4). */
+    if (buf_w_varint(&b, 1) != 0 ||
+        buf_w_varint(&b, 4) != 0 ||
+        buf_w_varint(&b, long_count) != 0) {
+        buf_free(&b);
+        free(longs);
         return -1;
     }
-    root->payload.compound.children[0] = mb;
+    for (int32_t i = 0; i < long_count; i++) {
+        if (buf_w_i64_be(&b, longs[i]) != 0) {
+            buf_free(&b);
+            free(longs);
+            return -1;
+        }
+    }
 
-    int rc = mc_nbt_write_unnamed_root(root, out, out_len);
-    mc_nbt_free(root);
-    return rc;
+    uint8_t *blob = (uint8_t *)malloc(b.len ? b.len : 1);
+    if (!blob) {
+        buf_free(&b);
+        free(longs);
+        return -1;
+    }
+    memcpy(blob, b.data, b.len);
+    *out = blob;
+    *out_len = b.len;
+    buf_free(&b);
+    free(longs);
+    return 0;
 }
 
 static int build_fullbright_light_blob(uint8_t **out, size_t *out_len) {
@@ -1958,53 +2165,20 @@ fail:
     return -1;
 }
 
-static int cmp_i32(const void *a, const void *b) {
-    int32_t aa = *(const int32_t *)a;
-    int32_t bb = *(const int32_t *)b;
-    return (aa > bb) - (aa < bb);
-}
-
-static int bits_needed_u32(uint32_t v) {
-    int bits = 0;
-    while (v) {
-        bits++;
-        v >>= 1;
-    }
-    return bits;
-}
-
-static int ceil_log2_u32(uint32_t v) {
-    if (v <= 1) return 0;
-    uint32_t x = v - 1;
-    int bits = 0;
-    while (x) {
-        bits++;
-        x >>= 1;
-    }
-    return bits;
-}
-
-static int skip_paletted_container(const uint8_t *data, size_t len, size_t *pos) {
+static int skip_paletted_container(const uint8_t *data, size_t len, size_t *pos, int entry_count, int local_max_bits) {
     if (!data || !pos) return -1;
     if (*pos >= len) return -1;
     uint8_t bits = data[(*pos)++];
 
     if (bits == 0) {
         int32_t single = 0;
-        int32_t data_len = 0;
         size_t n = 0;
         if (varint_read(data + *pos, len - *pos, &single, &n) != 0) return -1;
         *pos += n;
-        if (varint_read(data + *pos, len - *pos, &data_len, &n) != 0) return -1;
-        *pos += n;
-        if (data_len < 0) return -1;
-        size_t bytes = (size_t)data_len * 8;
-        if (*pos + bytes > len) return -1;
-        *pos += bytes;
         return 0;
     }
 
-    if (bits <= 8) {
+    if (bits <= local_max_bits) {
         int32_t pal_len = 0;
         size_t n = 0;
         if (varint_read(data + *pos, len - *pos, &pal_len, &n) != 0) return -1;
@@ -2017,34 +2191,115 @@ static int skip_paletted_container(const uint8_t *data, size_t len, size_t *pos)
         }
     }
 
-    int32_t data_len = 0;
-    size_t n = 0;
-    if (varint_read(data + *pos, len - *pos, &data_len, &n) != 0) return -1;
-    *pos += n;
-    if (data_len < 0) return -1;
-    size_t bytes = (size_t)data_len * 8;
+    int word_count = paletted_word_count_for_network(entry_count, bits);
+    if (word_count < 0) return -1;
+    size_t bytes = (size_t)word_count * 8u;
     if (*pos + bytes > len) return -1;
     *pos += bytes;
+    return 0;
+}
+
+static int skip_heightmaps_stream_codec(const uint8_t *data, size_t len, size_t *pos) {
+    if (!data || !pos) return -1;
+    int32_t map_count = 0;
+    size_t n = 0;
+    if (varint_read(data + *pos, len - *pos, &map_count, &n) != 0) return -1;
+    *pos += n;
+    if (map_count < 0) return -1;
+
+    for (int32_t i = 0; i < map_count; i++) {
+        int32_t hm_type = 0;
+        int32_t long_count = 0;
+        if (varint_read(data + *pos, len - *pos, &hm_type, &n) != 0) return -1;
+        *pos += n;
+        if (varint_read(data + *pos, len - *pos, &long_count, &n) != 0) return -1;
+        *pos += n;
+        if (hm_type < 0 || long_count < 0) return -1;
+        size_t bytes = (size_t)long_count * 8;
+        if (*pos + bytes > len) return -1;
+        *pos += bytes;
+    }
     return 0;
 }
 
 static int parse_template_biome_id(const uint8_t *chunkdata, size_t chunkdata_len, int32_t *out_biome_id) {
     if (!chunkdata || !out_biome_id) return -1;
     size_t pos = 0;
-    if (chunkdata_len < 2) return -1;
-    pos += 2; /* non_air_count */
-    if (skip_paletted_container(chunkdata, chunkdata_len, &pos) != 0) return -1; /* blocks */
+    if (chunkdata_len < 4) return -1;
+    pos += 4; /* nonEmptyBlockCount + fluidCount */
+    if (skip_paletted_container(chunkdata, chunkdata_len, &pos, 4096, 8) != 0) return -1; /* blocks */
     if (pos >= chunkdata_len) return -1;
     uint8_t bits = chunkdata[pos++];
-    if (bits != 0) return -1;
-    int32_t single = 0;
-    int32_t data_len = 0;
+    if (bits > 3) return -1;
+    if (bits == 0) {
+        int32_t single = 0;
+        size_t n = 0;
+        if (varint_read(chunkdata + pos, chunkdata_len - pos, &single, &n) != 0) return -1;
+        *out_biome_id = single;
+        return 0;
+    }
+    int32_t pal_len = 0;
     size_t n = 0;
-    if (varint_read(chunkdata + pos, chunkdata_len - pos, &single, &n) != 0) return -1;
+    if (varint_read(chunkdata + pos, chunkdata_len - pos, &pal_len, &n) != 0) return -1;
     pos += n;
-    if (varint_read(chunkdata + pos, chunkdata_len - pos, &data_len, &n) != 0) return -1;
-    if (data_len != 0) return -1;
-    *out_biome_id = single;
+    if (pal_len <= 0) return -1;
+    int32_t first = -1;
+    for (int32_t i = 0; i < pal_len; i++) {
+        int32_t v = 0;
+        if (varint_read(chunkdata + pos, chunkdata_len - pos, &v, &n) != 0) return -1;
+        pos += n;
+        if (i == 0) first = v;
+    }
+    *out_biome_id = first;
+    return 0;
+}
+
+int proto_play_validate_chunkdata_for_test(const uint8_t *data, size_t len) {
+    if (!data) return -1;
+    size_t pos = 0;
+    for (int sec = 0; sec < MC_WORLD_SECTION_COUNT; sec++) {
+        if (len - pos < 4) return -1;
+        pos += 4; /* nonEmptyBlockCount + fluidCount */
+        if (skip_paletted_container(data, len, &pos, 4096, 8) != 0) return -1;
+        if (skip_paletted_container(data, len, &pos, 64, 3) != 0) return -1;
+    }
+    return pos == len ? 0 : -1;
+}
+
+static int pack_simple_bitstorage_u32(const uint32_t *values, size_t value_count, int bits,
+                                      uint64_t **out_words, int32_t *out_word_count) {
+    size_t values_per_long;
+    size_t word_count;
+    uint64_t *words;
+    uint64_t mask;
+
+    if (out_words) *out_words = NULL;
+    if (out_word_count) *out_word_count = 0;
+    if (!values || !out_words || !out_word_count) return -1;
+    if (bits <= 0 || bits > 32) return -1;
+
+    /* PalettedContainer network encoding uses SimpleBitStorage, which pads
+     * each 64-bit cell to floor(64 / bits) values instead of compacting
+     * entries across word boundaries. This differs from our internal compact
+     * storage and from heightmaps. */
+    values_per_long = 64u / (size_t)bits;
+    if (values_per_long == 0) return -1;
+    word_count = (value_count + values_per_long - 1u) / values_per_long;
+    if (word_count > (size_t)INT32_MAX) return -1;
+
+    words = (uint64_t *)calloc(word_count ? word_count : 1u, sizeof(*words));
+    if (!words) return -1;
+
+    mask = (1ULL << bits) - 1ULL;
+    for (size_t i = 0; i < value_count; i++) {
+        size_t word_index = i / values_per_long;
+        size_t index_in_word = i - (word_index * values_per_long);
+        size_t shift = index_in_word * (size_t)bits;
+        words[word_index] |= (((uint64_t)values[i]) & mask) << shift;
+    }
+
+    *out_words = words;
+    *out_word_count = (int32_t)word_count;
     return 0;
 }
 
@@ -2068,29 +2323,19 @@ static int load_chunk_template(mc_conn_t *c) {
     }
 
     size_t pos = 8;
-    mc_nbt_tag_t *hm = NULL;
-    size_t hm_bytes = 0;
-    if (mc_nbt_read_unnamed_root(blob + pos, blob_len - pos, &hm, &hm_bytes) != 0) {
-        if (mc_nbt_read_named_root(blob + pos, blob_len - pos, &hm, &hm_bytes) != 0) {
-            free(blob);
-            return -1;
-        }
-    }
-    mc_nbt_free(hm);
-    hm = NULL;
-
-    if (pos + hm_bytes > blob_len) {
+    size_t hm_pos = pos;
+    if (skip_heightmaps_stream_codec(blob, blob_len, &pos) != 0) {
         free(blob);
         return -1;
     }
+    size_t hm_bytes = pos - hm_pos;
     g_chunk_tpl.heightmaps = (uint8_t *)malloc(hm_bytes);
     if (!g_chunk_tpl.heightmaps) {
         free(blob);
         return -1;
     }
-    memcpy(g_chunk_tpl.heightmaps, blob + pos, hm_bytes);
+    memcpy(g_chunk_tpl.heightmaps, blob + hm_pos, hm_bytes);
     g_chunk_tpl.heightmaps_len = hm_bytes;
-    pos += hm_bytes;
 
     int32_t chunkdata_len = 0;
     size_t n = 0;
@@ -2162,6 +2407,12 @@ static int load_chunk_template(mc_conn_t *c) {
     return 0;
 }
 
+static int cmp_i32(const void *a, const void *b) {
+    int32_t aa = *(const int32_t *)a;
+    int32_t bb = *(const int32_t *)b;
+    return (aa > bb) - (aa < bb);
+}
+
 static int palette_index_of(const int32_t *palette, int pal_len, int32_t v) {
     int lo = 0;
     int hi = pal_len - 1;
@@ -2175,94 +2426,112 @@ static int palette_index_of(const int32_t *palette, int pal_len, int32_t v) {
     return -1;
 }
 
+static int paletted_word_count_for_network(int entry_count, int bits) {
+    int values_per_long;
+    if (bits <= 0) return 0;
+    values_per_long = 64 / bits;
+    if (values_per_long <= 0) return -1;
+    return (entry_count + values_per_long - 1) / values_per_long;
+}
+
+static int block_palette_bits_for_size(int pal_len) {
+    if (pal_len <= 1) return 0;
+    if (pal_len <= 16) return 4;
+    if (pal_len <= 32) return 5;
+    if (pal_len <= 64) return 6;
+    if (pal_len <= 128) return 7;
+    if (pal_len <= 256) return 8;
+    return 15;
+}
+
+static int biome_palette_bits_for_size(int pal_len) {
+    if (pal_len <= 1) return 0;
+    if (pal_len <= 2) return 1;
+    if (pal_len <= 4) return 2;
+    if (pal_len <= 8) return 3;
+    return 6;
+}
+
+static int encode_paletted_container_network(mc_buf_t *out, const int32_t *values, int entry_count, int local_max_bits) {
+    int32_t palette[4096];
+    int pal_len = 0;
+
+    if (!out || !values || entry_count <= 0 || entry_count > (int)(sizeof(palette) / sizeof(palette[0]))) return -1;
+
+    memcpy(palette, values, (size_t)entry_count * sizeof(values[0]));
+    qsort(palette, (size_t)entry_count, sizeof(palette[0]), cmp_i32);
+    for (int i = 0; i < entry_count; i++) {
+        if (i == 0 || palette[i] != palette[i - 1]) palette[pal_len++] = palette[i];
+    }
+
+    int bits = local_max_bits == 8 ? block_palette_bits_for_size(pal_len) : biome_palette_bits_for_size(pal_len);
+    if (buf_w_u8(out, (uint8_t)bits) != 0) return -1;
+
+    if (bits == 0) {
+        return buf_w_varint(out, palette[0]);
+    }
+
+    if (bits <= local_max_bits) {
+        if (buf_w_varint(out, pal_len) != 0) return -1;
+        for (int i = 0; i < pal_len; i++) {
+            if (buf_w_varint(out, palette[i]) != 0) return -1;
+        }
+    }
+
+    uint32_t packed_vals[4096];
+    for (int i = 0; i < entry_count; i++) {
+        if (bits <= local_max_bits) {
+            int idx = palette_index_of(palette, pal_len, values[i]);
+            if (idx < 0) return -1;
+            packed_vals[i] = (uint32_t)idx;
+        } else {
+            packed_vals[i] = (uint32_t)values[i];
+        }
+    }
+
+    uint64_t *words = NULL;
+    int32_t word_count = 0;
+    if (pack_simple_bitstorage_u32(packed_vals, (size_t)entry_count, bits, &words, &word_count) != 0) return -1;
+    for (int32_t i = 0; i < word_count; i++) {
+        if (buf_w_u64_be(out, words[i]) != 0) {
+            free(words);
+            return -1;
+        }
+    }
+    free(words);
+    return 0;
+}
+
 int proto_play_encode_chunkdata_for_test(mc_world_t *world, const mc_chunk_t *chunk, mc_buf_t *out) {
     if (!world || !chunk || !out) return -1;
     const mc_world_ids_t *ids = mc_world_ids(world);
     if (!ids) return -1;
 
-    int32_t states[4096];
-    int32_t pal[4096];
-
     for (int sec = 0; sec < MC_WORLD_SECTION_COUNT; sec++) {
-        int non_air = 0;
+        const mc_paletted_container_t *section = &chunk->sections[sec];
+        int32_t states[4096];
         for (int i = 0; i < 4096; i++) {
             int ly = i >> 8;
             int rem = i & 255;
             int lz = rem >> 4;
             int lx = rem & 15;
-            int y_index = sec * 16 + ly;
-            int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-            int32_t sid = mc_world_normalize_container_state_id(chunk->blocks[idx]);
-            states[i] = sid;
-            if (sid != ids->air) non_air++;
+            int32_t raw_state = (int32_t)mc_paletted_container_get_block(section, lx, ly, lz);
+            int32_t normalized_state = mc_world_normalize_container_state_id(raw_state);
+            states[i] = normalized_state;
         }
-        if (non_air < 0) non_air = 0;
-        if (non_air > 4096) non_air = 4096;
-        if (buf_w_u16_be(out, (uint16_t)non_air) != 0) return -1;
 
-        memcpy(pal, states, sizeof(states));
-        qsort(pal, 4096, sizeof(pal[0]), cmp_i32);
-        int pal_len = 0;
+        int non_air = 0;
         for (int i = 0; i < 4096; i++) {
-            if (i == 0 || pal[i] != pal[i - 1]) pal[pal_len++] = pal[i];
+            if (states[i] != ids->air) non_air++;
         }
+        if (buf_w_u16_be(out, (uint16_t)non_air) != 0) return -1;
+        if (buf_w_u16_be(out, 0) != 0) return -1; /* fluidCount */
+        if (encode_paletted_container_network(out, states, 4096, 8) != 0) return -1;
 
-        if (pal_len <= 0) {
-            /* Treat as uniform air. */
-            if (buf_w_u8(out, 0) != 0) return -1;
-            if (buf_w_varint(out, ids->air) != 0) return -1;
-            if (buf_w_varint(out, 0) != 0) return -1;
-        } else if (pal_len == 1) {
-            if (buf_w_u8(out, 0) != 0) return -1;
-            if (buf_w_varint(out, pal[0]) != 0) return -1;
-            if (buf_w_varint(out, 0) != 0) return -1;
-        } else {
-            bool local = (pal_len <= 256);
-            int bits = local ? ceil_log2_u32((uint32_t)pal_len) : bits_needed_u32((uint32_t)pal[pal_len - 1]);
-            if (local && bits < 4) bits = 4;
-            if (!local && bits < 15) bits = 15;
-            if (buf_w_u8(out, (uint8_t)bits) != 0) return -1;
-            if (local) {
-                if (buf_w_varint(out, pal_len) != 0) return -1;
-                for (int i = 0; i < pal_len; i++) {
-                    if (buf_w_varint(out, pal[i]) != 0) return -1;
-                }
-            }
-
-            uint32_t packed_vals[4096];
-            for (int i = 0; i < 4096; i++) {
-                if (local) {
-                    int idx = palette_index_of(pal, pal_len, states[i]);
-                    if (idx < 0) idx = 0;
-                    packed_vals[i] = (uint32_t)idx;
-                } else {
-                    packed_vals[i] = (uint32_t)states[i];
-                }
-            }
-
-            int64_t *longs = NULL;
-            int32_t long_count = 0;
-            if (mc_packed_pack_compact_u32(packed_vals, 4096, bits, &longs, &long_count) != 0) {
-                return -1;
-            }
-
-            if (buf_w_varint(out, long_count) != 0) {
-                free(longs);
-                return -1;
-            }
-            for (int32_t i = 0; i < long_count; i++) {
-                if (buf_w_u64_be(out, (uint64_t)longs[i]) != 0) {
-                    free(longs);
-                    return -1;
-                }
-            }
-            free(longs);
-        }
-
-        /* Biomes: uniform single from template. bits=0, single, data_len=0 */
-        if (buf_w_u8(out, 0) != 0) return -1;
-        if (buf_w_varint(out, g_chunk_tpl.biome_id) != 0) return -1;
-        if (buf_w_varint(out, 0) != 0) return -1;
+        /* Biomes: one 4x4x4 container per section. */
+        int32_t biomes[64];
+        for (int i = 0; i < 64; i++) biomes[i] = g_chunk_tpl.biome_id;
+        if (encode_paletted_container_network(out, biomes, 64, 3) != 0) return -1;
     }
 
     return 0;
@@ -2503,8 +2772,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
         int32_t world_y = MC_WORLD_MIN_Y + y_index;
         for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
             for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
-                int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-                int32_t state_id = mc_world_normalize_container_state_id(chunk->blocks[idx]);
+                int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
                 int32_t be_type = container_block_entity_type(state_id);
                 if (be_type < 0) continue;
 
@@ -2571,8 +2839,7 @@ static int send_chunk_container_repairs(mc_conn_t *c, const mc_chunk_t *chunk) {
         int32_t world_y = MC_WORLD_MIN_Y + y_index;
         for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
             for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
-                int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-                int32_t state_id = mc_world_normalize_container_state_id(chunk->blocks[idx]);
+                int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
                 if (container_block_entity_type(state_id) < 0) continue;
                 int32_t world_x = chunk->cx * MC_CHUNK_XZ + lx;
                 int32_t world_z = chunk->cz * MC_CHUNK_XZ + lz;
@@ -2737,6 +3004,7 @@ int proto_play_send_initial(mc_conn_t *c) {
     if (w_bool(buf, sizeof(buf), &pos, true) != 0) return -1;  /* is flat */
     if (w_bool(buf, sizeof(buf), &pos, false) != 0) return -1; /* has death location */
     if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1;   /* portal cooldown */
+    if (w_varint(buf, sizeof(buf), &pos, 63) != 0) return -1;  /* sea level */
     if (w_bool(buf, sizeof(buf), &pos, false) != 0) return -1; /* enforces secure chat */
 
     if (conn_write_packet(c, PKT_PLAY_LOGIN, buf, pos, -1) != 0) return -1;
@@ -2758,9 +3026,12 @@ int proto_play_send_initial(mc_conn_t *c) {
     c->has_center_chunk = false;
     if (rebuild_chunk_stream(c, world, 0, 0, view_distance) != 0) return -1;
 
-    /* Set Default Spawn Position (0,64,0) */
+    /* 26.1 default spawn packet carries LevelData.RespawnData:
+     * GlobalPos(dimension + block pos) + yaw + pitch. */
     pos = 0;
+    if (w_string(buf, sizeof(buf), &pos, "minecraft:overworld") != 0) return -1;
     if (w_position(buf, sizeof(buf), &pos, 0, 80, 0) != 0) return -1;
+    if (w_f32(buf, sizeof(buf), &pos, 0.0f) != 0) return -1;
     if (w_f32(buf, sizeof(buf), &pos, 0.0f) != 0) return -1;
     if (conn_write_packet(c, PKT_PLAY_SET_DEFAULT_SPAWN, buf, pos, -1) != 0) return -1;
 
@@ -2953,6 +3224,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         float cx = 0.0f, cy = 0.0f, cz = 0.0f;
         bool inside = false;
         int32_t seq = 0;
+        bool has_sequence = false;
         if (r_varint(&r, &hand) != 0) return -1;
         if (r_position(&r, &x, &y, &z) != 0) return -1;
         if (r_varint(&r, &face) != 0) return -1;
@@ -2962,16 +3234,22 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (r_bool(&r, &inside) != 0) return -1;
         if (r.pos < r.len) {
             if (r_varint(&r, &seq) != 0) return -1;
+            has_sequence = true;
         }
-        if (hand != 0) return 0;
+        if (hand != 0) {
+            if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+            return 0;
+        }
         (void)cx;
         (void)cy;
         (void)cz;
         (void)inside;
-        (void)seq;
 
         int open_rc = try_open_target_container(c, x, y, z);
-        if (open_rc != 0) return open_rc < 0 ? -1 : 0;
+        if (open_rc != 0) {
+            if (open_rc > 0 && has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+            return open_rc < 0 ? -1 : 0;
+        }
 
         int32_t px = x;
         int32_t py = y;
@@ -2988,32 +3266,78 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         const mc_world_ids_t *ids = mc_world_ids(world);
         if (world && ids) {
             int held_idx = selected_mainhand_slot_index(c);
-            int32_t requested_sid = proto_play_slot_to_state(ids, held);
-            int32_t sid = mc_world_normalize_container_state_id(requested_sid);
+            int32_t mapped_state_id = (held && held->present) ? mc_item_default_place_state(held->item_id) : -1;
+            int32_t requested_state_id = proto_play_resolve_placement_state(ids, held, face, c->yaw, c->pitch);
+            int32_t normalized_state_id = mc_world_normalize_container_state_id(requested_state_id);
+            int32_t authoritative_state_id = -1;
+            int32_t network_state_id = -1;
+            bool placed_block = false;
             if (debug_place_enabled()) {
                 const char *item_name = (held && held->present) ? mc_minecraft_item_name(held->item_id) : NULL;
-                log_info("place debug: use_item_on held_slot=%d item_id=%d item=%s target=(%d,%d,%d) face=%d placed=(%d,%d,%d) state_id=%d key=%s",
+                log_info("place debug: use_item_on begin held_slot=%d item_id=%d item=%s target=(%d,%d,%d) face=%d placed=(%d,%d,%d) seq=%d mapped=%d requested=%d normalized=%d mapped_key=%s requested_key=%s normalized_key=%s",
                          c->player ? c->player->inventory.selected_hotbar_slot : -1,
                          held && held->present ? held->item_id : -1, item_name ? item_name : "(empty)",
-                         x, y, z, face, px, py, pz, sid, sid >= 0 && mc_block_state_key(sid) ? mc_block_state_key(sid) : "(none)");
+                         x, y, z, face, px, py, pz, seq, mapped_state_id, requested_state_id, normalized_state_id,
+                         mapped_state_id >= 0 && mc_block_state_key(mapped_state_id) ? mc_block_state_key(mapped_state_id) : "(none)",
+                         requested_state_id >= 0 && mc_block_state_key(requested_state_id) ? mc_block_state_key(requested_state_id) : "(none)",
+                         normalized_state_id >= 0 && mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(none)");
             }
-            if (sid >= 0) {
-                if (mc_world_set_block(world, px, py, pz, sid) == 0) {
-                    if (container_block_entity_type(sid) >= 0) {
+            if (normalized_state_id >= 0) {
+                if (mc_world_set_block(world, px, py, pz, normalized_state_id) == 0) {
+                    placed_block = true;
+                    authoritative_state_id = normalized_state_id;
+                    if (mc_world_get_block(world, px, py, pz, &authoritative_state_id) != 0) {
+                        authoritative_state_id = normalized_state_id;
+                    }
+                    network_state_id = authoritative_state_id;
+                    if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
+                    if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                    if (container_block_entity_type(authoritative_state_id) >= 0) {
                         if (mc_world_flush_block(world, px, py, pz) != 0) return -1;
-                        (void)send_block_entity_update(c, px, py, pz, sid);
+                        (void)send_block_entity_update(c, px, py, pz, authoritative_state_id);
                         if (resend_authoritative_chunk_at(c, world, px, pz) != 0) return -1;
                         if (debug_container_pos_match(px, py, pz)) {
-                            log_info("containers debug: place pos=(%d,%d,%d) requested=%d normalized=%d requested_key=%s normalized_key=%s",
-                                     px, py, pz, requested_sid, sid,
-                                     mc_block_state_key(requested_sid) ? mc_block_state_key(requested_sid) : "(null)",
-                                     mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
+                            log_info("containers debug: place pos=(%d,%d,%d) mapped=%d requested=%d normalized=%d authoritative=%d network=%d requested_key=%s normalized_key=%s authoritative_key=%s",
+                                     px, py, pz, mapped_state_id, requested_state_id, normalized_state_id, authoritative_state_id,
+                                     network_state_id,
+                                     mc_block_state_key(requested_state_id) ? mc_block_state_key(requested_state_id) : "(null)",
+                                     mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(null)",
+                                     mc_block_state_key(authoritative_state_id) ? mc_block_state_key(authoritative_state_id) : "(null)");
                         }
                     }
                     if (c->gamemode != GAMEMODE_CREATIVE && held_idx >= 0 && held && held->present) {
                         if (consume_selected_item(c) != 0) return -1;
                     }
                 }
+            }
+            if (!placed_block) {
+                if (mc_world_get_block(world, px, py, pz, &authoritative_state_id) == 0) {
+                    network_state_id = authoritative_state_id;
+                    if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
+                }
+                if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                if (held_idx >= 0) {
+                    if (sync_inventory_slot(c, (int16_t)held_idx) != 0) return -1;
+                }
+                if (send_held_item_slot(c) != 0) return -1;
+            }
+            if (debug_place_enabled()) {
+                const char *item_name = (held && held->present) ? mc_minecraft_item_name(held->item_id) : NULL;
+                log_info("[debug] Player placed item=%s(%d) mapped=%d requested=%d normalized=%d authoritative=%d network=%d seq=%d target=(%d,%d,%d) placed=(%d,%d,%d) mapped_key=%s requested_key=%s normalized_key=%s authoritative_key=%s network_key=%s",
+                         item_name ? item_name : "(empty)",
+                         held && held->present ? held->item_id : -1,
+                         mapped_state_id,
+                         requested_state_id,
+                         normalized_state_id,
+                         authoritative_state_id,
+                         network_state_id,
+                         seq,
+                         x, y, z, px, py, pz,
+                         mapped_state_id >= 0 && mc_block_state_key(mapped_state_id) ? mc_block_state_key(mapped_state_id) : "(none)",
+                         requested_state_id >= 0 && mc_block_state_key(requested_state_id) ? mc_block_state_key(requested_state_id) : "(none)",
+                         normalized_state_id >= 0 && mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(none)",
+                         authoritative_state_id >= 0 && mc_block_state_key(authoritative_state_id) ? mc_block_state_key(authoritative_state_id) : "(none)",
+                         network_state_id >= 0 && mc_block_state_key(network_state_id) ? mc_block_state_key(network_state_id) : "(none)");
             }
         }
         return 0;

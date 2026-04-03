@@ -129,6 +129,41 @@ int proto_config_send_registry(mc_conn_t *c) {
     return 0;
 }
 
+static int proto_config_send_tags(mc_conn_t *c) {
+    if (!c || !c->cfg) return -1;
+
+    const char *path = c->cfg->tags_blob_path;
+    if (!path) {
+        log_error("tags blob path not configured");
+        send_config_disconnect(c, "{\"text\":\"Tags data missing\"}");
+        return -1;
+    }
+
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    if (read_file(path, &blob, &blob_len) != 0) {
+        log_error("failed to read tags blob: %s", path);
+        send_config_disconnect(c, "{\"text\":\"Tags data load failed\"}");
+        return -1;
+    }
+
+    if (blob_len == 0) {
+        free(blob);
+        log_error("tags blob is empty: %s", path);
+        send_config_disconnect(c, "{\"text\":\"Tags data parse error\"}");
+        return -1;
+    }
+
+    if (conn_write_packet(c, MC_PKT_CONFIGURATION_CLIENTBOUND_UPDATE_TAGS, blob, blob_len, -1) != 0) {
+        free(blob);
+        return -1;
+    }
+
+    free(blob);
+    log_info("sent update tags packet len=%zu", blob_len);
+    return 0;
+}
+
 int proto_config_handle(mc_conn_t *c, const mc_frame_t *frame) {
     if (!c || !frame) return -1;
 
@@ -151,6 +186,7 @@ int proto_config_handle(mc_conn_t *c, const mc_frame_t *frame) {
         }
 
         if (proto_config_send_registry(c) != 0) return -1;
+        if (proto_config_send_tags(c) != 0) return -1;
 
         if (!c->config_finish_sent) {
             if (conn_write_packet(c, MC_PKT_CONFIGURATION_CLIENTBOUND_FINISH_CONFIGURATION, NULL, 0, -1) != 0) return -1;

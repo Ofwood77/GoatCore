@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "arena.h"
+
 typedef enum {
     MC_NBT_TAG_END = 0,
     MC_NBT_TAG_BYTE = 1,
@@ -72,6 +74,12 @@ int mc_nbt_read_named_root(const uint8_t *data, size_t len, mc_nbt_tag_t **out, 
 /* Reads an unnamed root tag (network NBT): [type][payload]. */
 int mc_nbt_read_unnamed_root(const uint8_t *data, size_t len, mc_nbt_tag_t **out, size_t *bytes_read);
 
+/* Reads a named root tag into an arena-backed tree. */
+int mc_nbt_read_named_root_arena(const uint8_t *data, size_t len, mc_arena_t *arena, mc_nbt_tag_t **out, size_t *bytes_read);
+
+/* Reads an unnamed root tag into an arena-backed tree. */
+int mc_nbt_read_unnamed_root_arena(const uint8_t *data, size_t len, mc_arena_t *arena, mc_nbt_tag_t **out, size_t *bytes_read);
+
 /* Writes a named root tag (on-disk NBT): [type][name][payload]. Output is malloc'ed. */
 int mc_nbt_write_named_root(const mc_nbt_tag_t *root, uint8_t **out, size_t *out_len);
 
@@ -81,6 +89,8 @@ int mc_nbt_write_unnamed_root(const mc_nbt_tag_t *root, uint8_t **out, size_t *o
 void mc_nbt_free(mc_nbt_tag_t *tag);
 
 const mc_nbt_tag_t *mc_nbt_compound_get(const mc_nbt_tag_t *compound, const char *name);
+
+bool mc_anvil_validate_chunk(const mc_nbt_tag_t *root);
 
 void mc_nbt_dump(const mc_nbt_tag_t *tag, FILE *out, int indent, int max_depth);
 

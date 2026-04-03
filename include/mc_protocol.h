@@ -27,6 +27,8 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_remove_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id);
 int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot);
+int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch);
 int proto_play_encode_chunkdata_for_test(mc_world_t *world, const mc_chunk_t *chunk, mc_buf_t *out);
+int proto_play_validate_chunkdata_for_test(const uint8_t *data, size_t len);
 
 #endif /* MC_PROTOCOL_H */

@@ -5,8 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-EXPECTED_PROTOCOL_VERSION = 767
-EXPECTED_VERSION_IDS = {"1.21.1", "1.21.1-pre1", "1.21.1-pre2", "1.21.1-pre3", "1.21.1-rc1"}
+EXPECTED_PROTOCOL_VERSION = 775
+EXPECTED_VERSION_IDS = {"26.1"}
 
 
 PACKET_PROTOCOLS = {
@@ -376,6 +376,19 @@ def emit_json(out_json: Path, packets: list[dict], items: list[dict], entities: 
     out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def load_version_info(client_root: Path) -> dict:
+    candidates = [
+        client_root / "version.json",
+        client_root.parent / "version.json",
+        client_root.parent / "server" / "version.json",
+        client_root.parent / "client" / "version.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            return json.load(path.open("r", encoding="utf-8"))
+    return {}
+
+
 def main() -> int:
     if len(sys.argv) != 5:
         print("usage: gen_minecraft_ids.py <client_root> <out.c> <out.h> <out.json>", file=sys.stderr)
@@ -390,44 +403,31 @@ def main() -> int:
         print(f"client root not found: {client_root}", file=sys.stderr)
         return 1
 
-    version_path = Path(client_root) / "version.json"
-    version_info = {}
-    if version_path.exists():
-        version_info = json.load(version_path.open("r", encoding="utf-8"))
+    version_info = load_version_info(Path(client_root))
     version_id = version_info.get("id")
     protocol_version = version_info.get("protocol_version")
-    use_fallback = protocol_version != EXPECTED_PROTOCOL_VERSION or version_id not in EXPECTED_VERSION_IDS
-
-    if use_fallback:
-        assets_items = Path(__file__).resolve().parent.parent / "assets" / "items.json"
-        if not assets_items.exists() or not PROTO_FALLBACK_PATH.exists():
-            print("version mismatch and fallback assets missing (need assets/items.json and assets/proto.yml)", file=sys.stderr)
-            return 1
-        item_json = json.load(assets_items.open("r", encoding="utf-8"))
-        packets = build_fallback_packets_from_proto(PROTO_FALLBACK_PATH)
-        items = [{"id": int(item["id"]), "name": to_mc_name(item["name"])} for item in item_json]
-        entities = list(FALLBACK_ENTITY_TYPES)
-        block_entities = list(FALLBACK_BLOCK_ENTITY_TYPES)
+    if protocol_version != EXPECTED_PROTOCOL_VERSION or version_id not in EXPECTED_VERSION_IDS:
         print(
-            f"warning: client source version {version_id!r} protocol={protocol_version!r} does not match "
-            f"MC_PROTO_VERSION_1_21_1={EXPECTED_PROTOCOL_VERSION}; using bundled 1.21.1 fallback IDs",
+            f"client source version {version_id!r} protocol={protocol_version!r} does not match "
+            f"expected 26.1/{EXPECTED_PROTOCOL_VERSION}",
             file=sys.stderr,
         )
-    else:
-        packets = []
-        for state, class_name in PACKET_PROTOCOLS.items():
-            text = run_javap(client_root, ["-p", "-c"], class_name)
-            for direction, names in parse_protocol_packets(text):
-                for packet_id, name in enumerate(names):
-                    packets.append({"state": state, "direction": direction, "id": packet_id, "name": name})
+        return 1
 
-        entity_text = run_javap(client_root, ["-p", "-c"], ENTITY_CLASS)
-        block_entity_text = run_javap(client_root, ["-p", "-c"], BLOCK_ENTITY_CLASS)
-        items_text = run_javap(client_root, ["-p", "-constants"], ITEMS_CLASS)
+    packets = []
+    for state, class_name in PACKET_PROTOCOLS.items():
+        text = run_javap(client_root, ["-p", "-c"], class_name)
+        for direction, names in parse_protocol_packets(text):
+            for packet_id, name in enumerate(names):
+                packets.append({"state": state, "direction": direction, "id": packet_id, "name": name})
 
-        entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(entity_text))]
-        block_entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(block_entity_text))]
-        items = [{"id": idx, "name": name} for idx, name in enumerate(parse_item_fields(items_text))]
+    entity_text = run_javap(client_root, ["-p", "-c"], ENTITY_CLASS)
+    block_entity_text = run_javap(client_root, ["-p", "-c"], BLOCK_ENTITY_CLASS)
+    items_text = run_javap(client_root, ["-p", "-constants"], ITEMS_CLASS)
+
+    entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(entity_text))]
+    block_entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(block_entity_text))]
+    items = [{"id": idx, "name": name} for idx, name in enumerate(parse_item_fields(items_text))]
 
     if not packets or not items or not entities or not block_entities:
         print("failed to extract minecraft ids from client classes", file=sys.stderr)
