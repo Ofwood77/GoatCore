@@ -26,6 +26,22 @@ static int r_string_skip(mc_reader_t *r) {
     return 0;
 }
 
+static int r_string_alloc(mc_reader_t *r, char **out) {
+    int32_t str_len = 0;
+    char *s = NULL;
+    if (out) *out = NULL;
+    if (r_varint(r, &str_len) != 0) return -1;
+    if (str_len < 0 || (size_t)str_len > r->len - r->pos) return -1;
+    s = (char *)malloc((size_t)str_len + 1u);
+    if (!s) return -1;
+    memcpy(s, r->data + r->pos, (size_t)str_len);
+    s[str_len] = '\0';
+    r->pos += (size_t)str_len;
+    if (out) *out = s;
+    else free(s);
+    return 0;
+}
+
 static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     size_t n = 0;
     if (varint_write(buf + *pos, cap - *pos, v, &n) != 0) return -1;
@@ -116,6 +132,25 @@ int proto_config_send_registry(mc_conn_t *c) {
             send_config_disconnect(c, "{\"text\":\"Registry data parse error\"}");
             return -1;
         }
+        mc_reader_t reg_reader = {blob + pos, (size_t)payload_len, 0};
+        char *registry_key = NULL;
+        int32_t entry_count = -1;
+        if (r_string_alloc(&reg_reader, &registry_key) != 0) {
+            free(blob);
+            log_error("registry blob parse error (registry key)");
+            send_config_disconnect(c, "{\"text\":\"Registry data parse error\"}");
+            return -1;
+        }
+        if (r_varint(&reg_reader, &entry_count) != 0) {
+            free(registry_key);
+            free(blob);
+            log_error("registry blob parse error (entry count)");
+            send_config_disconnect(c, "{\"text\":\"Registry data parse error\"}");
+            return -1;
+        }
+        log_info("sending registry[%d]: key=%s entries=%d", packets, registry_key, entry_count);
+        free(registry_key);
+
         if (conn_write_packet(c, MC_PKT_CONFIGURATION_CLIENTBOUND_REGISTRY_DATA, blob + pos, (size_t)payload_len, -1) != 0) {
             free(blob);
             return -1;

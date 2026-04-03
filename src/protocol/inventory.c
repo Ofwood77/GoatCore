@@ -174,6 +174,7 @@ int mc_slot_read_net(const uint8_t *buf, size_t len, size_t *pos, mc_slot_t *out
     if (read_varint_at(buf, len, pos, &item_id) != 0) return -1;
     if (read_varint_at(buf, len, pos, &added) != 0) return -1;
     if (read_varint_at(buf, len, pos, &removed) != 0) return -1;
+    if (item_id <= 0) return -1;
     if (added != 0 || removed != 0) return -1;
 
     tmp.present = true;

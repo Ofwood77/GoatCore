@@ -169,9 +169,9 @@ int main(void) {
     cfg.compression_threshold = -1;
     cfg.online_mode = false;
     cfg.debug_packets = true;
-    cfg.registry_blob_path = "assets/registry_packets_26_1.bin";
-    cfg.tags_blob_path = "assets/tags_packet_26_1.bin";
-    cfg.chunk_blob_path = "assets/chunk_0_0_26_1.bin";
+    cfg.registry_blob_path = "assets/registry_packets_26_1_1.bin";
+    cfg.tags_blob_path = "assets/tags_packet_26_1_1.bin";
+    cfg.chunk_blob_path = "assets/chunk_0_0_26_1_1.bin";
     cfg.block_states_path = "assets/block_states.json";
     cfg.world_path = "world";
     cfg.level_seed = disk_cfg.level_seed;

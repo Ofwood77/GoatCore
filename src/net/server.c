@@ -71,6 +71,17 @@ static const char *serverbound_packet_name(mc_proto_state_t state, int32_t id) {
     return mc_minecraft_packet_name(state, MC_MINECRAFT_PACKET_DIR_SERVERBOUND, id);
 }
 
+static bool should_log_recv_packet(mc_proto_state_t state, int32_t id) {
+    if (state == MC_STATE_PLAY) {
+        if (id == MC_PKT_PLAY_SERVERBOUND_CLIENT_TICK_END) return false;
+        if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_POS) return false;
+        if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_POS_ROT) return false;
+        if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_ROT) return false;
+        if (id == MC_PKT_PLAY_SERVERBOUND_PLAYER_INPUT) return false;
+    }
+    return true;
+}
+
 static int set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) return -1;
@@ -570,8 +581,10 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
 
         if (s->cfg.debug_packets) {
             const char *packet_name = serverbound_packet_name(c->state, frame.packet_id);
-            if (packet_name) log_info("recv state=%s id=0x%02X (%s) len=%zu", state_name(c->state), frame.packet_id, packet_name, frame.payload.len);
-            else log_info("recv state=%s id=0x%02X len=%zu", state_name(c->state), frame.packet_id, frame.payload.len);
+            if (should_log_recv_packet(c->state, frame.packet_id)) {
+                if (packet_name) log_info("recv state=%s id=0x%02X (%s) len=%zu", state_name(c->state), frame.packet_id, packet_name, frame.payload.len);
+                else log_info("recv state=%s id=0x%02X len=%zu", state_name(c->state), frame.packet_id, frame.payload.len);
+            }
         }
         mc_task_t *task = (mc_task_t *)calloc(1, sizeof(mc_task_t));
         if (!task) {

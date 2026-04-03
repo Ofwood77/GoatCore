@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 EXPECTED_PROTOCOL_VERSION = 775
-EXPECTED_VERSION_IDS = {"26.1"}
+EXPECTED_VERSION_IDS = {"26.1", "26.1.1"}
 
 
 PACKET_PROTOCOLS = {
@@ -23,6 +23,7 @@ ITEMS_CLASS = "net.minecraft.world.item.Items"
 PROTO_FALLBACK_PATH = Path(__file__).resolve().parent.parent / "assets" / "proto.yml"
 
 PACKET_FALLBACK_NAME_MAP = {
+    ("handshaking", "serverbound", "intention"): "CLIENT_INTENTION",
     ("handshaking", "serverbound", "set_protocol"): "CLIENT_INTENTION",
     ("status", "serverbound", "ping_start"): "SERVERBOUND_STATUS_REQUEST",
     ("status", "serverbound", "ping"): "SERVERBOUND_PING_REQUEST",
@@ -94,6 +95,14 @@ FALLBACK_BLOCK_ENTITY_TYPES = [
     {"id": 2, "name": "minecraft:trapped_chest"},
     {"id": 3, "name": "minecraft:ender_chest"},
 ]
+
+REPORT_STATE_NAME_MAP = {
+    "handshake": "handshaking",
+    "status": "status",
+    "login": "login",
+    "configuration": "configuration",
+    "play": "play",
+}
 
 
 def run_javap(client_root: str, flags: list[str], class_name: str) -> str:
@@ -389,6 +398,67 @@ def load_version_info(client_root: Path) -> dict:
     return {}
 
 
+def is_reports_root(root: Path) -> bool:
+    return root.is_dir() and (root / "packets.json").exists() and (root / "registries.json").exists()
+
+
+def packet_logical_name(state: str, direction: str, packet_name: str) -> str:
+    suffix = packet_name.split(":", 1)[1] if ":" in packet_name else packet_name
+    mapped = PACKET_FALLBACK_NAME_MAP.get((state, direction, suffix))
+    if mapped is not None:
+        return mapped
+    prefix = "CLIENTBOUND" if direction == "clientbound" else "SERVERBOUND"
+    return f"{prefix}_{sanitize_macro(suffix)}"
+
+
+def load_reports_packets(reports_root: Path) -> list[dict]:
+    raw = json.loads((reports_root / "packets.json").read_text(encoding="utf-8"))
+    packets: list[dict] = []
+    for report_state, normalized_state in REPORT_STATE_NAME_MAP.items():
+        state_section = raw.get(report_state)
+        if not isinstance(state_section, dict):
+            continue
+        for direction in ("serverbound", "clientbound"):
+            dir_section = state_section.get(direction)
+            if not isinstance(dir_section, dict):
+                continue
+            for packet_name, meta in dir_section.items():
+                if not isinstance(packet_name, str) or not isinstance(meta, dict):
+                    continue
+                packet_id = meta.get("protocol_id")
+                if not isinstance(packet_id, int):
+                    continue
+                packets.append(
+                    {
+                        "state": normalized_state,
+                        "direction": direction,
+                        "id": packet_id,
+                        "name": packet_logical_name(normalized_state, direction, packet_name),
+                    }
+                )
+    return packets
+
+
+def load_registry_entries(reports_root: Path, registry_name: str) -> list[dict]:
+    raw = json.loads((reports_root / "registries.json").read_text(encoding="utf-8"))
+    reg = raw.get(registry_name)
+    if not isinstance(reg, dict):
+        return []
+    entries = reg.get("entries")
+    if not isinstance(entries, dict):
+        return []
+    values: list[dict] = []
+    for name, meta in entries.items():
+        if not isinstance(name, str) or not isinstance(meta, dict):
+            continue
+        protocol_id = meta.get("protocol_id")
+        if not isinstance(protocol_id, int):
+            continue
+        values.append({"id": protocol_id, "name": name})
+    values.sort(key=lambda entry: entry["id"])
+    return values
+
+
 def main() -> int:
     if len(sys.argv) != 5:
         print("usage: gen_minecraft_ids.py <client_root> <out.c> <out.h> <out.json>", file=sys.stderr)
@@ -399,13 +469,19 @@ def main() -> int:
     out_h = Path(sys.argv[3])
     out_json = Path(sys.argv[4])
 
-    if not Path(client_root).exists():
+    source_root = Path(client_root)
+    if not source_root.exists():
         print(f"client root not found: {client_root}", file=sys.stderr)
         return 1
 
-    version_info = load_version_info(Path(client_root))
+    reports_mode = is_reports_root(source_root)
+    version_info = {} if reports_mode else load_version_info(source_root)
     version_id = version_info.get("id")
     protocol_version = version_info.get("protocol_version")
+    if version_id is None:
+        version_id = "26.1.1"
+    if protocol_version is None:
+        protocol_version = EXPECTED_PROTOCOL_VERSION
     if protocol_version != EXPECTED_PROTOCOL_VERSION or version_id not in EXPECTED_VERSION_IDS:
         print(
             f"client source version {version_id!r} protocol={protocol_version!r} does not match "
@@ -414,20 +490,26 @@ def main() -> int:
         )
         return 1
 
-    packets = []
-    for state, class_name in PACKET_PROTOCOLS.items():
-        text = run_javap(client_root, ["-p", "-c"], class_name)
-        for direction, names in parse_protocol_packets(text):
-            for packet_id, name in enumerate(names):
-                packets.append({"state": state, "direction": direction, "id": packet_id, "name": name})
+    if reports_mode:
+        packets = load_reports_packets(source_root)
+        items = load_registry_entries(source_root, "minecraft:item")
+        entities = load_registry_entries(source_root, "minecraft:entity_type")
+        block_entities = load_registry_entries(source_root, "minecraft:block_entity_type")
+    else:
+        packets = []
+        for state, class_name in PACKET_PROTOCOLS.items():
+            text = run_javap(client_root, ["-p", "-c"], class_name)
+            for direction, names in parse_protocol_packets(text):
+                for packet_id, name in enumerate(names):
+                    packets.append({"state": state, "direction": direction, "id": packet_id, "name": name})
 
-    entity_text = run_javap(client_root, ["-p", "-c"], ENTITY_CLASS)
-    block_entity_text = run_javap(client_root, ["-p", "-c"], BLOCK_ENTITY_CLASS)
-    items_text = run_javap(client_root, ["-p", "-constants"], ITEMS_CLASS)
+        entity_text = run_javap(client_root, ["-p", "-c"], ENTITY_CLASS)
+        block_entity_text = run_javap(client_root, ["-p", "-c"], BLOCK_ENTITY_CLASS)
+        items_text = run_javap(client_root, ["-p", "-constants"], ITEMS_CLASS)
 
-    entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(entity_text))]
-    block_entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(block_entity_text))]
-    items = [{"id": idx, "name": name} for idx, name in enumerate(parse_item_fields(items_text))]
+        entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(entity_text))]
+        block_entities = [{"id": idx, "name": name} for idx, name in enumerate(parse_registered_names(block_entity_text))]
+        items = [{"id": idx, "name": name} for idx, name in enumerate(parse_item_fields(items_text))]
 
     if not packets or not items or not entities or not block_entities:
         print("failed to extract minecraft ids from client classes", file=sys.stderr)

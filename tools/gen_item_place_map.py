@@ -9,7 +9,7 @@ def short_name(full_name: str) -> str:
     return full_name
 
 
-def resolve_default_state(block: dict) -> int:
+def resolve_default_state_legacy(block: dict) -> int:
     states = block.get("states")
     min_state = block.get("minStateId")
     default_state = block.get("defaultState")
@@ -28,6 +28,38 @@ def resolve_default_state(block: dict) -> int:
     return -1
 
 
+def resolve_default_state_report(block_name: str, block: dict) -> int:
+    states = block.get("states")
+    if not isinstance(states, list) or not states:
+        return -1
+    fallback = None
+    for state in states:
+        raw_id = state.get("id")
+        if not isinstance(raw_id, int):
+            continue
+        if fallback is None or raw_id < fallback:
+            fallback = raw_id
+        if state.get("default") is True:
+            return raw_id
+    return fallback if fallback is not None else -1
+
+
+def build_block_lookup(blocks: object) -> dict[str, int]:
+    if isinstance(blocks, list):
+        by_name_block = {b["name"]: b for b in blocks if isinstance(b, dict) and "name" in b}
+        return {name: resolve_default_state_legacy(block) for name, block in by_name_block.items()}
+
+    if isinstance(blocks, dict):
+        result: dict[str, int] = {}
+        for block_name, block in blocks.items():
+            if not isinstance(block_name, str) or not isinstance(block, dict):
+                continue
+            result[block_name] = resolve_default_state_report(block_name, block)
+        return result
+
+    raise ValueError("unsupported block metadata format")
+
+
 def main():
     if len(sys.argv) != 5:
         print("usage: gen_item_place_map.py minecraft_ids.json blocks.json out.c out.h", file=sys.stderr)
@@ -38,7 +70,7 @@ def main():
     items = meta.get("items", [])
     blocks = json.load(open(blocks_path, "r", encoding="utf-8"))
 
-    by_name_block = {b["name"]: b for b in blocks}
+    state_by_block_name = build_block_lookup(blocks)
     max_item_id = max((int(item["id"]) for item in items), default=-1)
     names = ["NULL"] * (max_item_id + 1)
     states = [-1] * (max_item_id + 1)
@@ -48,9 +80,11 @@ def main():
         item_id = int(item["id"])
         full_name = item["name"]
         names[item_id] = json.dumps(full_name)
-        block = by_name_block.get(short_name(full_name))
-        if block is not None:
-            states[item_id] = resolve_default_state(block)
+        state_id = state_by_block_name.get(full_name)
+        if state_id is None:
+            state_id = state_by_block_name.get(short_name(full_name))
+        if state_id is not None and state_id >= 0:
+            states[item_id] = int(state_id)
             mapped += 1
 
     with open(out_h, "w", encoding="utf-8") as fh:

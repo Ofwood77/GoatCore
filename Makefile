@@ -51,48 +51,46 @@ GENERATED_HEADERS = \
     src/generated/generated_item_place.h
 
 GENERATED_SOURCES = \
-    src/world/block_registry.c
+    src/world/block_registry.c \
+    src/generated/generated_minecraft_ids.c \
+    src/generated/generated_registries.c \
+    src/generated/generated_item_place.c
 
 all: mc_server
 
-MC_CLIENT_ROOT ?= mc_vania_asset/client
-MC_IDS_SENTINEL ?= $(MC_CLIENT_ROOT)/net/minecraft/network/protocol/handshake/HandshakeProtocols.class
+DATA_REPORTS_DIR ?= data/26.1.1/reports
+MC_IDS_SOURCE ?= $(DATA_REPORTS_DIR)
 
-src/world/block_registry.c src/world/block_registry.h: tools/generate_registry.py data/26.1-rc-3/reports/blocks.json
-	python3 tools/generate_registry.py data/26.1-rc-3/reports/blocks.json src/world/block_registry.c src/world/block_registry.h
+src/world/block_registry.c src/world/block_registry.h: tools/generate_registry.py $(DATA_REPORTS_DIR)/blocks.json
+	python3 tools/generate_registry.py $(DATA_REPORTS_DIR)/blocks.json src/world/block_registry.c src/world/block_registry.h
 
 src/generated/generated_minecraft_ids.c src/generated/generated_minecraft_ids.h src/generated/generated_minecraft_ids.json: \
 	tools/gen_minecraft_ids.py \
-	$(MC_CLIENT_ROOT)
+	$(MC_IDS_SOURCE)
 	@mkdir -p src/generated
-	@if [ -f "$(MC_IDS_SENTINEL)" ]; then \
-		python3 tools/gen_minecraft_ids.py $(MC_CLIENT_ROOT) src/generated/generated_minecraft_ids.c src/generated/generated_minecraft_ids.h src/generated/generated_minecraft_ids.json; \
-	else \
-		test -f src/generated/generated_minecraft_ids.c && test -f src/generated/generated_minecraft_ids.h && test -f src/generated/generated_minecraft_ids.json || \
-			( echo "missing generated minecraft id files and no class extraction available under $(MC_CLIENT_ROOT)" >&2; exit 1 ); \
-		echo "using checked-in generated_minecraft_ids.* (no class extraction under $(MC_CLIENT_ROOT))"; \
-		touch src/generated/generated_minecraft_ids.c src/generated/generated_minecraft_ids.h src/generated/generated_minecraft_ids.json; \
-	fi
+	python3 tools/gen_minecraft_ids.py $(MC_IDS_SOURCE) src/generated/generated_minecraft_ids.c src/generated/generated_minecraft_ids.h src/generated/generated_minecraft_ids.json
 
-src/generated/generated_registries.c src/generated/generated_registries.h: tools/gen_registries.py assets/block_states.json
+src/generated/generated_registries.c src/generated/generated_registries.h: tools/gen_registries.py src/world/block_registry.h src/world/block_registry.c
 	@mkdir -p src/generated
-	python3 tools/gen_registries.py assets/block_states.json src/generated/generated_registries.c src/generated/generated_registries.h
+	python3 tools/gen_registries.py src/world/block_registry.h src/generated/generated_registries.c src/generated/generated_registries.h
 
-src/generated/generated_item_place.c src/generated/generated_item_place.h: tools/gen_item_place_map.py src/generated/generated_minecraft_ids.json assets/blocks.json
+src/generated/generated_item_place.c src/generated/generated_item_place.h: tools/gen_item_place_map.py src/generated/generated_minecraft_ids.json $(DATA_REPORTS_DIR)/blocks.json
 	@mkdir -p src/generated
-	python3 tools/gen_item_place_map.py src/generated/generated_minecraft_ids.json assets/blocks.json src/generated/generated_item_place.c src/generated/generated_item_place.h
+	python3 tools/gen_item_place_map.py src/generated/generated_minecraft_ids.json $(DATA_REPORTS_DIR)/blocks.json src/generated/generated_item_place.c src/generated/generated_item_place.h
+
+.PHONY: generated_headers generated_sources
 
 generated_headers: $(GENERATED_HEADERS)
 
-generated_sources: $(GENERATED_SOURCES)
+generated_sources: $(GENERATED_HEADERS) $(GENERATED_SOURCES)
 
-$(OBJ): generated_headers
+$(OBJ): $(GENERATED_HEADERS)
 
 src/protocol/handlers/play.o: src/generated/generated_registries.h src/generated/generated_item_place.h src/generated/generated_minecraft_ids.h
 src/protocol/inventory.o: src/generated/generated_minecraft_ids.h
 src/net/server.o: src/generated/generated_minecraft_ids.h
 
-mc_server: generated_sources $(OBJ)
+mc_server: generated_headers generated_sources $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDFLAGS)
 
 mc_recorder: tools/mc_recorder.c src/net/buffer.c src/protocol/varint.c src/protocol/framing.c src/protocol/crypto_stub.c src/util/mc_util.c src/generated/generated_minecraft_ids.c | generated_sources

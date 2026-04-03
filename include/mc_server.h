@@ -8,7 +8,7 @@
 
 #define MC_PROTO_VERSION 775
 #define MC_PROTO_VERSION_1_21_1 MC_PROTO_VERSION
-#define MC_GAME_VERSION "26.1"
+#define MC_GAME_VERSION "26.1.1"
 
 typedef enum {
     MC_STATE_HANDSHAKING = 0,

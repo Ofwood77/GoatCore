@@ -184,11 +184,19 @@ int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback) {
 
 int32_t mc_world_normalize_container_state_id(int32_t state_id) {
     const char *key = NULL;
+
+    /* Modern runtime/network state IDs from generated_registries are already
+     * authoritative and must pass through unchanged. Re-normalizing them risks
+     * remapping a valid 26.1 BlockState into a different state. */
+    key = mc_block_state_key(state_id);
+    if (key) return state_id;
+
+    /* Only legacy/mock bootstrap IDs from the temporary global palette should
+     * be rewritten into the real runtime registry. */
     if (state_id >= 0 && (size_t)state_id < GLOBAL_BLOCK_STATES_COUNT &&
         (GLOBAL_BLOCK_STATES[state_id].flags & MC_BLOCK_FLAG_VALID) != 0) {
         key = mc_global_state_key((mc_global_state_id_t)state_id);
     }
-    if (!key) key = mc_block_state_key(state_id);
     if (!key) return state_id;
     return mc_world_runtime_state_id_from_key(key, state_id);
 }

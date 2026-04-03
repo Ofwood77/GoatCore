@@ -743,10 +743,10 @@ static int test_container_state_truth(const char *root) {
         return fail("container state ids missing");
     }
 
-    if (mc_world_normalize_container_state_id(chest_true) != chest_false ||
-        mc_world_normalize_container_state_id(ender_true) != ender_false) {
+    if (mc_world_normalize_container_state_id(chest_true) != chest_true ||
+        mc_world_normalize_container_state_id(ender_true) != ender_true) {
         mc_world_destroy(w);
-        return fail("shared container normalize helper");
+        return fail("shared container normalize helper pass-through");
     }
 
     if (wait_chunk_loaded(w, 0, 0) != 0) {
@@ -760,23 +760,23 @@ static int test_container_state_truth(const char *root) {
     }
 
     int32_t got = -1;
-    if (mc_world_get_block(w, 1, 64, 1, &got) != 0 || got != chest_false) {
+    if (mc_world_get_block(w, 1, 64, 1, &got) != 0 || got != chest_true) {
         mc_world_destroy(w);
-        return fail("container state chest normalized in ram");
+        return fail("container state chest preserved in ram");
     }
-    if (mc_world_get_block(w, 2, 64, 2, &got) != 0 || got != ender_false) {
+    if (mc_world_get_block(w, 2, 64, 2, &got) != 0 || got != ender_true) {
         mc_world_destroy(w);
-        return fail("container state ender normalized in ram");
+        return fail("container state ender preserved in ram");
     }
 
     if (wait_chunk_saved(w, 0, 0) != 0) {
         mc_world_destroy(w);
         return fail("container state save");
     }
-    if (verify_chunkstore_block_equals(world, 0, 0, 1, 64, 1, chest_false) != 0 ||
-        verify_chunkstore_block_equals(world, 0, 0, 2, 64, 2, ender_false) != 0) {
+    if (verify_chunkstore_block_equals(world, 0, 0, 1, 64, 1, chest_true) != 0 ||
+        verify_chunkstore_block_equals(world, 0, 0, 2, 64, 2, ender_true) != 0) {
         mc_world_destroy(w);
-        return fail("container state saved normalized");
+        return fail("container state saved preserved");
     }
 
     mc_chunk_t raw = {0};
@@ -800,13 +800,13 @@ static int test_container_state_truth(const char *root) {
 
     mc_world_t *w2 = mc_world_create(world, 0);
     if (!w2) return fail("mc_world_create container state reload");
-    if (wait_block_equals(w2, 1, 64, 1, chest_false) != 0) {
+    if (wait_block_equals(w2, 1, 64, 1, chest_true) != 0) {
         mc_world_destroy(w2);
-        return fail("container state legacy normalized on load");
+        return fail("container state preserved on load");
     }
-    if (verify_chunkstore_block_equals(world, 0, 0, 1, 64, 1, chest_false) != 0) {
+    if (verify_chunkstore_block_equals(world, 0, 0, 1, 64, 1, chest_true) != 0) {
         mc_world_destroy(w2);
-        return fail("container state legacy rewrite normalized");
+        return fail("container state rewrite preserved");
     }
 
     mc_chunk_t chunk = {0};
@@ -846,7 +846,7 @@ static int test_container_state_truth(const char *root) {
     mc_chunk_destroy(&chunk);
     buf_free(&encoded);
     mc_world_destroy(w2);
-    if (!found_false || found_true) return fail("chunkdata contains wrong chest state");
+    if (found_false || !found_true) return fail("chunkdata contains wrong chest state");
     return 0;
 }
 
