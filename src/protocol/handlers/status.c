@@ -15,10 +15,11 @@ int proto_handle_status(mc_conn_t *c, const mc_frame_t *frame, const char *motd_
         int wrote = snprintf(
             motd,
             sizeof(motd),
-            "{\"version\":{\"name\":\"%s\",\"protocol\":767},"
+            "{\"version\":{\"name\":\"%s\",\"protocol\":%d},"
             "\"players\":{\"max\":%d,\"online\":%d},"
             "\"description\":{\"text\":\"%s\"}}",
             MC_GAME_VERSION,
+            MC_PROTO_VERSION,
             max_players,
             online_players,
             motd_text

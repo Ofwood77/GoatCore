@@ -1,26 +1,12 @@
 #ifndef MC_WORLD_H
 #define MC_WORLD_H
 
+#include "block_entity_store.h"
+#include "mc_chunk.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#define MC_WORLD_MIN_Y (-64)
-#define MC_WORLD_HEIGHT 384
-#define MC_WORLD_SECTION_COUNT 24
-#define MC_CHUNK_XZ 16
-
-#define MC_BLOCKS_PER_CHUNK (MC_CHUNK_XZ * MC_CHUNK_XZ * MC_WORLD_HEIGHT)
-
-typedef struct {
-    int32_t cx;
-    int32_t cz;
-    int32_t blocks[MC_BLOCKS_PER_CHUNK]; /* index = (y_index*16 + z)*16 + x */
-    bool loaded;
-    bool dirty;
-    bool evict_after_save;
-    size_t list_index;
-} mc_chunk_t;
 
 typedef struct {
     int32_t x;
@@ -49,7 +35,9 @@ void mc_world_destroy(mc_world_t *w);
 
 const char *mc_world_path(const mc_world_t *w);
 const mc_world_ids_t *mc_world_ids(const mc_world_t *w);
+int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback);
 int32_t mc_world_normalize_container_state_id(int32_t state_id);
+int mc_world_remove_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z);
 bool mc_world_debug_containers_enabled(const mc_world_t *w);
 bool mc_world_debug_container_match(const mc_world_t *w, int32_t x, int32_t y, int32_t z);
 

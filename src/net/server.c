@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <math.h>
 #include <sys/epoll.h>
 #include <time.h>
 #include <pthread.h>
@@ -207,15 +208,10 @@ static int resolve_item_entity_type_id(void) {
     static int init = 0;
     static int value = -1;
     if (!init) {
-        const char *env = getenv("MC_ITEM_ENTITY_TYPE_ID");
-        if (env && *env) {
-            char *end = NULL;
-            long parsed = strtol(env, &end, 10);
-            if (end != env && *end == '\0' && parsed >= 0 && parsed <= INT32_MAX) {
-                value = (int)parsed;
-            }
-        }
-        if (value < 0) value = mc_minecraft_entity_type_id("minecraft:item");
+        value = mc_minecraft_entity_type_id("minecraft:item");
+        /* Local generated ids for the current asset set map minecraft:item -> 57.
+         * Keep a hard fallback so block drops never silently degrade to a wrong entity type. */
+        if (value < 0) value = 57;
         if (value < 0) log_error("failed to resolve entity type id for minecraft:item");
         init = 1;
     }
@@ -282,6 +278,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
 
     s->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->listen_fd < 0) {
+        log_error("socket() failed for %s:%u (errno=%d %s)",
+                  cfg->bind_ip ? cfg->bind_ip : "0.0.0.0",
+                  (unsigned)cfg->bind_port,
+                  errno,
+                  strerror(errno));
         mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
         pthread_mutex_destroy(&s->conns_lock);
@@ -299,6 +300,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     addr.sin_addr.s_addr = cfg->bind_ip ? inet_addr(cfg->bind_ip) : INADDR_ANY;
 
     if (bind(s->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        log_error("bind() failed for %s:%u (errno=%d %s)",
+                  cfg->bind_ip ? cfg->bind_ip : "0.0.0.0",
+                  (unsigned)cfg->bind_port,
+                  errno,
+                  strerror(errno));
         close(s->listen_fd);
         mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
@@ -308,6 +314,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     }
 
     if (listen(s->listen_fd, cfg->max_connections) != 0) {
+        log_error("listen() failed for %s:%u (errno=%d %s)",
+                  cfg->bind_ip ? cfg->bind_ip : "0.0.0.0",
+                  (unsigned)cfg->bind_port,
+                  errno,
+                  strerror(errno));
         close(s->listen_fd);
         mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
@@ -317,6 +328,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     }
 
     if (set_nonblocking(s->listen_fd) != 0) {
+        log_error("failed to set listening socket non-blocking for %s:%u (errno=%d %s)",
+                  cfg->bind_ip ? cfg->bind_ip : "0.0.0.0",
+                  (unsigned)cfg->bind_port,
+                  errno,
+                  strerror(errno));
         close(s->listen_fd);
         mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
@@ -327,6 +343,7 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
 
     s->epoll_fd = epoll_create1(0);
     if (s->epoll_fd < 0) {
+        log_error("epoll_create1() failed (errno=%d %s)", errno, strerror(errno));
         close(s->listen_fd);
         mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
@@ -336,6 +353,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     }
 
     if (add_epoll(s->epoll_fd, s->listen_fd, EPOLLIN, s) != 0) {
+        log_error("failed to register listening socket in epoll for %s:%u (errno=%d %s)",
+                  cfg->bind_ip ? cfg->bind_ip : "0.0.0.0",
+                  (unsigned)cfg->bind_port,
+                  errno,
+                  strerror(errno));
         close(s->epoll_fd);
         close(s->listen_fd);
         mc_world_destroy(s->world);
@@ -404,6 +426,21 @@ static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     return 0;
 }
 
+static int w_lpvec3(uint8_t *buf, size_t cap, size_t *pos, double x, double y, double z) {
+    double ax = fabs(x);
+    double ay = fabs(y);
+    double az = fabs(z);
+    double abs_max = ax;
+    if (ay > abs_max) abs_max = ay;
+    if (az > abs_max) abs_max = az;
+
+    if (abs_max < 3.051944088384301e-5) {
+        return w_ubyte(buf, cap, pos, 0);
+    }
+
+    return -1;
+}
+
 static int send_block_update(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t block_state) {
     if (!c) return -1;
     uint8_t buf[32];
@@ -428,13 +465,11 @@ static int send_item_entity_spawn(mc_conn_t *c, const mc_item_entity_t *item) {
         w_f64(buf, sizeof(buf), &pos, item->z) != 0) {
         return -1;
     }
+    if (w_lpvec3(buf, sizeof(buf), &pos, 0.0, 0.0, 0.0) != 0) return -1;
     if (w_byte(buf, sizeof(buf), &pos, 0) != 0 || w_byte(buf, sizeof(buf), &pos, 0) != 0 || w_byte(buf, sizeof(buf), &pos, 0) != 0) {
         return -1;
     }
     if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1;
-    if (w_u16_be(buf, sizeof(buf), &pos, 0) != 0 || w_u16_be(buf, sizeof(buf), &pos, 0) != 0 || w_u16_be(buf, sizeof(buf), &pos, 0) != 0) {
-        return -1;
-    }
     return conn_write_packet(c, PKT_PLAY_SPAWN_ENTITY, buf, pos, -1);
 }
 

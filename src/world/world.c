@@ -3,8 +3,6 @@
 #include "generated_registries.h"
 #include "mc_chunk_store.h"
 #include "mc_anvil.h"
-#include "mc_nbt.h"
-#include "mc_packed.h"
 #include "mc_util.h"
 #include "stb_perlin.h"
 
@@ -82,6 +80,7 @@ struct mc_world {
     mc_world_ids_t ids;
     int32_t cave_air;
     int32_t void_air;
+    mc_block_entity_store_t block_entities;
 
     mc_chunk_map_t chunks;
     mc_chunk_t **chunk_list;
@@ -139,27 +138,8 @@ static int32_t floor_div_i32(int32_t a, int32_t b) {
     return -(((-a) + b - 1) / b);
 }
 
-static int32_t mod_i32(int32_t a, int32_t b) {
-    if (b == 0) return 0;
-    int32_t m = a % b;
-    if (m < 0) m += b;
-    return m;
-}
-
-static int ceil_log2_u32(uint32_t v) {
-    if (v <= 1) return 0;
-    uint32_t x = v - 1;
-    int bits = 0;
-    while (x) {
-        bits++;
-        x >>= 1;
-    }
-    return bits;
-}
-
-int32_t mc_world_normalize_container_state_id(int32_t state_id) {
-    const char *key = mc_block_state_key(state_id);
-    if (!key) return state_id;
+int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback) {
+    if (!key || !*key) return fallback;
 
     const char *facing = "north";
     const char *needle = strstr(key, "facing=");
@@ -173,45 +153,65 @@ int32_t mc_world_normalize_container_state_id(int32_t state_id) {
     char normalized[128];
     if (strncmp(key, "minecraft:chest[", 16) == 0) {
         snprintf(normalized, sizeof(normalized), "minecraft:chest[facing=%s,type=single,waterlogged=false]", facing);
-        return mc_block_state_id(normalized, state_id);
+        return mc_block_state_id(normalized, fallback);
     }
     if (strncmp(key, "minecraft:trapped_chest[", 24) == 0) {
         snprintf(normalized, sizeof(normalized), "minecraft:trapped_chest[facing=%s,type=single,waterlogged=false]", facing);
-        return mc_block_state_id(normalized, state_id);
+        return mc_block_state_id(normalized, fallback);
     }
     if (strncmp(key, "minecraft:ender_chest[", 22) == 0) {
         snprintf(normalized, sizeof(normalized), "minecraft:ender_chest[facing=%s,waterlogged=false]", facing);
-        return mc_block_state_id(normalized, state_id);
+        return mc_block_state_id(normalized, fallback);
     }
-    return state_id;
+
+    int32_t exact = mc_block_state_id(key, -1);
+    if (exact >= 0) return exact;
+
+    const char *props = strchr(key, '[');
+    if (props) {
+        char base[128];
+        size_t len = (size_t)(props - key);
+        if (len > 0 && len < sizeof(base)) {
+            memcpy(base, key, len);
+            base[len] = '\0';
+            int32_t base_id = mc_block_state_id(base, -1);
+            if (base_id >= 0) return base_id;
+        }
+    }
+
+    return fallback;
+}
+
+int32_t mc_world_normalize_container_state_id(int32_t state_id) {
+    const char *key = NULL;
+    if (state_id >= 0 && (size_t)state_id < GLOBAL_BLOCK_STATES_COUNT &&
+        (GLOBAL_BLOCK_STATES[state_id].flags & MC_BLOCK_FLAG_VALID) != 0) {
+        key = mc_global_state_key((mc_global_state_id_t)state_id);
+    }
+    if (!key) key = mc_block_state_key(state_id);
+    if (!key) return state_id;
+    return mc_world_runtime_state_id_from_key(key, state_id);
 }
 
 static bool normalize_chunk_container_states(mc_chunk_t *chunk) {
     if (!chunk) return false;
     bool changed = false;
-    for (size_t i = 0; i < MC_BLOCKS_PER_CHUNK; i++) {
-        int32_t normalized = mc_world_normalize_container_state_id(chunk->blocks[i]);
-        if (normalized != chunk->blocks[i]) {
-            chunk->blocks[i] = normalized;
-            changed = true;
+    for (int y = MC_WORLD_MIN_Y; y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT; y++) {
+        for (int z = 0; z < MC_CHUNK_XZ; z++) {
+            for (int x = 0; x < MC_CHUNK_XZ; x++) {
+                int32_t current = (int32_t)mc_chunk_get_block(chunk, x, y, z);
+                int32_t normalized = mc_world_normalize_container_state_id(current);
+                if (normalized != current && mc_chunk_set_block(chunk, x, y, z, (mc_global_state_id_t)normalized) == 0) {
+                    changed = true;
+                }
+            }
         }
     }
     return changed;
 }
 
-static size_t padded_long_count(size_t value_count, int bits) {
-    if (bits <= 0) return 0;
-    int values_per_long = 64 / bits;
-    if (values_per_long <= 0) return 0;
-    return (value_count + (size_t)values_per_long - 1) / (size_t)values_per_long;
-}
-
 static bool debug_target_chunk(const mc_world_t *w, int32_t cx, int32_t cz) {
     return w && w->debug_reload && w->debug_cx == cx && w->debug_cz == cz;
-}
-
-static bool debug_target_block(const mc_world_t *w, int32_t cx, int32_t cz, int32_t x, int32_t y, int32_t z) {
-    return debug_target_chunk(w, cx, cz) && w->debug_x == x && w->debug_y == y && w->debug_z == z;
 }
 
 static void maybe_init_debug_reload(mc_world_t *w) {
@@ -259,6 +259,11 @@ bool mc_world_debug_container_match(const mc_world_t *w, int32_t x, int32_t y, i
     if (!w || !w->debug_containers) return false;
     if (!w->debug_container_pos_set) return true;
     return w->debug_container_x == x && w->debug_container_y == y && w->debug_container_z == z;
+}
+
+int mc_world_remove_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
+    if (!w) return -1;
+    return mc_be_store_remove(&w->block_entities, (mc_pos_t){x, y, z}) ? 0 : 1;
 }
 
 static int coords_to_chunk(int32_t x, int32_t z, int32_t *out_cx, int32_t *out_cz, int *out_lx, int *out_lz) {
@@ -411,6 +416,7 @@ static void chunk_map_free(mc_chunk_map_t *m) {
         for (size_t i = 0; i < m->cap; i++) {
             mc_chunk_entry_t *e = &m->entries[i];
             if (e->state == CHUNK_SLOT_READY) {
+                mc_chunk_destroy(e->chunk);
                 free(e->chunk);
             }
             if (e->state == CHUNK_SLOT_LOADING && e->pending) {
@@ -541,6 +547,7 @@ static void chunk_map_remove_key(mc_world_t *w, int64_t key) {
 
     if (e->state == CHUNK_SLOT_READY && e->chunk) {
         chunk_list_remove(w, e->chunk);
+        mc_chunk_destroy(e->chunk);
         free(e->chunk);
         e->chunk = NULL;
     }
@@ -677,16 +684,12 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
                     sid = (water >= 0) ? water : w->ids.air;
                 }
 
-                int y_index = y - MC_WORLD_MIN_Y;
-                size_t idx = ((size_t)y_index * MC_CHUNK_XZ + (size_t)lz) * MC_CHUNK_XZ + (size_t)lx;
-                chunk->blocks[idx] = sid;
+                (void)mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)sid);
             }
 
             int32_t top_y = INT32_MIN;
             for (int32_t y = max_y; y >= min_y; y--) {
-                int y_index = y - MC_WORLD_MIN_Y;
-                size_t idx = ((size_t)y_index * MC_CHUNK_XZ + (size_t)lz) * MC_CHUNK_XZ + (size_t)lx;
-                int32_t sid = chunk->blocks[idx];
+                int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
                 if (sid == w->ids.air) continue;
                 int32_t water = w->ids.water_level[0];
                 if (water >= 0 && sid == water) continue;
@@ -703,10 +706,9 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
                 for (int layer = 0; layer < 4; layer++) {
                     int32_t y = top_y - layer;
                     if (y < min_y) break;
-                    int y_index = y - MC_WORLD_MIN_Y;
-                    size_t idx = ((size_t)y_index * MC_CHUNK_XZ + (size_t)lz) * MC_CHUNK_XZ + (size_t)lx;
-                    if (layer == 0) chunk->blocks[idx] = top_sid;
-                    else chunk->blocks[idx] = w->ids.dirt >= 0 ? w->ids.dirt : w->ids.stone;
+                    if (layer == 0) (void)mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)top_sid);
+                    else (void)mc_chunk_set_block(chunk, lx, y, lz,
+                                                  (mc_global_state_id_t)(w->ids.dirt >= 0 ? w->ids.dirt : w->ids.stone));
                 }
             }
         }
@@ -715,290 +717,23 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     chunk->loaded = true;
 }
 
-static int cmp_nbt_tag_ptr_name(const void *a, const void *b) {
-    const mc_nbt_tag_t *ta = *(const mc_nbt_tag_t *const *)a;
-    const mc_nbt_tag_t *tb = *(const mc_nbt_tag_t *const *)b;
-    if (!ta || !tb) return (ta != NULL) - (tb != NULL);
-    if (!ta->name || !tb->name) return (ta->name != NULL) - (tb->name != NULL);
-    return strcmp(ta->name, tb->name);
-}
-
-static char *canonicalize_palette_key(const char *name, const mc_nbt_tag_t *props) {
-    if (!name || !*name) return NULL;
-    if (!props || props->type != MC_NBT_TAG_COMPOUND || props->payload.compound.length <= 0) {
-        return strdup(name);
-    }
-
-    int32_t nprops = props->payload.compound.length;
-    mc_nbt_tag_t **sorted = (mc_nbt_tag_t **)calloc((size_t)nprops, sizeof(*sorted));
-    if (!sorted) return NULL;
-    for (int32_t i = 0; i < nprops; i++) sorted[i] = props->payload.compound.children[i];
-    qsort(sorted, (size_t)nprops, sizeof(*sorted), cmp_nbt_tag_ptr_name);
-
-    size_t cap = strlen(name) + 2;
-    for (int32_t i = 0; i < nprops; i++) {
-        mc_nbt_tag_t *t = sorted[i];
-        if (!t || !t->name || t->type != MC_NBT_TAG_STRING || !t->payload.string_val) continue;
-        cap += strlen(t->name) + 1 + strlen(t->payload.string_val) + 1;
-    }
-
-    char *out = (char *)malloc(cap + 1);
-    if (!out) {
-        free(sorted);
-        return NULL;
-    }
-    size_t pos = 0;
-    size_t name_len = strlen(name);
-    memcpy(out + pos, name, name_len);
-    pos += name_len;
-    out[pos++] = '[';
-
-    bool first = true;
-    for (int32_t i = 0; i < nprops; i++) {
-        mc_nbt_tag_t *t = sorted[i];
-        if (!t || !t->name || t->type != MC_NBT_TAG_STRING || !t->payload.string_val) continue;
-        if (!first) out[pos++] = ',';
-        first = false;
-        size_t kn = strlen(t->name);
-        memcpy(out + pos, t->name, kn);
-        pos += kn;
-        out[pos++] = '=';
-        size_t vn = strlen(t->payload.string_val);
-        memcpy(out + pos, t->payload.string_val, vn);
-        pos += vn;
-    }
-    out[pos++] = ']';
-    out[pos] = '\0';
-    free(sorted);
-    return out;
-}
-
-static const mc_nbt_tag_t *find_sections_tag(const mc_nbt_tag_t *root) {
-    if (!root || root->type != MC_NBT_TAG_COMPOUND) return NULL;
-    const mc_nbt_tag_t *sections = mc_nbt_compound_get(root, "sections");
-    if (sections) return sections;
-    sections = mc_nbt_compound_get(root, "Sections");
-    if (sections) return sections;
-    const mc_nbt_tag_t *lvl = mc_nbt_compound_get(root, "Level");
-    if (!lvl) lvl = mc_nbt_compound_get(root, "level");
-    if (lvl && lvl->type == MC_NBT_TAG_COMPOUND) {
-        sections = mc_nbt_compound_get(lvl, "sections");
-        if (sections) return sections;
-        sections = mc_nbt_compound_get(lvl, "Sections");
-        if (sections) return sections;
-    }
-    return NULL;
-}
-
-static int decode_section_palette_index(const int64_t *longs,
-                                        int32_t longs_len,
-                                        int32_t palette_len,
-                                        int index,
-                                        uint32_t *out_pal_idx,
-                                        bool *out_used_compact) {
-    if (out_pal_idx) *out_pal_idx = 0;
-    if (out_used_compact) *out_used_compact = false;
-    if (!out_pal_idx) return -1;
-    if (palette_len <= 1) {
-        *out_pal_idx = 0;
-        return 0;
-    }
-    if (!longs || longs_len <= 0) return -1;
-    if (index < 0 || index >= 4096) return -1;
-
-    int bits = ceil_log2_u32((uint32_t)palette_len);
-    if (bits < 4) bits = 4;
-
-    size_t expected_compact = mc_packed_compact_long_count(4096, bits);
-    size_t expected_padded = padded_long_count(4096, bits);
-
-    if ((size_t)longs_len == expected_compact) {
-        *out_pal_idx = mc_packed_unpack_compact_u32(longs, longs_len, (size_t)index, bits);
-        if (out_used_compact) *out_used_compact = true;
-        return 0;
-    }
-
-    if ((size_t)longs_len == expected_padded) {
-        int values_per_long = 64 / bits;
-        uint64_t mask = (bits >= 64) ? UINT64_MAX : ((1ULL << bits) - 1ULL);
-        int li = index / values_per_long;
-        int shift = (index % values_per_long) * bits;
-        if (li < 0 || li >= longs_len) return -1;
-        uint64_t word = (uint64_t)longs[li];
-        *out_pal_idx = (uint32_t)((word >> shift) & mask);
-        if (out_used_compact) *out_used_compact = false;
-        return 0;
-    }
-
-    return -1;
-}
-
 static int load_chunk_from_anvil(mc_world_t *w, mc_chunk_t *chunk) {
     if (!w || !chunk) return -1;
     if (!w->world_path || !*w->world_path) return 1;
 
     int32_t region_x = floor_div_i32(chunk->cx, 32);
     int32_t region_z = floor_div_i32(chunk->cz, 32);
-    int32_t local_x = mod_i32(chunk->cx, 32);
-    int32_t local_z = mod_i32(chunk->cz, 32);
-
     char path[1024];
     int n = snprintf(path, sizeof(path), "%s/region/r.%d.%d.mca", w->world_path, region_x, region_z);
     if (n <= 0 || (size_t)n >= sizeof(path)) return -1;
 
-    uint8_t *nbt_buf = NULL;
-    size_t nbt_len = 0;
-    int rc = mc_anvil_read_chunk_nbt(path, local_x, local_z, &nbt_buf, &nbt_len);
-    if (rc == 1) return 1;
-    if (rc != 0) return -1;
+    mc_arena_t temp_arena;
+    if (mc_arena_init(&temp_arena, 2u * 1024u * 1024u) != 0) return -1;
 
-    mc_nbt_tag_t *root = NULL;
-    size_t bytes_read = 0;
-    if (mc_nbt_read_named_root(nbt_buf, nbt_len, &root, &bytes_read) != 0 || !root) {
-        free(nbt_buf);
-        return -1;
-    }
+    int rc = mc_anvil_load_chunk(path, chunk->cx, chunk->cz, chunk, &w->block_entities, &temp_arena);
+    mc_arena_destroy(&temp_arena);
+    if (rc != 0) return rc;
 
-    const mc_nbt_tag_t *sections = find_sections_tag(root);
-    if (!sections || sections->type != MC_NBT_TAG_LIST) {
-        mc_nbt_free(root);
-        free(nbt_buf);
-        chunk->loaded = true;
-        return 0;
-    }
-
-    int32_t base_section_y = MC_WORLD_MIN_Y / 16;
-    int32_t sec_count = sections->payload.list.length;
-    for (int32_t si = 0; si < sec_count; si++) {
-        mc_nbt_tag_t *sec = sections->payload.list.items ? sections->payload.list.items[si] : NULL;
-        if (!sec || sec->type != MC_NBT_TAG_COMPOUND) continue;
-
-        const mc_nbt_tag_t *y_tag = mc_nbt_compound_get(sec, "Y");
-        if (!y_tag) continue;
-        int32_t sec_y = 0;
-        if (y_tag->type == MC_NBT_TAG_BYTE) sec_y = (int32_t)y_tag->payload.byte_val;
-        else if (y_tag->type == MC_NBT_TAG_INT) sec_y = y_tag->payload.int_val;
-        else continue;
-
-        int32_t sec_index = sec_y - base_section_y;
-        if (sec_index < 0 || sec_index >= MC_WORLD_SECTION_COUNT) continue;
-
-        const mc_nbt_tag_t *bs = mc_nbt_compound_get(sec, "block_states");
-        if (!bs) bs = mc_nbt_compound_get(sec, "BlockStates");
-        if (!bs || bs->type != MC_NBT_TAG_COMPOUND) continue;
-
-        const mc_nbt_tag_t *palette = mc_nbt_compound_get(bs, "palette");
-        if (!palette || palette->type != MC_NBT_TAG_LIST) continue;
-        int32_t palette_len = palette->payload.list.length;
-        if (palette_len <= 0) continue;
-
-        int32_t *palette_ids = (int32_t *)calloc((size_t)palette_len, sizeof(*palette_ids));
-        if (!palette_ids) continue;
-
-        for (int32_t pi = 0; pi < palette_len; pi++) {
-            mc_nbt_tag_t *pe = palette->payload.list.items ? palette->payload.list.items[pi] : NULL;
-            if (!pe || pe->type != MC_NBT_TAG_COMPOUND) {
-                palette_ids[pi] = w->ids.air;
-                continue;
-            }
-            const mc_nbt_tag_t *name = mc_nbt_compound_get(pe, "Name");
-            const mc_nbt_tag_t *props = mc_nbt_compound_get(pe, "Properties");
-            if (!name || name->type != MC_NBT_TAG_STRING || !name->payload.string_val) {
-                palette_ids[pi] = w->ids.air;
-                continue;
-            }
-            char *key = canonicalize_palette_key(name->payload.string_val, props);
-            if (!key) {
-                palette_ids[pi] = w->ids.air;
-                continue;
-            }
-            palette_ids[pi] = mc_world_normalize_container_state_id(mc_block_state_id(key, w->ids.air));
-            free(key);
-        }
-
-        const mc_nbt_tag_t *data = mc_nbt_compound_get(bs, "data");
-        const int64_t *longs = NULL;
-        int32_t longs_len = 0;
-        if (data && data->type == MC_NBT_TAG_LONG_ARRAY && data->payload.long_array.length > 0) {
-            longs = data->payload.long_array.data;
-            longs_len = data->payload.long_array.length;
-        }
-
-        if (palette_len == 1) {
-            int32_t sid = palette_ids[0];
-            for (int i = 0; i < 4096; i++) {
-                int ly = i >> 8;
-                int rem = i & 255;
-                int lz = rem >> 4;
-                int lx = rem & 15;
-                int y_index = sec_index * 16 + ly;
-                int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-                chunk->blocks[idx] = sid;
-            }
-            free(palette_ids);
-            continue;
-        }
-
-        int bits = ceil_log2_u32((uint32_t)palette_len);
-        if (bits < 4) bits = 4;
-        size_t expected_compact = mc_packed_compact_long_count(4096, bits);
-        size_t expected_padded = padded_long_count(4096, bits);
-        if (!longs) {
-            log_error("anvil load invalid section: chunk=(%d,%d) secY=%d palette_len=%d missing data", chunk->cx, chunk->cz,
-                      sec_y, palette_len);
-            free(palette_ids);
-            mc_nbt_free(root);
-            free(nbt_buf);
-            return -1;
-        }
-        if ((size_t)longs_len != expected_compact && (size_t)longs_len != expected_padded) {
-            log_error("anvil load invalid section: chunk=(%d,%d) secY=%d palette_len=%d long_count=%d expected_compact=%zu "
-                      "expected_padded=%zu",
-                      chunk->cx, chunk->cz, sec_y, palette_len, longs_len, expected_compact, expected_padded);
-            free(palette_ids);
-            mc_nbt_free(root);
-            free(nbt_buf);
-            return -1;
-        }
-
-        for (int i = 0; i < 4096; i++) {
-            int ly = i >> 8;
-            int rem = i & 255;
-            int lz = rem >> 4;
-            int lx = rem & 15;
-            int y_index = sec_index * 16 + ly;
-            int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-
-            uint32_t pal_idx = 0;
-            bool used_compact = false;
-            if (decode_section_palette_index(longs, longs_len, palette_len, i, &pal_idx, &used_compact) != 0) {
-                log_error("anvil load decode failed: chunk=(%d,%d) secY=%d idx=%d palette_len=%d long_count=%d", chunk->cx,
-                          chunk->cz, sec_y, i, palette_len, longs_len);
-                free(palette_ids);
-                mc_nbt_free(root);
-                free(nbt_buf);
-                return -1;
-            }
-            if ((int32_t)pal_idx < 0 || (int32_t)pal_idx >= palette_len) pal_idx = 0;
-            chunk->blocks[idx] = palette_ids[(int32_t)pal_idx];
-
-            int32_t world_x = chunk->cx * MC_CHUNK_XZ + lx;
-            int32_t world_y = MC_WORLD_MIN_Y + y_index;
-            int32_t world_z = chunk->cz * MC_CHUNK_XZ + lz;
-            if (debug_target_block(w, chunk->cx, chunk->cz, world_x, world_y, world_z)) {
-                int32_t sid = chunk->blocks[idx];
-                log_info("chunk reload debug: load chunk=(%d,%d) secY=%d palette_len=%d pal_idx=%u state_id=%d key=%s mode=%s",
-                         chunk->cx, chunk->cz, sec_y, palette_len, pal_idx, sid,
-                         mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)",
-                         used_compact ? "compact" : "padded");
-            }
-        }
-
-        free(palette_ids);
-    }
-
-    mc_nbt_free(root);
-    free(nbt_buf);
     chunk->loaded = true;
     return 0;
 }
@@ -1017,9 +752,7 @@ static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
         int lx = 0, lz = 0;
         if (coords_to_chunk(w->debug_container_x, w->debug_container_z, &cx, &cz, &lx, &lz) == 0 && cx == chunk->cx && cz == chunk->cz &&
             w->debug_container_y >= MC_WORLD_MIN_Y && w->debug_container_y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
-            int y_index = w->debug_container_y - MC_WORLD_MIN_Y;
-            int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-            int32_t sid = chunk->blocks[idx];
+            int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, w->debug_container_y, lz);
             log_info("containers debug: save chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s", chunk->cx, chunk->cz,
                      w->debug_container_x, w->debug_container_y, w->debug_container_z, sid,
                      mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
@@ -1032,9 +765,7 @@ static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
         int lx = 0, lz = 0;
         if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) == 0 && cx == chunk->cx && cz == chunk->cz &&
             y >= MC_WORLD_MIN_Y && y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
-            int y_index = y - MC_WORLD_MIN_Y;
-            int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-            int32_t sid = chunk->blocks[idx];
+            int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
             log_info("chunk reload debug: save chunk=(%d,%d) path=%s/chunks/c.%d.%d.mcc dirty=%d block=(%d,%d,%d) state_id=%d key=%s",
                      chunk->cx, chunk->cz, w->world_path, chunk->cx, chunk->cz, chunk->dirty ? 1 : 0, x, y, z, sid,
                      mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
@@ -1052,10 +783,7 @@ static void apply_pending_mods(mc_world_t *w, mc_chunk_t *chunk, mc_pending_mods
         if (coords_to_chunk(m.x, m.z, &cx, &cz, &lx, &lz) != 0) continue;
         if (cx != chunk->cx || cz != chunk->cz) continue;
         if (m.y < MC_WORLD_MIN_Y || m.y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) continue;
-        int y_index = m.y - MC_WORLD_MIN_Y;
-        int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-        if (idx < 0 || idx >= (int)MC_BLOCKS_PER_CHUNK) continue;
-        chunk->blocks[idx] = m.state_id;
+        if (mc_chunk_set_block(chunk, lx, m.y, lz, (mc_global_state_id_t)m.state_id) != 0) continue;
         chunk->dirty = true;
         (void)updates_push(w, (mc_block_update_t){m.x, m.y, m.z, m.state_id});
     }
@@ -1079,12 +807,10 @@ static void *worker_main(void *arg) {
 
         mc_chunk_t *chunk = (mc_chunk_t *)calloc(1, sizeof(*chunk));
         if (!chunk) continue;
-        chunk->cx = job.cx;
-        chunk->cz = job.cz;
-        for (size_t i = 0; i < MC_BLOCKS_PER_CHUNK; i++) chunk->blocks[i] = w->ids.air;
-        chunk->loaded = false;
-        chunk->dirty = false;
-        chunk->evict_after_save = false;
+        if (mc_chunk_init(chunk, job.cx, job.cz, (mc_global_state_id_t)w->ids.air) != 0) {
+            free(chunk);
+            continue;
+        }
 
         bool generated = false;
         bool rewrite_store = false;
@@ -1099,9 +825,7 @@ static void *worker_main(void *arg) {
                 if (coords_to_chunk(w->debug_container_x, w->debug_container_z, &cx, &cz, &lx, &lz) == 0 &&
                     cx == job.cx && cz == job.cz &&
                     w->debug_container_y >= MC_WORLD_MIN_Y && w->debug_container_y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
-                    int y_index = w->debug_container_y - MC_WORLD_MIN_Y;
-                    int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-                    int32_t sid = chunk->blocks[idx];
+                    int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, w->debug_container_y, lz);
                     log_info("containers debug: load source=chunkstore chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s normalized=%d",
                              job.cx, job.cz, w->debug_container_x, w->debug_container_y, w->debug_container_z, sid,
                              mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)", normalized ? 1 : 0);
@@ -1148,9 +872,7 @@ static void *worker_main(void *arg) {
                     if (coords_to_chunk(w->debug_container_x, w->debug_container_z, &cx, &cz, &lx, &lz) == 0 &&
                         cx == job.cx && cz == job.cz &&
                         w->debug_container_y >= MC_WORLD_MIN_Y && w->debug_container_y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
-                        int y_index = w->debug_container_y - MC_WORLD_MIN_Y;
-                        int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-                        int32_t sid = chunk->blocks[idx];
+                        int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, w->debug_container_y, lz);
                         log_info("containers debug: load source=anvil chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s normalized=%d",
                                  job.cx, job.cz, w->debug_container_x, w->debug_container_y, w->debug_container_z, sid,
                                  mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)", normalized ? 1 : 0);
@@ -1182,6 +904,7 @@ static void *worker_main(void *arg) {
 
         mc_chunk_done_t *d = (mc_chunk_done_t *)calloc(1, sizeof(*d));
         if (!d) {
+            mc_chunk_destroy(chunk);
             free(chunk);
             continue;
         }
@@ -1240,6 +963,7 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
     w->ids.redstone_block = mc_block_state_id("minecraft:redstone_block", -1);
     w->ids.lamp_lit[0] = mc_block_state_id("minecraft:redstone_lamp[lit=false]", -1);
     w->ids.lamp_lit[1] = mc_block_state_id("minecraft:redstone_lamp[lit=true]", -1);
+    mc_be_store_init(&w->block_entities);
 
     if (chunk_map_init(&w->chunks, 256) != 0) {
         free(w->world_path);
@@ -1312,6 +1036,7 @@ void mc_world_destroy(mc_world_t *w) {
             e->chunk = done->chunk;
             e->state = CHUNK_SLOT_READY;
             if (chunk_list_add(w, done->chunk) != 0) {
+                mc_chunk_destroy(done->chunk);
                 free(done->chunk);
                 e->chunk = NULL;
                 e->state = CHUNK_SLOT_TOMB;
@@ -1323,6 +1048,7 @@ void mc_world_destroy(mc_world_t *w) {
                 e->pending = NULL;
             }
         } else {
+            mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
         free(done);
@@ -1341,6 +1067,7 @@ void mc_world_destroy(mc_world_t *w) {
     free(w->chunk_list);
     free(w->updates);
     free(w->jobs);
+    mc_be_store_destroy(&w->block_entities);
     free(w->world_path);
 
     pthread_mutex_destroy(&w->job_lock);
@@ -1394,9 +1121,7 @@ int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *
         *out_state_id = w->ids.air;
         return 0;
     }
-    int y_index = y - MC_WORLD_MIN_Y;
-    int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-    *out_state_id = chunk->blocks[idx];
+    *out_state_id = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
     return 0;
 }
 
@@ -1413,11 +1138,9 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
     mc_chunk_entry_t *e = chunk_map_get(&w->chunks, key);
     if (e && e->state == CHUNK_SLOT_READY && e->chunk) {
         mc_chunk_t *chunk = e->chunk;
-        int y_index = y - MC_WORLD_MIN_Y;
-        int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-        int32_t old = chunk->blocks[idx];
+        int32_t old = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
         if (old == state_id) return 0;
-        chunk->blocks[idx] = state_id;
+        if (mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)state_id) != 0) return -1;
         chunk->dirty = true;
         if (mc_world_debug_container_match(w, x, y, z) &&
             (mc_world_normalize_container_state_id(old) != old || mc_world_normalize_container_state_id(state_id) == state_id)) {
@@ -1464,9 +1187,7 @@ int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     if (save_chunk_to_store(w, chunk) != 0) return -1;
     chunk->dirty = false;
     if (mc_world_debug_container_match(w, x, y, z)) {
-        int y_index = y - MC_WORLD_MIN_Y;
-        int idx = (y_index * MC_CHUNK_XZ + lz) * MC_CHUNK_XZ + lx;
-        int32_t sid = chunk->blocks[idx];
+        int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
         log_info("containers debug: flush chunk=(%d,%d) block=(%d,%d,%d) state_id=%d key=%s", cx, cz, x, y, z, sid,
                  mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
     }
@@ -1486,6 +1207,7 @@ void mc_world_tick(mc_world_t *w, int64_t now_ms) {
             e->chunk = done->chunk;
             e->state = CHUNK_SLOT_READY;
             if (chunk_list_add(w, done->chunk) != 0) {
+                mc_chunk_destroy(done->chunk);
                 free(done->chunk);
                 e->chunk = NULL;
                 e->state = CHUNK_SLOT_TOMB;
@@ -1497,6 +1219,7 @@ void mc_world_tick(mc_world_t *w, int64_t now_ms) {
                 e->pending = NULL;
             }
         } else {
+            mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
         free(done);

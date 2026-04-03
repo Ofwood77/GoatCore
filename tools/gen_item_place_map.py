@@ -9,6 +9,25 @@ def short_name(full_name: str) -> str:
     return full_name
 
 
+def resolve_default_state(block: dict) -> int:
+    states = block.get("states")
+    min_state = block.get("minStateId")
+    default_state = block.get("defaultState")
+
+    if isinstance(states, list) and states:
+        if min_state is not None:
+            return int(min_state)
+        if default_state is not None:
+            return int(default_state)
+        return -1
+
+    if default_state is not None:
+        return int(default_state)
+    if min_state is not None:
+        return int(min_state)
+    return -1
+
+
 def main():
     if len(sys.argv) != 5:
         print("usage: gen_item_place_map.py minecraft_ids.json blocks.json out.c out.h", file=sys.stderr)
@@ -31,7 +50,7 @@ def main():
         names[item_id] = json.dumps(full_name)
         block = by_name_block.get(short_name(full_name))
         if block is not None:
-            states[item_id] = int(block.get("defaultState", -1))
+            states[item_id] = resolve_default_state(block)
             mapped += 1
 
     with open(out_h, "w", encoding="utf-8") as fh:

@@ -78,7 +78,6 @@ static int send_login_success(mc_conn_t *c) {
     if (w_uuid(buf, sizeof(buf), &pos, c->uuid) != 0) return -1;
     if (w_string(buf, sizeof(buf), &pos, c->username) != 0) return -1;
     if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1; /* properties count */
-    if (w_bool(buf, sizeof(buf), &pos, false) != 0) return -1; /* strict error handling */
 
     if (conn_write_packet(c, MC_PKT_LOGIN_CLIENTBOUND_LOGIN_FINISHED, buf, pos, -1) != 0) return -1;
     c->login_success_sent = true;

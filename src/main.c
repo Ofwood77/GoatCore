@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define SERVER_CONFIG_PATH "server.config"
 #define DEFAULT_LEVEL_SEED 0
@@ -132,6 +133,19 @@ static int load_server_config(const char *path, server_disk_config_t *out) {
     return rc;
 }
 
+static int require_runtime_asset(const char *path, const char *label) {
+    if (!path || !*path) {
+        log_error("missing %s path in server configuration", label ? label : "runtime asset");
+        return -1;
+    }
+    if (access(path, R_OK) != 0) {
+        int e = errno;
+        log_error("required %s missing or unreadable: %s (errno=%d %s)", label ? label : "runtime asset", path, e, strerror(e));
+        return -1;
+    }
+    return 0;
+}
+
 int main(void) {
     const char *ignored = getenv("MC_WORLD_PATH");
     if (ignored && *ignored) {
@@ -155,13 +169,20 @@ int main(void) {
     cfg.compression_threshold = -1;
     cfg.online_mode = false;
     cfg.debug_packets = true;
-    cfg.registry_blob_path = "assets/registry_packets_1_21_1.bin";
-    cfg.chunk_blob_path = "assets/chunk_0_0.bin";
+    cfg.registry_blob_path = "assets/registry_packets_26_1.bin";
+    cfg.tags_blob_path = "assets/tags_packet_26_1.bin";
+    cfg.chunk_blob_path = "assets/chunk_0_0_26_1.bin";
     cfg.block_states_path = "assets/block_states.json";
     cfg.world_path = "world";
     cfg.level_seed = disk_cfg.level_seed;
     cfg.view_distance = disk_cfg.view_distance;
     cfg.simulation_distance = disk_cfg.simulation_distance;
+
+    if (require_runtime_asset(cfg.registry_blob_path, "registry blob") != 0 ||
+        require_runtime_asset(cfg.tags_blob_path, "tags blob") != 0 ||
+        require_runtime_asset(cfg.chunk_blob_path, "spawn chunk blob") != 0) {
+        return 1;
+    }
 
     mc_server_t *srv = NULL;
     if (net_server_init(&srv, &cfg) != 0) {
