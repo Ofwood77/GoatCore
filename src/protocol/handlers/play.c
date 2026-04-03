@@ -758,9 +758,10 @@ int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id) {
     return mc_item_default_place_state(item_id);
 }
 
-int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot) {
-    if (!slot || !slot->present || slot->count <= 0) return -1;
-    return proto_play_item_to_state(ids, slot->item_id);
+int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch) {
+    int32_t state_id = proto_play_slot_to_state(ids, slot);
+    if (state_id < 0) return state_id;
+    return contextualize_placement_state(state_id, face, yaw, pitch);
 }
 
 static int write_slot_item(mc_buf_t *b, const mc_slot_t *slot) {

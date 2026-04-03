@@ -1,0 +1,22 @@
+{
+  "minecraft:air": {
+    "states": [ { "id": 0, "default": true } ]
+  },
+  "minecraft:stone": {
+    "states": [ { "id": 1, "default": true } ]
+  },
+  "minecraft:glass": {
+    "states": [ { "id": 2, "default": true } ]
+  },
+  "minecraft:chest": {
+    "properties": {
+      "facing": [ "north", "south", "west", "east" ]
+    },
+    "states": [
+      { "id": 3, "properties": { "facing": "north" }, "default": true },
+      { "id": 4, "properties": { "facing": "south" } },
+      { "id": 5, "properties": { "facing": "west" } },
+      { "id": 6, "properties": { "facing": "east" } }
+    ]
+  }
+}

@@ -883,10 +883,13 @@ int main(void) {
     int32_t item_dirt = require_item_id("minecraft:dirt");
     int32_t item_chest = require_item_id("minecraft:chest");
     int32_t item_ender_chest = require_item_id("minecraft:ender_chest");
+    int32_t item_furnace = require_item_id("minecraft:furnace");
+    int32_t item_oak_log = require_item_id("minecraft:oak_log");
     int32_t item_redstone_block = require_item_id("minecraft:redstone_block");
     int32_t item_water_bucket = require_item_id("minecraft:water_bucket");
     int32_t item_lava_bucket = require_item_id("minecraft:lava_bucket");
-    if (item_dirt < 0 || item_chest < 0 || item_ender_chest < 0 || item_redstone_block < 0 || item_water_bucket < 0 || item_lava_bucket < 0) {
+    if (item_dirt < 0 || item_chest < 0 || item_ender_chest < 0 || item_furnace < 0 || item_oak_log < 0 ||
+        item_redstone_block < 0 || item_water_bucket < 0 || item_lava_bucket < 0) {
         mc_world_destroy(w);
         return 1;
     }
@@ -903,6 +906,10 @@ int main(void) {
         mc_world_destroy(w);
         return fail("item->state ender chest mapping");
     }
+    if (proto_play_item_to_state(ids, item_oak_log) != mc_block_state_id("minecraft:oak_log[axis=y]", -1)) {
+        mc_world_destroy(w);
+        return fail("item->state oak_log default mapping");
+    }
     if (proto_play_item_to_state(ids, item_redstone_block) != id_redstone0) {
         mc_world_destroy(w);
         return fail("item->state redstone_block mapping");
@@ -915,6 +922,45 @@ int main(void) {
         mc_world_destroy(w);
         return fail("item->state lava_bucket mapping");
     }
+
+    mc_slot_t placement_slot = {0};
+    if (mc_slot_set_simple(&placement_slot, item_chest, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup chest placement slot");
+    }
+    if (proto_play_resolve_placement_state(ids, &placement_slot, 1, 90.0f, 0.0f) !=
+        mc_block_state_id("minecraft:chest[facing=east,type=single,waterlogged=false]", -1)) {
+        mc_world_destroy(w);
+        return fail("placement chest facing player");
+    }
+    mc_slot_clear(&placement_slot);
+
+    if (mc_slot_set_simple(&placement_slot, item_furnace, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup furnace placement slot");
+    }
+    if (proto_play_resolve_placement_state(ids, &placement_slot, 1, 90.0f, 0.0f) !=
+        mc_block_state_id("minecraft:furnace[facing=east,lit=false]", -1)) {
+        mc_world_destroy(w);
+        return fail("placement furnace facing player");
+    }
+    mc_slot_clear(&placement_slot);
+
+    if (mc_slot_set_simple(&placement_slot, item_oak_log, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup oak_log placement slot");
+    }
+    if (proto_play_resolve_placement_state(ids, &placement_slot, 5, 0.0f, 0.0f) !=
+            mc_block_state_id("minecraft:oak_log[axis=x]", -1) ||
+        proto_play_resolve_placement_state(ids, &placement_slot, 1, 0.0f, 0.0f) !=
+            mc_block_state_id("minecraft:oak_log[axis=y]", -1) ||
+        proto_play_resolve_placement_state(ids, &placement_slot, 2, 0.0f, 0.0f) !=
+            mc_block_state_id("minecraft:oak_log[axis=z]", -1)) {
+        mc_world_destroy(w);
+        return fail("placement oak_log natural axis");
+    }
+    mc_slot_clear(&placement_slot);
+
     if (wait_chunk_loaded(w, 0, 0) != 0) {
         mc_world_destroy(w);
         return fail("initial chunk load");
