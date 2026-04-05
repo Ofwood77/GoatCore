@@ -97,6 +97,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
 static int send_chunk_container_repairs(mc_conn_t *c, const mc_chunk_t *chunk);
 static int paletted_word_count_for_network(int entry_count, int bits);
 static int encode_paletted_container_network(mc_buf_t *out, const uint32_t *values, int entry_count, int palette_bits);
+static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face);
 
 static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     size_t n = 0;
@@ -340,6 +341,12 @@ static int save_player_data(mc_conn_t *c) {
     if (!c || !c->player || !world) return 0;
     const char *world_path = mc_world_path(world);
     if (!world_path || !*world_path) return 0;
+    c->player->pos_x = c->x;
+    c->player->pos_y = c->y;
+    c->player->pos_z = c->z;
+    c->player->yaw = c->yaw;
+    c->player->pitch = c->pitch;
+    c->player->gamemode = c->gamemode;
     if (mc_player_store_save(world_path, c->player) != 0) {
         log_error("player save failed: user=%s world=%s", c->player->username, world_path);
         return -1;
@@ -375,7 +382,13 @@ static int ensure_player_loaded(mc_conn_t *c) {
     }
     if (rc == 1) {
         mc_inventory_fill_starter_loadout(&player->inventory);
+        player->pos_x = 0.5;
+        player->pos_y = 80.0;
+        player->pos_z = 0.5;
+        player->yaw = 0.0f;
+        player->pitch = 0.0f;
     }
+    c->gamemode = player->gamemode;
     c->player = player;
     return 0;
 }
@@ -808,10 +821,15 @@ int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id) {
     return mc_item_default_place_state(item_id);
 }
 
+int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot) {
+    if (!slot || !slot->present || slot->count <= 0) return -1;
+    return proto_play_item_to_state(ids, slot->item_id);
+}
+
 int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch) {
-    int32_t state_id = proto_play_slot_to_state(ids, slot);
-    if (state_id < 0) return state_id;
-    return contextualize_placement_state(state_id, face, yaw, pitch);
+    (void)ids;
+    (void)pitch;
+    return mc_resolve_placement_state(slot, yaw, face);
 }
 
 static const char *axis_from_clicked_face(int32_t face) {
@@ -2938,15 +2956,20 @@ int proto_play_send_initial(mc_conn_t *c) {
 
     /* 26.1 default spawn packet carries LevelData.RespawnData:
      * GlobalPos(dimension + block pos) + yaw + pitch. */
+    double spawn_x = (c->player ? c->player->pos_x : 0.5);
+    double spawn_y = (c->player ? c->player->pos_y : 80.0);
+    double spawn_z = (c->player ? c->player->pos_z : 0.5);
+    float spawn_yaw = (c->player ? c->player->yaw : 0.0f);
+    float spawn_pitch = (c->player ? c->player->pitch : 0.0f);
     pos = 0;
     if (w_string(buf, sizeof(buf), &pos, "minecraft:overworld") != 0) return -1;
-    if (w_position(buf, sizeof(buf), &pos, 0, 80, 0) != 0) return -1;
-    if (w_f32(buf, sizeof(buf), &pos, 0.0f) != 0) return -1;
-    if (w_f32(buf, sizeof(buf), &pos, 0.0f) != 0) return -1;
+    if (w_position(buf, sizeof(buf), &pos, floor_i32_from_f64(spawn_x), floor_i32_from_f64(spawn_y), floor_i32_from_f64(spawn_z)) != 0) return -1;
+    if (w_f32(buf, sizeof(buf), &pos, spawn_yaw) != 0) return -1;
+    if (w_f32(buf, sizeof(buf), &pos, spawn_pitch) != 0) return -1;
     if (conn_write_packet(c, PKT_PLAY_SET_DEFAULT_SPAWN, buf, pos, -1) != 0) return -1;
 
     /* Synchronize Player Position */
-    if (send_sync_position(c, 0.5, 80.0, 0.5, 0.0f, 0.0f) != 0) return -1;
+    if (send_sync_position(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch) != 0) return -1;
 
     if (send_player_abilities(c) != 0) return -1;
     if (sync_inventory_full(c) != 0) return -1;

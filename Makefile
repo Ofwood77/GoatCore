@@ -126,7 +126,10 @@ test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers
 test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+test_player_nbt: tests/test_player_nbt.c src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -f mc_server mc_recorder mc_anvil_dump mc_gen_bench test_varint test_nbt test_nbt_arena test_block_registry test_block_entity_store test_paletted_container test_chunk_network_codec test_anvil_roundtrip $(OBJ) $(OBJ:.o=.d) src/world/block_registry.c src/world/block_registry.h
+	rm -f mc_server mc_recorder mc_anvil_dump mc_gen_bench test_varint test_nbt test_nbt_arena test_block_registry test_block_entity_store test_paletted_container test_chunk_network_codec test_anvil_roundtrip test_player_nbt $(OBJ) $(OBJ:.o=.d) src/world/block_registry.c src/world/block_registry.h
 
 -include $(OBJ:.o=.d)

@@ -68,6 +68,11 @@ typedef struct mc_player_data {
     bool has_uuid;
     char username[17];
     int32_t gamemode;
+    double pos_x;
+    double pos_y;
+    double pos_z;
+    float yaw;
+    float pitch;
     mc_inventory_t inventory;
     mc_slot_t ender_chest[MC_CONTAINER_SLOT_COUNT];
     int32_t ender_state_id;

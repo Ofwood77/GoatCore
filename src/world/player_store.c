@@ -1,21 +1,23 @@
 #include "mc_player_store.h"
 
+#include "generated_minecraft_ids.h"
+#include "mc_nbt.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <zlib.h>
-
-#define MCP_MAGIC "MCP1"
-#define MCP_VERSION 2U
 
 typedef struct {
     uint8_t *data;
     size_t len;
     size_t cap;
-} mcp_buf_t;
+} byte_buf_t;
 
-static void mcp_buf_free(mcp_buf_t *b) {
+static void byte_buf_free(byte_buf_t *b) {
     if (!b) return;
     free(b->data);
     b->data = NULL;
@@ -23,65 +25,55 @@ static void mcp_buf_free(mcp_buf_t *b) {
     b->cap = 0;
 }
 
-static int mcp_buf_reserve(mcp_buf_t *b, size_t need) {
+static int byte_buf_reserve(byte_buf_t *b, size_t need) {
+    size_t new_cap;
+    uint8_t *next;
+
     if (!b) return -1;
     if (need <= b->cap) return 0;
-    size_t cap = b->cap ? b->cap * 2 : 256;
-    while (cap < need) cap *= 2;
-    uint8_t *next = (uint8_t *)realloc(b->data, cap);
+    new_cap = b->cap ? b->cap : 4096;
+    while (new_cap < need) {
+        if (new_cap > SIZE_MAX / 2) return -1;
+        new_cap *= 2;
+    }
+    next = (uint8_t *)realloc(b->data, new_cap);
     if (!next) return -1;
     b->data = next;
-    b->cap = cap;
+    b->cap = new_cap;
     return 0;
 }
 
-static int mcp_buf_write(mcp_buf_t *b, const void *src, size_t n) {
-    if (!b || !src) return -1;
-    if (mcp_buf_reserve(b, b->len + n) != 0) return -1;
-    memcpy(b->data + b->len, src, n);
+static int byte_buf_append(byte_buf_t *b, const void *src, size_t n) {
+    if (!b || (!src && n != 0)) return -1;
+    if (byte_buf_reserve(b, b->len + n) != 0) return -1;
+    if (n > 0) memcpy(b->data + b->len, src, n);
     b->len += n;
     return 0;
 }
 
-static int write_u8(mcp_buf_t *b, uint8_t v) { return mcp_buf_write(b, &v, 1); }
+static int mkdir_p_local(const char *path, mode_t mode) {
+    char tmp[1024];
+    size_t n;
 
-static int write_u32_le(mcp_buf_t *b, uint32_t v) {
-    uint8_t tmp[4] = {
-        (uint8_t)(v & 0xFF),
-        (uint8_t)((v >> 8) & 0xFF),
-        (uint8_t)((v >> 16) & 0xFF),
-        (uint8_t)((v >> 24) & 0xFF),
-    };
-    return mcp_buf_write(b, tmp, sizeof(tmp));
-}
+    if (!path || !*path) return -1;
+    n = strlen(path);
+    if (n >= sizeof(tmp)) return -1;
+    memcpy(tmp, path, n + 1);
 
-static int write_i32_le(mcp_buf_t *b, int32_t v) { return write_u32_le(b, (uint32_t)v); }
-
-static int read_u8(const uint8_t *buf, size_t len, size_t *pos, uint8_t *out) {
-    if (!buf || !pos || !out || *pos + 1 > len) return -1;
-    *out = buf[(*pos)++];
-    return 0;
-}
-
-static int read_u32_le(const uint8_t *buf, size_t len, size_t *pos, uint32_t *out) {
-    if (!buf || !pos || !out || *pos + 4 > len) return -1;
-    uint32_t v = (uint32_t)buf[*pos] | ((uint32_t)buf[*pos + 1] << 8) | ((uint32_t)buf[*pos + 2] << 16) |
-                 ((uint32_t)buf[*pos + 3] << 24);
-    *pos += 4;
-    *out = v;
-    return 0;
-}
-
-static int read_i32_le(const uint8_t *buf, size_t len, size_t *pos, int32_t *out) {
-    uint32_t u = 0;
-    if (read_u32_le(buf, len, pos, &u) != 0) return -1;
-    *out = (int32_t)u;
+    for (size_t i = 1; i < n; i++) {
+        if (tmp[i] != '/') continue;
+        tmp[i] = '\0';
+        if (tmp[0] != '\0' && mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
+        tmp[i] = '/';
+    }
+    if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
     return 0;
 }
 
 static void sanitize_username(const char *src, char *dst, size_t cap) {
-    if (!dst || cap == 0) return;
     size_t pos = 0;
+
+    if (!dst || cap == 0) return;
     if (src) {
         for (size_t i = 0; src[i] && pos + 1 < cap; i++) {
             char ch = src[i];
@@ -92,213 +84,465 @@ static void sanitize_username(const char *src, char *dst, size_t cap) {
             }
         }
     }
-    if (pos == 0 && cap > 1) {
-        dst[pos++] = 'p';
-    }
+    if (pos == 0 && cap > 1) dst[pos++] = 'p';
     dst[pos] = '\0';
 }
 
-static int player_path(char *buf, size_t cap, const char *world_path, const mc_player_data_t *player) {
-    if (!buf || !world_path || !*world_path || !player) return -1;
-    char name[128];
-    if (player->has_uuid) {
-        snprintf(name, sizeof(name),
-                 "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-                 player->uuid[0], player->uuid[1], player->uuid[2], player->uuid[3], player->uuid[4], player->uuid[5],
-                 player->uuid[6], player->uuid[7], player->uuid[8], player->uuid[9], player->uuid[10], player->uuid[11],
-                 player->uuid[12], player->uuid[13], player->uuid[14], player->uuid[15]);
-    } else {
-        sanitize_username(player->username, name, sizeof(name));
-    }
-    int n = snprintf(buf, cap, "%s/players/%s.mcp", world_path, name);
+static int playerdata_dir_path(char *buf, size_t cap, const char *world_path) {
+    int n;
+    if (!buf || !world_path || !*world_path) return -1;
+    n = snprintf(buf, cap, "%s/playerdata", world_path);
     if (n <= 0 || (size_t)n >= cap) return -1;
     return 0;
 }
 
-static int write_slot(mcp_buf_t *b, const mc_slot_t *slot) {
-    if (write_u8(b, (slot && slot->present) ? 1U : 0U) != 0) return -1;
-    if (!slot || !slot->present) return 0;
-    if (write_i32_le(b, slot->item_id) != 0 || write_i32_le(b, slot->count) != 0 || write_i32_le(b, slot->damage) != 0 ||
-        write_i32_le(b, slot->added_component_count) != 0 || write_i32_le(b, slot->removed_component_count) != 0 ||
-        write_u32_le(b, (uint32_t)slot->components_len) != 0) {
-        return -1;
+static int player_dat_path(char *buf, size_t cap, const char *world_path, const mc_player_data_t *player) {
+    char id_buf[128];
+    int n;
+
+    if (!buf || !world_path || !*world_path || !player) return -1;
+    if (player->has_uuid) {
+        n = snprintf(id_buf, sizeof(id_buf),
+                     "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                     player->uuid[0], player->uuid[1], player->uuid[2], player->uuid[3], player->uuid[4], player->uuid[5],
+                     player->uuid[6], player->uuid[7], player->uuid[8], player->uuid[9], player->uuid[10], player->uuid[11],
+                     player->uuid[12], player->uuid[13], player->uuid[14], player->uuid[15]);
+        if (n <= 0 || (size_t)n >= sizeof(id_buf)) return -1;
+    } else {
+        sanitize_username(player->username, id_buf, sizeof(id_buf));
     }
-    if (slot->components_len > 0 && mcp_buf_write(b, slot->components, slot->components_len) != 0) return -1;
+
+    n = snprintf(buf, cap, "%s/playerdata/%s.dat", world_path, id_buf);
+    if (n <= 0 || (size_t)n >= cap) return -1;
     return 0;
 }
 
-static int read_slot(const uint8_t *buf, size_t len, size_t *pos, mc_slot_t *slot) {
-    uint8_t present = 0;
-    if (read_u8(buf, len, pos, &present) != 0) return -1;
-    mc_slot_clear(slot);
-    if (!present) return 0;
+static int gzip_write_file(const char *path, const uint8_t *data, size_t len) {
+    gzFile gz;
+    size_t pos = 0;
 
-    uint32_t comp_len = 0;
-    if (read_i32_le(buf, len, pos, &slot->item_id) != 0 || read_i32_le(buf, len, pos, &slot->count) != 0 ||
-        read_i32_le(buf, len, pos, &slot->damage) != 0 || read_i32_le(buf, len, pos, &slot->added_component_count) != 0 ||
-        read_i32_le(buf, len, pos, &slot->removed_component_count) != 0 || read_u32_le(buf, len, pos, &comp_len) != 0) {
+    if (!path || !data) return -1;
+    gz = gzopen(path, "wb");
+    if (!gz) return -1;
+    while (pos < len) {
+        unsigned chunk = (unsigned)((len - pos) > 1u << 20 ? (1u << 20) : (len - pos));
+        int written = gzwrite(gz, data + pos, chunk);
+        if (written <= 0 || (unsigned)written != chunk) {
+            gzclose(gz);
+            return -1;
+        }
+        pos += (size_t)written;
+    }
+    return gzclose(gz) == Z_OK ? 0 : -1;
+}
+
+static int gzip_read_file(const char *path, uint8_t **out, size_t *out_len) {
+    gzFile gz;
+    byte_buf_t buf = {0};
+
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!path || !out || !out_len) return -1;
+
+    gz = gzopen(path, "rb");
+    if (!gz) return -1;
+
+    for (;;) {
+        uint8_t tmp[4096];
+        int n = gzread(gz, tmp, (unsigned)sizeof(tmp));
+        if (n < 0) {
+            byte_buf_free(&buf);
+            gzclose(gz);
+            return -1;
+        }
+        if (n == 0) break;
+        if (byte_buf_append(&buf, tmp, (size_t)n) != 0) {
+            byte_buf_free(&buf);
+            gzclose(gz);
+            return -1;
+        }
+    }
+
+    if (gzclose(gz) != Z_OK) {
+        byte_buf_free(&buf);
         return -1;
     }
-    if (*pos + comp_len > len) return -1;
-    if (comp_len > 0) {
-        slot->components = (uint8_t *)malloc(comp_len);
-        if (!slot->components) return -1;
-        memcpy(slot->components, buf + *pos, comp_len);
-        slot->components_len = comp_len;
-    }
-    *pos += comp_len;
-    slot->present = true;
+
+    *out = buf.data;
+    *out_len = buf.len;
     return 0;
 }
 
-int mc_player_store_save(const char *world_path, const mc_player_data_t *player) {
-    if (!world_path || !*world_path || !player) return -1;
-    char path[1024];
-    if (player_path(path, sizeof(path), world_path, player) != 0) return -1;
+static mc_nbt_tag_t *nbt_new(mc_nbt_type_t type, const char *name) {
+    mc_nbt_tag_t *tag = (mc_nbt_tag_t *)calloc(1, sizeof(*tag));
+    if (!tag) return NULL;
+    tag->type = type;
+    if (name) {
+        tag->name = strdup(name);
+        if (!tag->name) {
+            free(tag);
+            return NULL;
+        }
+    }
+    return tag;
+}
 
-    mcp_buf_t payload = {0};
-    if (write_u8(&payload, player->has_uuid ? 1U : 0U) != 0) goto fail;
-    if (mcp_buf_write(&payload, player->uuid, sizeof(player->uuid)) != 0) goto fail;
-    uint8_t name_len = (uint8_t)strnlen(player->username, sizeof(player->username) - 1);
-    if (write_u8(&payload, name_len) != 0) goto fail;
-    if (name_len > 0 && mcp_buf_write(&payload, player->username, name_len) != 0) goto fail;
-    if (write_i32_le(&payload, player->gamemode) != 0 ||
-        write_i32_le(&payload, player->inventory.selected_hotbar_slot) != 0 ||
-        write_i32_le(&payload, player->inventory.state_id) != 0) {
+static mc_nbt_tag_t *nbt_new_byte(const char *name, int8_t value) {
+    mc_nbt_tag_t *tag = nbt_new(MC_NBT_TAG_BYTE, name);
+    if (tag) tag->payload.byte_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_int(const char *name, int32_t value) {
+    mc_nbt_tag_t *tag = nbt_new(MC_NBT_TAG_INT, name);
+    if (tag) tag->payload.int_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_float(const char *name, float value) {
+    mc_nbt_tag_t *tag = nbt_new(MC_NBT_TAG_FLOAT, name);
+    if (tag) tag->payload.float_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_double(const char *name, double value) {
+    mc_nbt_tag_t *tag = nbt_new(MC_NBT_TAG_DOUBLE, name);
+    if (tag) tag->payload.double_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_string(const char *name, const char *value) {
+    mc_nbt_tag_t *tag = nbt_new(MC_NBT_TAG_STRING, name);
+    if (!tag) return NULL;
+    tag->payload.string_val = strdup(value ? value : "");
+    if (!tag->payload.string_val) {
+        mc_nbt_free(tag);
+        return NULL;
+    }
+    return tag;
+}
+
+static int compound_add(mc_nbt_tag_t *compound, mc_nbt_tag_t *child) {
+    mc_nbt_tag_t **next;
+    int32_t len;
+
+    if (!compound || compound->type != MC_NBT_TAG_COMPOUND || !child) return -1;
+    len = compound->payload.compound.length;
+    next = (mc_nbt_tag_t **)realloc(compound->payload.compound.children, (size_t)(len + 1) * sizeof(*next));
+    if (!next) return -1;
+    compound->payload.compound.children = next;
+    compound->payload.compound.children[len] = child;
+    compound->payload.compound.length = len + 1;
+    return 0;
+}
+
+static int list_add(mc_nbt_tag_t *list, mc_nbt_tag_t *item) {
+    mc_nbt_tag_t **next;
+    int32_t len;
+
+    if (!list || list->type != MC_NBT_TAG_LIST || !item) return -1;
+    if (list->payload.list.length == 0) {
+        list->payload.list.elem_type = item->type;
+    } else if (list->payload.list.elem_type != item->type) {
+        return -1;
+    }
+    len = list->payload.list.length;
+    next = (mc_nbt_tag_t **)realloc(list->payload.list.items, (size_t)(len + 1) * sizeof(*next));
+    if (!next) return -1;
+    list->payload.list.items = next;
+    list->payload.list.items[len] = item;
+    list->payload.list.length = len + 1;
+    return 0;
+}
+
+static int nbt_num_to_i32(const mc_nbt_tag_t *tag, int32_t *out) {
+    if (!tag || !out) return -1;
+    switch (tag->type) {
+        case MC_NBT_TAG_BYTE:
+            *out = (int32_t)tag->payload.byte_val;
+            return 0;
+        case MC_NBT_TAG_SHORT:
+            *out = (int32_t)tag->payload.short_val;
+            return 0;
+        case MC_NBT_TAG_INT:
+            *out = tag->payload.int_val;
+            return 0;
+        default:
+            return -1;
+    }
+}
+
+static int nbt_num_to_f32(const mc_nbt_tag_t *tag, float *out) {
+    if (!tag || !out) return -1;
+    switch (tag->type) {
+        case MC_NBT_TAG_FLOAT:
+            *out = tag->payload.float_val;
+            return 0;
+        case MC_NBT_TAG_DOUBLE:
+            *out = (float)tag->payload.double_val;
+            return 0;
+        default:
+            return -1;
+    }
+}
+
+static int nbt_num_to_f64(const mc_nbt_tag_t *tag, double *out) {
+    if (!tag || !out) return -1;
+    switch (tag->type) {
+        case MC_NBT_TAG_DOUBLE:
+            *out = tag->payload.double_val;
+            return 0;
+        case MC_NBT_TAG_FLOAT:
+            *out = (double)tag->payload.float_val;
+            return 0;
+        default:
+            return -1;
+    }
+}
+
+static mc_nbt_tag_t *make_slot_compound(int32_t slot_index, const mc_slot_t *slot) {
+    const char *item_name;
+    mc_nbt_tag_t *entry = NULL;
+
+    if (!slot || !slot->present || slot->count <= 0 || slot->item_id <= 0) return NULL;
+    item_name = mc_minecraft_item_name(slot->item_id);
+    if (!item_name || !*item_name) return NULL;
+
+    entry = nbt_new(MC_NBT_TAG_COMPOUND, NULL);
+    if (!entry) return NULL;
+    if (compound_add(entry, nbt_new_byte("Slot", (int8_t)slot_index)) != 0 ||
+        compound_add(entry, nbt_new_string("id", item_name)) != 0 ||
+        compound_add(entry, nbt_new_byte("Count", (int8_t)slot->count)) != 0) {
+        mc_nbt_free(entry);
+        return NULL;
+    }
+    return entry;
+}
+
+static int build_inventory_list(mc_nbt_tag_t *list, const mc_slot_t *slots, int slot_count) {
+    if (!list || list->type != MC_NBT_TAG_LIST || !slots || slot_count < 0) return -1;
+    list->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    for (int i = 0; i < slot_count; i++) {
+        mc_nbt_tag_t *entry = make_slot_compound(i, &slots[i]);
+        if (!entry) continue;
+        if (list_add(list, entry) != 0) {
+            mc_nbt_free(entry);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int parse_inventory_list(const mc_nbt_tag_t *list, mc_slot_t *slots, int slot_count) {
+    if (!list || !slots || slot_count < 0) return -1;
+    if (list->type != MC_NBT_TAG_LIST || list->payload.list.elem_type != MC_NBT_TAG_COMPOUND) return -1;
+
+    for (int32_t i = 0; i < list->payload.list.length; i++) {
+        const mc_nbt_tag_t *entry = list->payload.list.items ? list->payload.list.items[i] : NULL;
+        const mc_nbt_tag_t *slot_tag;
+        const mc_nbt_tag_t *id_tag;
+        const mc_nbt_tag_t *count_tag;
+        int32_t slot_index = -1;
+        int32_t count = 0;
+        int32_t item_id = -1;
+
+        if (!entry || entry->type != MC_NBT_TAG_COMPOUND) continue;
+        slot_tag = mc_nbt_compound_get(entry, "Slot");
+        id_tag = mc_nbt_compound_get(entry, "id");
+        count_tag = mc_nbt_compound_get(entry, "Count");
+        if (!count_tag) count_tag = mc_nbt_compound_get(entry, "count");
+        if (nbt_num_to_i32(slot_tag, &slot_index) != 0 || slot_index < 0 || slot_index >= slot_count) continue;
+        if (!id_tag || id_tag->type != MC_NBT_TAG_STRING) continue;
+        if (nbt_num_to_i32(count_tag, &count) != 0 || count <= 0) continue;
+        item_id = mc_minecraft_item_id(id_tag->payload.string_val);
+        if (item_id <= 0) continue;
+        (void)mc_slot_set_simple(&slots[slot_index], item_id, count);
+    }
+
+    return 0;
+}
+
+static int player_build_nbt(const mc_player_data_t *player, mc_nbt_tag_t **out_root) {
+    mc_nbt_tag_t *root = NULL;
+    mc_nbt_tag_t *pos = NULL;
+    mc_nbt_tag_t *rot = NULL;
+    mc_nbt_tag_t *inv = NULL;
+    mc_nbt_tag_t *ender = NULL;
+
+    if (out_root) *out_root = NULL;
+    if (!player || !out_root) return -1;
+
+    root = nbt_new(MC_NBT_TAG_COMPOUND, "");
+    pos = nbt_new(MC_NBT_TAG_LIST, "Pos");
+    rot = nbt_new(MC_NBT_TAG_LIST, "Rotation");
+    inv = nbt_new(MC_NBT_TAG_LIST, "Inventory");
+    ender = nbt_new(MC_NBT_TAG_LIST, "EnderItems");
+    if (!root || !pos || !rot || !inv || !ender) goto fail;
+
+    pos->payload.list.elem_type = MC_NBT_TAG_DOUBLE;
+    rot->payload.list.elem_type = MC_NBT_TAG_FLOAT;
+    inv->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    ender->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+
+    if (list_add(pos, nbt_new_double(NULL, player->pos_x)) != 0 ||
+        list_add(pos, nbt_new_double(NULL, player->pos_y)) != 0 ||
+        list_add(pos, nbt_new_double(NULL, player->pos_z)) != 0 ||
+        list_add(rot, nbt_new_float(NULL, player->yaw)) != 0 ||
+        list_add(rot, nbt_new_float(NULL, player->pitch)) != 0 ||
+        build_inventory_list(inv, player->inventory.slots, MC_PLAYER_SLOT_COUNT) != 0 ||
+        build_inventory_list(ender, player->ender_chest, MC_CONTAINER_SLOT_COUNT) != 0) {
         goto fail;
     }
-    for (size_t i = 0; i < MC_PLAYER_SLOT_COUNT; i++) {
-        if (write_slot(&payload, &player->inventory.slots[i]) != 0) goto fail;
-    }
-    if (write_slot(&payload, &player->inventory.cursor_slot) != 0) goto fail;
-    if (write_i32_le(&payload, player->ender_state_id) != 0) goto fail;
-    for (size_t i = 0; i < MC_CONTAINER_SLOT_COUNT; i++) {
-        if (write_slot(&payload, &player->ender_chest[i]) != 0) goto fail;
+
+    if (compound_add(root, pos) != 0 ||
+        compound_add(root, rot) != 0 ||
+        compound_add(root, inv) != 0 ||
+        compound_add(root, ender) != 0 ||
+        compound_add(root, nbt_new_int("playerGameType", player->gamemode)) != 0 ||
+        compound_add(root, nbt_new_int("SelectedItemSlot", player->inventory.selected_hotbar_slot)) != 0) {
+        goto fail;
     }
 
-    uint32_t crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, payload.data, payload.len);
-
-    FILE *fp = fopen(path, "wb");
-    if (!fp) goto fail;
-    if (fwrite(MCP_MAGIC, 1, 4, fp) != 4) goto io_fail;
-    uint8_t header[12] = {
-        (uint8_t)(MCP_VERSION & 0xFF), (uint8_t)((MCP_VERSION >> 8) & 0xFF), (uint8_t)((MCP_VERSION >> 16) & 0xFF),
-        (uint8_t)((MCP_VERSION >> 24) & 0xFF), (uint8_t)(payload.len & 0xFF), (uint8_t)((payload.len >> 8) & 0xFF),
-        (uint8_t)((payload.len >> 16) & 0xFF), (uint8_t)((payload.len >> 24) & 0xFF), (uint8_t)(crc & 0xFF),
-        (uint8_t)((crc >> 8) & 0xFF), (uint8_t)((crc >> 16) & 0xFF), (uint8_t)((crc >> 24) & 0xFF),
-    };
-    if (fwrite(header, 1, sizeof(header), fp) != sizeof(header)) goto io_fail;
-    if (payload.len > 0 && fwrite(payload.data, 1, payload.len, fp) != payload.len) goto io_fail;
-    fclose(fp);
-    mcp_buf_free(&payload);
+    pos = NULL;
+    rot = NULL;
+    inv = NULL;
+    ender = NULL;
+    *out_root = root;
     return 0;
 
-io_fail:
-    fclose(fp);
 fail:
-    mcp_buf_free(&payload);
+    mc_nbt_free(pos);
+    mc_nbt_free(rot);
+    mc_nbt_free(inv);
+    mc_nbt_free(ender);
+    mc_nbt_free(root);
     return -1;
 }
 
+static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
+    const mc_nbt_tag_t *pos;
+    const mc_nbt_tag_t *rot;
+    const mc_nbt_tag_t *gamemode;
+    const mc_nbt_tag_t *selected;
+    const mc_nbt_tag_t *inv;
+    const mc_nbt_tag_t *ender;
+    double px = 0.5;
+    double py = 80.0;
+    double pz = 0.5;
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+
+    if (!root || !out || root->type != MC_NBT_TAG_COMPOUND) return -1;
+
+    pos = mc_nbt_compound_get(root, "Pos");
+    if (pos && pos->type == MC_NBT_TAG_LIST && pos->payload.list.length >= 3) {
+        (void)nbt_num_to_f64(pos->payload.list.items[0], &px);
+        (void)nbt_num_to_f64(pos->payload.list.items[1], &py);
+        (void)nbt_num_to_f64(pos->payload.list.items[2], &pz);
+    }
+
+    rot = mc_nbt_compound_get(root, "Rotation");
+    if (rot && rot->type == MC_NBT_TAG_LIST && rot->payload.list.length >= 2) {
+        (void)nbt_num_to_f32(rot->payload.list.items[0], &yaw);
+        (void)nbt_num_to_f32(rot->payload.list.items[1], &pitch);
+    }
+
+    out->pos_x = px;
+    out->pos_y = py;
+    out->pos_z = pz;
+    out->yaw = yaw;
+    out->pitch = pitch;
+
+    gamemode = mc_nbt_compound_get(root, "playerGameType");
+    if (gamemode) (void)nbt_num_to_i32(gamemode, &out->gamemode);
+
+    selected = mc_nbt_compound_get(root, "SelectedItemSlot");
+    if (selected) (void)nbt_num_to_i32(selected, &out->inventory.selected_hotbar_slot);
+
+    inv = mc_nbt_compound_get(root, "Inventory");
+    if (inv) (void)parse_inventory_list(inv, out->inventory.slots, MC_PLAYER_SLOT_COUNT);
+
+    ender = mc_nbt_compound_get(root, "EnderItems");
+    if (ender) (void)parse_inventory_list(ender, out->ender_chest, MC_CONTAINER_SLOT_COUNT);
+
+    return 0;
+}
+
+int mc_player_store_save_to_file(const char *world_path, const mc_player_data_t *player) {
+    char dir_path[1024];
+    char file_path[1024];
+    mc_nbt_tag_t *root = NULL;
+    uint8_t *raw = NULL;
+    size_t raw_len = 0;
+    int rc = -1;
+
+    if (!world_path || !*world_path || !player) return -1;
+    if (playerdata_dir_path(dir_path, sizeof(dir_path), world_path) != 0) return -1;
+    if (player_dat_path(file_path, sizeof(file_path), world_path, player) != 0) return -1;
+    if (mkdir_p_local(dir_path, 0755) != 0) return -1;
+
+    if (player_build_nbt(player, &root) != 0) goto cleanup;
+    if (mc_nbt_write_named_root(root, &raw, &raw_len) != 0) goto cleanup;
+    if (gzip_write_file(file_path, raw, raw_len) != 0) goto cleanup;
+    rc = 0;
+
+cleanup:
+    free(raw);
+    mc_nbt_free(root);
+    return rc;
+}
+
+int mc_player_store_save(const char *world_path, const mc_player_data_t *player) {
+    return mc_player_store_save_to_file(world_path, player);
+}
+
 int mc_player_store_load(const char *world_path, const uint8_t uuid[16], bool has_uuid, const char *username, mc_player_data_t *out) {
-    if (!world_path || !*world_path || !out) return 1;
     mc_player_data_t key = {0};
+    char file_path[1024];
+    uint8_t *raw = NULL;
+    size_t raw_len = 0;
+    mc_nbt_tag_t *root = NULL;
+    mc_player_data_t tmp;
+    int rc = 1;
+
+    if (!world_path || !*world_path || !out) return 1;
+
     key.has_uuid = has_uuid;
     if (uuid) memcpy(key.uuid, uuid, sizeof(key.uuid));
     if (username) snprintf(key.username, sizeof(key.username), "%s", username);
+    if (player_dat_path(file_path, sizeof(file_path), world_path, &key) != 0) return -1;
+    if (access(file_path, R_OK) != 0) return (errno == ENOENT) ? 1 : -1;
 
-    char path[1024];
-    if (player_path(path, sizeof(path), world_path, &key) != 0) return -1;
-
-    FILE *fp = fopen(path, "rb");
-    if (!fp) return (errno == ENOENT) ? 1 : -1;
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return -1;
-    }
-    long fsize = ftell(fp);
-    if (fsize < 16) {
-        fclose(fp);
-        return -1;
-    }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return -1;
-    }
-    uint8_t *file_data = (uint8_t *)malloc((size_t)fsize);
-    if (!file_data) {
-        fclose(fp);
-        return -1;
-    }
-    if (fread(file_data, 1, (size_t)fsize, fp) != (size_t)fsize) {
-        free(file_data);
-        fclose(fp);
-        return -1;
-    }
-    fclose(fp);
-
-    if (memcmp(file_data, MCP_MAGIC, 4) != 0) {
-        free(file_data);
-        return -1;
-    }
-    size_t pos = 4;
-    uint32_t version = 0, payload_len = 0, stored_crc = 0;
-    if (read_u32_le(file_data, (size_t)fsize, &pos, &version) != 0 || read_u32_le(file_data, (size_t)fsize, &pos, &payload_len) != 0 ||
-        read_u32_le(file_data, (size_t)fsize, &pos, &stored_crc) != 0) {
-        free(file_data);
-        return -1;
-    }
-    if ((version != 1U && version != MCP_VERSION) || pos + payload_len != (size_t)fsize) {
-        free(file_data);
-        return -1;
-    }
-    uint32_t crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, file_data + pos, payload_len);
-    if (crc != stored_crc) {
-        free(file_data);
+    if (gzip_read_file(file_path, &raw, &raw_len) != 0) return -1;
+    if (mc_nbt_read_named_root(raw, raw_len, &root, NULL) != 0) {
+        free(raw);
         return -1;
     }
 
-    mc_player_data_t tmp;
     mc_player_data_init(&tmp);
-    uint8_t has_uuid_u8 = 0;
-    uint8_t name_len = 0;
-    if (read_u8(file_data, (size_t)fsize, &pos, &has_uuid_u8) != 0) goto fail;
-    tmp.has_uuid = has_uuid_u8 ? true : false;
-    if (pos + sizeof(tmp.uuid) > (size_t)fsize) goto fail;
-    memcpy(tmp.uuid, file_data + pos, sizeof(tmp.uuid));
-    pos += sizeof(tmp.uuid);
-    if (read_u8(file_data, (size_t)fsize, &pos, &name_len) != 0) goto fail;
-    if (pos + name_len > (size_t)fsize || name_len >= sizeof(tmp.username)) goto fail;
-    if (name_len > 0) memcpy(tmp.username, file_data + pos, name_len);
-    tmp.username[name_len] = '\0';
-    pos += name_len;
-    if (read_i32_le(file_data, (size_t)fsize, &pos, &tmp.gamemode) != 0 ||
-        read_i32_le(file_data, (size_t)fsize, &pos, &tmp.inventory.selected_hotbar_slot) != 0 ||
-        read_i32_le(file_data, (size_t)fsize, &pos, &tmp.inventory.state_id) != 0) {
-        goto fail;
-    }
-    for (size_t i = 0; i < MC_PLAYER_SLOT_COUNT; i++) {
-        if (read_slot(file_data, (size_t)fsize, &pos, &tmp.inventory.slots[i]) != 0) goto fail;
-    }
-    if (read_slot(file_data, (size_t)fsize, &pos, &tmp.inventory.cursor_slot) != 0) goto fail;
-    if (version >= 2U) {
-        if (read_i32_le(file_data, (size_t)fsize, &pos, &tmp.ender_state_id) != 0) goto fail;
-        for (size_t i = 0; i < MC_CONTAINER_SLOT_COUNT; i++) {
-            if (read_slot(file_data, (size_t)fsize, &pos, &tmp.ender_chest[i]) != 0) goto fail;
-        }
-    } else {
-        tmp.ender_state_id = 1;
+    tmp.has_uuid = has_uuid;
+    if (uuid) memcpy(tmp.uuid, uuid, sizeof(tmp.uuid));
+    if (username) snprintf(tmp.username, sizeof(tmp.username), "%s", username);
+    tmp.gamemode = 1;
+    tmp.pos_x = 0.5;
+    tmp.pos_y = 80.0;
+    tmp.pos_z = 0.5;
+    tmp.yaw = 0.0f;
+    tmp.pitch = 0.0f;
+    tmp.ender_state_id = 1;
+
+    if (player_parse_nbt(root, &tmp) != 0) {
+        mc_player_data_clear(&tmp);
+        mc_nbt_free(root);
+        free(raw);
+        return -1;
     }
 
     mc_player_data_clear(out);
     *out = tmp;
-    free(file_data);
-    return 0;
+    rc = 0;
 
-fail:
-    mc_player_data_clear(&tmp);
-    free(file_data);
-    return -1;
+    mc_nbt_free(root);
+    free(raw);
+    return rc;
 }
