@@ -1,36 +1,47 @@
 #include "mc_chunk_store.h"
 
-#include "mc_util.h"
+#include "mc_anvil.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/stat.h>
 
 #include <zlib.h>
 
-#define MC_CHUNK_STORE_MAGIC "MCC1"
-#define MC_CHUNK_STORE_VERSION 1u
-#define MC_CHUNK_STORE_HEADER_SIZE 36u
+static int mkdir_p_local(const char *path, mode_t mode) {
+    char tmp[1024];
+    size_t n;
 
-static void write_le32(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)(v & 0xFFu);
-    p[1] = (uint8_t)((v >> 8) & 0xFFu);
-    p[2] = (uint8_t)((v >> 16) & 0xFFu);
-    p[3] = (uint8_t)((v >> 24) & 0xFFu);
-}
-
-static uint32_t read_le32(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static int chunk_store_path(char *buf, size_t cap, const char *world_path, int32_t cx, int32_t cz) {
-    if (!buf || cap == 0 || !world_path || !*world_path) {
+    if (!path || !*path) {
         errno = EINVAL;
         return -1;
     }
-    int n = snprintf(buf, cap, "%s/chunks/c.%d.%d.mcc", world_path, cx, cz);
+    n = strlen(path);
+    if (n >= sizeof(tmp)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(tmp, path, n + 1);
+
+    for (size_t i = 1; i < n; i++) {
+        if (tmp[i] != '/') continue;
+        tmp[i] = '\0';
+        if (tmp[0] != '\0' && mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
+        tmp[i] = '/';
+    }
+    if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static int chunks_dir_path(char *buf, size_t cap, const char *world_path) {
+    int n;
+    if (!buf || !world_path || !*world_path) {
+        errno = EINVAL;
+        return -1;
+    }
+    n = snprintf(buf, cap, "%s/chunks", world_path);
     if (n <= 0 || (size_t)n >= cap) {
         errno = ENAMETOOLONG;
         return -1;
@@ -38,253 +49,238 @@ static int chunk_store_path(char *buf, size_t cap, const char *world_path, int32
     return 0;
 }
 
-static int deflate_buffer_zlib(const uint8_t *src, size_t src_len, uint8_t **out, size_t *out_len) {
+static int chunk_file_path(char *buf, size_t cap, const char *world_path, int32_t cx, int32_t cz) {
+    int n;
+
+    if (!buf || !world_path || !*world_path) {
+        errno = EINVAL;
+        return -1;
+    }
+    n = snprintf(buf, cap, "%s/chunks/c_%d_%d.bin", world_path, cx, cz);
+    if (n <= 0 || (size_t)n >= cap) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    return 0;
+}
+
+static int deflate_buffer_zlib_local(const uint8_t *src, size_t src_len, uint8_t **out, size_t *out_len) {
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
-    if (!src || !out || !out_len) {
-        errno = EINVAL;
-        return -1;
-    }
+    if (!src || !out || !out_len) return -1;
+    if (src_len > (size_t)UINT_MAX) return -1;
 
-    uLongf bound = compressBound((uLong)src_len);
-    uint8_t *buf = (uint8_t *)malloc((size_t)bound ? (size_t)bound : 1u);
+    uLong bound = compressBound((uLong)src_len);
+    if (bound == 0) return -1;
+
+    uint8_t *buf = (uint8_t *)malloc((size_t)bound);
     if (!buf) return -1;
 
-    int zrc = compress2(buf, &bound, src, (uLong)src_len, Z_DEFAULT_COMPRESSION);
-    if (zrc != Z_OK) {
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    strm.next_in = (Bytef *)src;
+    strm.avail_in = (uInt)src_len;
+    strm.next_out = buf;
+    strm.avail_out = (uInt)bound;
+
+    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
         free(buf);
-        errno = EIO;
         return -1;
     }
 
+    int ret = deflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        deflateEnd(&strm);
+        free(buf);
+        return -1;
+    }
+    if (deflateEnd(&strm) != Z_OK) {
+        free(buf);
+        return -1;
+    }
+
+    size_t n = (size_t)strm.total_out;
+    uint8_t *shrunk = (uint8_t *)realloc(buf, n ? n : 1);
+    if (shrunk) buf = shrunk;
     *out = buf;
-    *out_len = (size_t)bound;
+    *out_len = n;
     return 0;
 }
 
-static int inflate_buffer_zlib(const uint8_t *src, size_t src_len, uint8_t *out, size_t out_len) {
-    if (!src || !out) {
-        errno = EINVAL;
+static int inflate_buffer_zlib_or_gzip_local(const uint8_t *src, size_t src_len, uint8_t **out, size_t *out_len) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!src || !out || !out_len) return -1;
+
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    strm.next_in = (Bytef *)src;
+    strm.avail_in = (uInt)src_len;
+
+    if (inflateInit2(&strm, 15 + 32) != Z_OK) return -1;
+
+    size_t cap = src_len ? (src_len * 4u) : 4096u;
+    if (cap < 4096u) cap = 4096u;
+    uint8_t *buf = (uint8_t *)malloc(cap);
+    if (!buf) {
+        inflateEnd(&strm);
         return -1;
     }
-    uLongf got = (uLongf)out_len;
-    int zrc = uncompress(out, &got, src, (uLong)src_len);
-    if (zrc != Z_OK || got != (uLongf)out_len) {
-        errno = EIO;
-        return -1;
+
+    int ret = Z_OK;
+    while (ret != Z_STREAM_END) {
+        if (strm.total_out >= cap) {
+            size_t new_cap = cap * 2u;
+            if (new_cap < cap) {
+                free(buf);
+                inflateEnd(&strm);
+                return -1;
+            }
+            uint8_t *next = (uint8_t *)realloc(buf, new_cap);
+            if (!next) {
+                free(buf);
+                inflateEnd(&strm);
+                return -1;
+            }
+            buf = next;
+            cap = new_cap;
+        }
+
+        strm.next_out = buf + strm.total_out;
+        strm.avail_out = (uInt)(cap - (size_t)strm.total_out);
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret == Z_STREAM_END) break;
+        if (ret != Z_OK) {
+            free(buf);
+            inflateEnd(&strm);
+            return -1;
+        }
     }
+
+    inflateEnd(&strm);
+
+    size_t n = (size_t)strm.total_out;
+    uint8_t *shrunk = (uint8_t *)realloc(buf, n ? n : 1);
+    if (shrunk) buf = shrunk;
+    *out = buf;
+    *out_len = n;
     return 0;
 }
 
-int mc_chunk_store_read(const char *world_path, int32_t cx, int32_t cz, mc_chunk_t *out) {
+int mc_chunk_store_read(const char *world_path, int32_t cx, int32_t cz, mc_chunk_t *out, mc_block_entity_store_t *be_store) {
+    char path[1024];
+    mc_block_entity_store_t dummy_store;
+    mc_arena_t temp_arena;
+    uint8_t *compressed = NULL;
+    uint8_t *raw = NULL;
+    size_t compressed_len = 0;
+    size_t raw_len = 0;
+    int rc = -1;
+
     if (!out) {
         errno = EINVAL;
         return -1;
     }
     if (!world_path || !*world_path) return 1;
-
-    char path[1024];
-    if (chunk_store_path(path, sizeof(path), world_path, cx, cz) != 0) return -1;
+    if (chunk_file_path(path, sizeof(path), world_path, cx, cz) != 0) return -1;
 
     FILE *f = fopen(path, "rb");
     if (!f) {
         if (errno == ENOENT) return 1;
-        log_error("chunk store read: open failed path=%s (errno=%d %s)", path, errno, strerror(errno));
         return -1;
     }
 
     if (fseek(f, 0, SEEK_END) != 0) {
-        log_error("chunk store read: seek failed path=%s (errno=%d %s)", path, errno, strerror(errno));
         fclose(f);
         return -1;
     }
-    long file_size = ftell(f);
-    if (file_size < (long)MC_CHUNK_STORE_HEADER_SIZE) {
-        log_error("chunk store read: file too small path=%s size=%ld", path, file_size);
+    long size_l = ftell(f);
+    if (size_l < 0) {
         fclose(f);
-        errno = EIO;
         return -1;
     }
     if (fseek(f, 0, SEEK_SET) != 0) {
-        log_error("chunk store read: rewind failed path=%s (errno=%d %s)", path, errno, strerror(errno));
         fclose(f);
         return -1;
     }
 
-    uint8_t header[MC_CHUNK_STORE_HEADER_SIZE];
-    if (fread(header, 1, sizeof(header), f) != sizeof(header)) {
-        log_error("chunk store read: header short read path=%s", path);
-        fclose(f);
-        errno = EIO;
-        return -1;
-    }
-
-    if (memcmp(header, MC_CHUNK_STORE_MAGIC, 4) != 0) {
-        log_error("chunk store read: bad magic path=%s", path);
-        fclose(f);
-        errno = EINVAL;
-        return -1;
-    }
-
-    uint32_t version = read_le32(header + 4);
-    int32_t file_cx = (int32_t)read_le32(header + 8);
-    int32_t file_cz = (int32_t)read_le32(header + 12);
-    int32_t min_y = (int32_t)read_le32(header + 16);
-    uint32_t height = read_le32(header + 20);
-    uint32_t block_count = read_le32(header + 24);
-    uint32_t raw_size = read_le32(header + 28);
-    uint32_t want_crc = read_le32(header + 32);
-
-    if (version != MC_CHUNK_STORE_VERSION || file_cx != cx || file_cz != cz || min_y != MC_WORLD_MIN_Y ||
-        height != MC_WORLD_HEIGHT || block_count != MC_BLOCKS_PER_CHUNK ||
-        raw_size != (uint32_t)(MC_BLOCKS_PER_CHUNK * sizeof(int32_t))) {
-        log_error("chunk store read: invalid header path=%s version=%u cx=%d cz=%d min_y=%d height=%u blocks=%u raw=%u", path,
-                  version, file_cx, file_cz, min_y, height, block_count, raw_size);
-        fclose(f);
-        errno = EINVAL;
-        return -1;
-    }
-
-    size_t comp_len = (size_t)file_size - sizeof(header);
-    uint8_t *comp = (uint8_t *)malloc(comp_len ? comp_len : 1u);
-    if (!comp) {
+    compressed_len = (size_t)size_l;
+    compressed = (uint8_t *)malloc(compressed_len ? compressed_len : 1u);
+    if (!compressed) {
         fclose(f);
         return -1;
     }
-    if (fread(comp, 1, comp_len, f) != comp_len) {
-        log_error("chunk store read: payload short read path=%s", path);
-        free(comp);
+    if (compressed_len > 0 && fread(compressed, 1, compressed_len, f) != compressed_len) {
+        free(compressed);
         fclose(f);
-        errno = EIO;
         return -1;
     }
     fclose(f);
 
-    uint8_t *raw = (uint8_t *)malloc(raw_size ? raw_size : 1u);
-    if (!raw) {
-        free(comp);
+    if (inflate_buffer_zlib_or_gzip_local(compressed, compressed_len, &raw, &raw_len) != 0) {
+        free(compressed);
         return -1;
     }
-    if (inflate_buffer_zlib(comp, comp_len, raw, raw_size) != 0) {
-        log_error("chunk store read: inflate failed path=%s (errno=%d %s)", path, errno, strerror(errno));
-        free(raw);
-        free(comp);
-        return -1;
-    }
-    free(comp);
+    free(compressed);
 
-    uint32_t got_crc = crc32(0L, Z_NULL, 0);
-    got_crc = crc32(got_crc, raw, raw_size);
-    if (got_crc != want_crc) {
-        log_error("chunk store read: crc mismatch path=%s want=%u got=%u", path, want_crc, got_crc);
+    if (mc_chunk_init(out, cx, cz, 0u) != 0) {
         free(raw);
-        errno = EIO;
         return -1;
+    }
+    if (mc_arena_init(&temp_arena, 2u * 1024u * 1024u) != 0) {
+        mc_chunk_destroy(out);
+        free(raw);
+        return -1;
+    }
+    if (!be_store) {
+        mc_be_store_init(&dummy_store);
+        be_store = &dummy_store;
     }
 
-    if (mc_chunk_init(out, cx, cz, 0) != 0) {
-        free(raw);
-        return -1;
-    }
-    for (int y = MC_WORLD_MIN_Y; y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT; y++) {
-        int y_index = y - MC_WORLD_MIN_Y;
-        for (int z = 0; z < MC_CHUNK_XZ; z++) {
-            for (int x = 0; x < MC_CHUNK_XZ; x++) {
-                size_t flat_index = ((size_t)y_index * MC_CHUNK_XZ + (size_t)z) * MC_CHUNK_XZ + (size_t)x;
-                int32_t state_id = (int32_t)read_le32(raw + (flat_index * sizeof(uint32_t)));
-                if (mc_chunk_set_block(out, x, y, z, (mc_global_state_id_t)state_id) != 0) {
-                    mc_chunk_destroy(out);
-                    free(raw);
-                    errno = EIO;
-                    return -1;
-                }
-            }
-        }
-    }
-    out->loaded = true;
-    out->dirty = false;
-    out->evict_after_save = false;
+    rc = mc_anvil_decode_chunk_nbt(raw, raw_len, cx, cz, out, be_store, &temp_arena);
+
+    if (be_store == &dummy_store) mc_be_store_destroy(&dummy_store);
+    mc_arena_destroy(&temp_arena);
     free(raw);
-    return 0;
+    if (rc != 0) mc_chunk_destroy(out);
+    return rc;
 }
 
-int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk) {
+int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store) {
+    char chunks_dir[1024];
+    char chunk_path[1024];
+    uint8_t *raw = NULL;
+    uint8_t *compressed = NULL;
+    size_t raw_len = 0;
+    size_t compressed_len = 0;
+    int rc = -1;
+
     if (!world_path || !*world_path || !chunk) {
         errno = EINVAL;
         return -1;
     }
+    if (chunks_dir_path(chunks_dir, sizeof(chunks_dir), world_path) != 0) return -1;
+    if (mkdir_p_local(chunks_dir, 0755) != 0) return -1;
+    if (chunk_file_path(chunk_path, sizeof(chunk_path), world_path, chunk->cx, chunk->cz) != 0) return -1;
 
-    char path[1024];
-    char tmp_path[1100];
-    if (chunk_store_path(path, sizeof(path), world_path, chunk->cx, chunk->cz) != 0) return -1;
-    int n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", path, (long)getpid());
-    if (n <= 0 || (size_t)n >= sizeof(tmp_path)) {
-        errno = ENAMETOOLONG;
-        return -1;
+    if (mc_anvil_encode_chunk_nbt(chunk, be_store, &raw, &raw_len) != 0) goto cleanup;
+    if (deflate_buffer_zlib_local(raw, raw_len, &compressed, &compressed_len) != 0) goto cleanup;
+
+    FILE *f = fopen(chunk_path, "wb");
+    if (!f) goto cleanup;
+    if (compressed_len > 0 && fwrite(compressed, 1, compressed_len, f) != compressed_len) {
+        fclose(f);
+        goto cleanup;
     }
-
-    size_t raw_size = MC_BLOCKS_PER_CHUNK * sizeof(uint32_t);
-    uint8_t *raw = (uint8_t *)malloc(raw_size ? raw_size : 1u);
-    if (!raw) return -1;
-    for (int y = MC_WORLD_MIN_Y; y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT; y++) {
-        int y_index = y - MC_WORLD_MIN_Y;
-        for (int z = 0; z < MC_CHUNK_XZ; z++) {
-            for (int x = 0; x < MC_CHUNK_XZ; x++) {
-                size_t flat_index = ((size_t)y_index * MC_CHUNK_XZ + (size_t)z) * MC_CHUNK_XZ + (size_t)x;
-                mc_global_state_id_t state_id = mc_chunk_get_block(chunk, x, y, z);
-                write_le32(raw + (flat_index * sizeof(uint32_t)), (uint32_t)state_id);
-            }
-        }
+    if (fflush(f) != 0) {
+        fclose(f);
+        goto cleanup;
     }
+    if (fclose(f) != 0) goto cleanup;
+    rc = 0;
 
-    uint32_t crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, raw, raw_size);
-
-    uint8_t *comp = NULL;
-    size_t comp_len = 0;
-    if (deflate_buffer_zlib(raw, raw_size, &comp, &comp_len) != 0) {
-        log_error("chunk store write: compress failed path=%s (errno=%d %s)", path, errno, strerror(errno));
-        free(raw);
-        return -1;
-    }
+cleanup:
     free(raw);
-
-    FILE *f = fopen(tmp_path, "wb");
-    if (!f) {
-        log_error("chunk store write: open failed path=%s (errno=%d %s)", tmp_path, errno, strerror(errno));
-        free(comp);
-        return -1;
-    }
-
-    uint8_t header[MC_CHUNK_STORE_HEADER_SIZE];
-    memset(header, 0, sizeof(header));
-    memcpy(header, MC_CHUNK_STORE_MAGIC, 4);
-    write_le32(header + 4, MC_CHUNK_STORE_VERSION);
-    write_le32(header + 8, (uint32_t)chunk->cx);
-    write_le32(header + 12, (uint32_t)chunk->cz);
-    write_le32(header + 16, (uint32_t)MC_WORLD_MIN_Y);
-    write_le32(header + 20, (uint32_t)MC_WORLD_HEIGHT);
-    write_le32(header + 24, (uint32_t)MC_BLOCKS_PER_CHUNK);
-    write_le32(header + 28, (uint32_t)raw_size);
-    write_le32(header + 32, crc);
-
-    int rc = -1;
-    if (fwrite(header, 1, sizeof(header), f) == sizeof(header) && fwrite(comp, 1, comp_len, f) == comp_len &&
-        fflush(f) == 0 && fsync(fileno(f)) == 0) {
-        rc = 0;
-    }
-    if (fclose(f) != 0 && rc == 0) rc = -1;
-    free(comp);
-
-    if (rc != 0) {
-        log_error("chunk store write: failed path=%s (errno=%d %s)", tmp_path, errno, strerror(errno));
-        unlink(tmp_path);
-        return -1;
-    }
-    if (rename(tmp_path, path) != 0) {
-        log_error("chunk store write: rename failed %s -> %s (errno=%d %s)", tmp_path, path, errno, strerror(errno));
-        unlink(tmp_path);
-        return -1;
-    }
-    return 0;
+    free(compressed);
+    return rc;
 }

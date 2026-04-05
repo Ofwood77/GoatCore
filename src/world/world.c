@@ -141,6 +141,9 @@ static int32_t floor_div_i32(int32_t a, int32_t b) {
 int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback) {
     if (!key || !*key) return fallback;
 
+    int32_t exact = mc_block_state_id(key, -1);
+    if (exact >= 0) return exact;
+
     const char *facing = "north";
     const char *needle = strstr(key, "facing=");
     if (needle) {
@@ -163,9 +166,6 @@ int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback) {
         snprintf(normalized, sizeof(normalized), "minecraft:ender_chest[facing=%s,waterlogged=false]", facing);
         return mc_block_state_id(normalized, fallback);
     }
-
-    int32_t exact = mc_block_state_id(key, -1);
-    if (exact >= 0) return exact;
 
     const char *props = strchr(key, '[');
     if (props) {
@@ -649,75 +649,22 @@ static float noise3_seed(int32_t wx, int32_t wy, int32_t wz, float freq, int see
 
 void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     if (!w || !chunk) return;
-
     const int32_t min_y = MC_WORLD_MIN_Y;
     const int32_t max_y = MC_WORLD_MIN_Y + MC_WORLD_HEIGHT - 1;
-
-    const float freq_temp = 0.001f;
-    const float freq_humid = 0.001f;
-    const float freq_base = w->gen_base_freq > 0.0f ? w->gen_base_freq : 0.002f;
-    const float freq_density = 0.02f;
-    const float freq_caves = 0.05f;
-    const float amp_base = (float)w->gen_base_amp;
-    const float amp_density = 8.0f;
-    const float amp_caves = 12.0f;
-    const int32_t sea_level = 63;
-
-    (void)freq_temp;
-    (void)freq_humid;
-
-    int seed0 = (int)(uint32_t)w->seed;
+    const int32_t bedrock_y = 0;
+    const int32_t dirt_min_y = 1;
+    const int32_t dirt_max_y = 62;
+    const int32_t grass_y = 63;
+    int32_t bedrock_id = mc_block_state_id("minecraft:bedrock", w->ids.stone);
 
     for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
-        int32_t wz = chunk->cz * MC_CHUNK_XZ + lz;
         for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
-            int32_t wx = chunk->cx * MC_CHUNK_XZ + lx;
-
-            float base_n = noise2_seed(wx, wz, freq_base, seed0);
-            float hn = base_n * amp_base;
-            int32_t base_h = w->gen_base_y + (int32_t)(hn + (hn >= 0.0f ? 0.5f : -0.5f));
-            if (base_h < min_y) base_h = min_y;
-            if (base_h > max_y) base_h = max_y;
-
             for (int32_t y = min_y; y <= max_y; y++) {
-                float d = (float)(base_h - y);
-                d += noise3_seed(wx, y, wz, freq_density, seed0 + 3) * amp_density;
-                d -= fabsf(noise3_seed(wx, y, wz, freq_caves, seed0 + 4)) * amp_caves;
-
                 int32_t sid = w->ids.air;
-                if (d > 0.0f) {
-                    sid = w->ids.stone;
-                } else if (y < sea_level) {
-                    int32_t water = w->ids.water_level[0];
-                    sid = (water >= 0) ? water : w->ids.air;
-                }
-
+                if (y == bedrock_y) sid = bedrock_id;
+                else if (y >= dirt_min_y && y <= dirt_max_y) sid = (w->ids.dirt >= 0) ? w->ids.dirt : w->ids.stone;
+                else if (y == grass_y) sid = (w->ids.grass_block_snowy_false >= 0) ? w->ids.grass_block_snowy_false : w->ids.dirt;
                 (void)mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)sid);
-            }
-
-            int32_t top_y = INT32_MIN;
-            for (int32_t y = max_y; y >= min_y; y--) {
-                int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
-                if (sid == w->ids.air) continue;
-                int32_t water = w->ids.water_level[0];
-                if (water >= 0 && sid == water) continue;
-                top_y = y;
-                break;
-            }
-            if (top_y != INT32_MIN) {
-                int32_t water = w->ids.water_level[0];
-                bool underwater = (water >= 0 && top_y < sea_level);
-                int32_t top_sid =
-                    underwater ? w->ids.dirt
-                               : ((w->ids.grass_block_snowy_false >= 0) ? w->ids.grass_block_snowy_false : w->ids.dirt);
-
-                for (int layer = 0; layer < 4; layer++) {
-                    int32_t y = top_y - layer;
-                    if (y < min_y) break;
-                    if (layer == 0) (void)mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)top_sid);
-                    else (void)mc_chunk_set_block(chunk, lx, y, lz,
-                                                  (mc_global_state_id_t)(w->ids.dirt >= 0 ? w->ids.dirt : w->ids.stone));
-                }
             }
         }
     }
@@ -725,32 +672,11 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     chunk->loaded = true;
 }
 
-static int load_chunk_from_anvil(mc_world_t *w, mc_chunk_t *chunk) {
-    if (!w || !chunk) return -1;
-    if (!w->world_path || !*w->world_path) return 1;
-
-    int32_t region_x = floor_div_i32(chunk->cx, 32);
-    int32_t region_z = floor_div_i32(chunk->cz, 32);
-    char path[1024];
-    int n = snprintf(path, sizeof(path), "%s/region/r.%d.%d.mca", w->world_path, region_x, region_z);
-    if (n <= 0 || (size_t)n >= sizeof(path)) return -1;
-
-    mc_arena_t temp_arena;
-    if (mc_arena_init(&temp_arena, 2u * 1024u * 1024u) != 0) return -1;
-
-    int rc = mc_anvil_load_chunk(path, chunk->cx, chunk->cz, chunk, &w->block_entities, &temp_arena);
-    mc_arena_destroy(&temp_arena);
-    if (rc != 0) return rc;
-
-    chunk->loaded = true;
-    return 0;
-}
-
 static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
     if (!w || !chunk) return -1;
     if (!w->world_path || !*w->world_path) return -1;
 
-    int rc = mc_chunk_store_write(w->world_path, chunk);
+    int rc = mc_chunk_store_write(w->world_path, chunk, &w->block_entities);
     if (rc != 0) {
         int e = errno;
         log_error("chunk store save failed chunk=(%d,%d) world=%s (errno=%d %s)", chunk->cx, chunk->cz,
@@ -774,8 +700,8 @@ static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
         if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) == 0 && cx == chunk->cx && cz == chunk->cz &&
             y >= MC_WORLD_MIN_Y && y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
             int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
-            log_info("chunk reload debug: save chunk=(%d,%d) path=%s/chunks/c.%d.%d.mcc dirty=%d block=(%d,%d,%d) state_id=%d key=%s",
-                     chunk->cx, chunk->cz, w->world_path, chunk->cx, chunk->cz, chunk->dirty ? 1 : 0, x, y, z, sid,
+            log_info("chunk reload debug: save chunk=(%d,%d) path=%s/region/r.%d.%d.mca dirty=%d block=(%d,%d,%d) state_id=%d key=%s",
+                     chunk->cx, chunk->cz, w->world_path, floor_div_i32(chunk->cx, 32), floor_div_i32(chunk->cz, 32), chunk->dirty ? 1 : 0, x, y, z, sid,
                      mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
         }
     }
@@ -821,10 +747,9 @@ static void *worker_main(void *arg) {
         }
 
         bool generated = false;
-        bool rewrite_store = false;
         bool normalized_on_load = false;
 
-        int store_rc = mc_chunk_store_read(w->world_path, job.cx, job.cz, chunk);
+        int store_rc = mc_chunk_store_read(w->world_path, job.cx, job.cz, chunk, &w->block_entities);
         if (store_rc == 0) {
             bool normalized = normalize_chunk_container_states(chunk);
             if (w->debug_containers && w->debug_container_pos_set) {
@@ -843,28 +768,21 @@ static void *worker_main(void *arg) {
                 chunk->dirty = true;
                 normalized_on_load = true;
                 if (w->debug_containers) {
-                    log_info("containers debug: chunk=(%d,%d) source=chunkstore normalized=1", job.cx, job.cz);
+                    log_info("containers debug: chunk=(%d,%d) source=anvil normalized=1", job.cx, job.cz);
                 }
             }
             if (debug_target_chunk(w, job.cx, job.cz)) {
-                log_info("chunk reload debug: worker chunk=(%d,%d) source=chunkstore", job.cx, job.cz);
+                log_info("chunk reload debug: worker chunk=(%d,%d) source=anvil", job.cx, job.cz);
             }
         } else {
-            if (store_rc < 0) {
-                rewrite_store = (w->world_path && *w->world_path);
-                log_error("chunk store load failed for chunk (%d,%d) world=%s", job.cx, job.cz,
-                          w->world_path ? w->world_path : "(null)");
-            }
-
-            int rc = load_chunk_from_anvil(w, chunk);
-            if (rc == 1) {
+            if (store_rc == 1) {
                 if (debug_target_chunk(w, job.cx, job.cz)) {
                     log_info("chunk reload debug: worker chunk=(%d,%d) source=generate reason=absent", job.cx, job.cz);
                 }
                 mc_world_generate_chunk(w, chunk);
                 chunk->dirty = (w->world_path && *w->world_path);
                 generated = true;
-            } else if (rc != 0) {
+            } else {
                 log_error("anvil load failed for chunk (%d,%d) world=%s", job.cx, job.cz, w->world_path ? w->world_path : "(null)");
                 if (debug_target_chunk(w, job.cx, job.cz)) {
                     log_info("chunk reload debug: worker chunk=(%d,%d) source=generate reason=load_error", job.cx, job.cz);
@@ -872,28 +790,6 @@ static void *worker_main(void *arg) {
                 mc_world_generate_chunk(w, chunk);
                 chunk->dirty = (w->world_path && *w->world_path);
                 generated = true;
-            } else {
-                bool normalized = normalize_chunk_container_states(chunk);
-                if (w->debug_containers && w->debug_container_pos_set) {
-                    int32_t cx = 0, cz = 0;
-                    int lx = 0, lz = 0;
-                    if (coords_to_chunk(w->debug_container_x, w->debug_container_z, &cx, &cz, &lx, &lz) == 0 &&
-                        cx == job.cx && cz == job.cz &&
-                        w->debug_container_y >= MC_WORLD_MIN_Y && w->debug_container_y < MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
-                        int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, w->debug_container_y, lz);
-                        log_info("containers debug: load source=anvil chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s normalized=%d",
-                                 job.cx, job.cz, w->debug_container_x, w->debug_container_y, w->debug_container_z, sid,
-                                 mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)", normalized ? 1 : 0);
-                    }
-                }
-                if (debug_target_chunk(w, job.cx, job.cz)) {
-                    log_info("chunk reload debug: worker chunk=(%d,%d) source=anvil", job.cx, job.cz);
-                }
-                if (rewrite_store || normalized) chunk->dirty = true;
-                if (normalized) normalized_on_load = true;
-                if (normalized && w->debug_containers) {
-                    log_info("containers debug: chunk=(%d,%d) source=anvil normalized=1", job.cx, job.cz);
-                }
             }
         }
         if (normalize_chunk_container_states(chunk)) {

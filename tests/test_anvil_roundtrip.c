@@ -19,6 +19,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <zlib.h>
 
 static int fail(const char *msg) {
     fprintf(stderr, "FAIL: %s\n", msg);
@@ -200,7 +201,7 @@ static int verify_chunkstore_block_equals(const char *world_path,
                                           int32_t z,
                                           int32_t expected) {
     mc_chunk_t chunk = {0};
-    if (mc_chunk_store_read(world_path, cx, cz, &chunk) != 0) return -1;
+    if (mc_chunk_store_read(world_path, cx, cz, &chunk, NULL) != 0) return -1;
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
         mc_chunk_destroy(&chunk);
         return -1;
@@ -217,9 +218,40 @@ static int verify_chunkstore_block_equals(const char *world_path,
 }
 
 static int chunk_store_path(char *buf, size_t cap, const char *world_path, int32_t cx, int32_t cz) {
-    int n = snprintf(buf, cap, "%s/chunks/c.%d.%d.mcc", world_path, cx, cz);
+    int n = snprintf(buf, cap, "%s/chunks/c_%d_%d.bin", world_path, cx, cz);
     if (n <= 0 || (size_t)n >= cap) return -1;
     return 0;
+}
+
+static int write_chunk_store_raw_nbt(const char *world_path, int32_t cx, int32_t cz, const uint8_t *nbt, size_t nbt_len) {
+    char path[1024];
+    char dir[1024];
+    uLongf comp_cap;
+    uint8_t *comp = NULL;
+    int rc = -1;
+
+    if (!world_path || !nbt) return -1;
+    if (snprintf(dir, sizeof(dir), "%s/chunks", world_path) >= (int)sizeof(dir)) return -1;
+    if (mkdir(dir, 0755) != 0 && errno != EEXIST) return -1;
+    if (chunk_store_path(path, sizeof(path), world_path, cx, cz) != 0) return -1;
+
+    comp_cap = compressBound((uLong)nbt_len);
+    comp = (uint8_t *)malloc((size_t)comp_cap);
+    if (!comp) return -1;
+    if (compress2(comp, &comp_cap, nbt, (uLong)nbt_len, Z_DEFAULT_COMPRESSION) != Z_OK) goto cleanup;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) goto cleanup;
+    if (fwrite(comp, 1, (size_t)comp_cap, f) != (size_t)comp_cap) {
+        fclose(f);
+        goto cleanup;
+    }
+    if (fclose(f) != 0) goto cleanup;
+    rc = 0;
+
+cleanup:
+    free(comp);
+    return rc;
 }
 
 static int read_u16_be_local(const uint8_t *buf, size_t len, size_t *pos, uint16_t *out) {
@@ -790,7 +822,7 @@ static int test_container_state_truth(const char *root) {
         mc_world_destroy(w);
         return fail("container state raw set");
     }
-    if (mc_chunk_store_write(world, &raw) != 0) {
+    if (mc_chunk_store_write(world, &raw, NULL) != 0) {
         mc_chunk_destroy(&raw);
         mc_world_destroy(w);
         return fail("container state legacy write");
@@ -1038,17 +1070,11 @@ int main(void) {
 
     mc_world_destroy(w2);
 
-    /* Priority: custom snapshot wins over base Anvil. */
+    /* Priority: chunkstore snapshot wins as the sole persistence backend. */
     char world3[1024];
     if (snprintf(world3, sizeof(world3), "%s/world_priority", dir) >= (int)sizeof(world3)) return fail("world3 path");
     mc_world_t *wp = mc_world_create(world3, 0);
     if (!wp) return fail("mc_world_create priority");
-    char region3[1024];
-    if (snprintf(region3, sizeof(region3), "%s/region/r.0.0.mca", world3) >= (int)sizeof(region3)) return fail("region3 path");
-    if (write_uniform_anvil_chunk(region3, 3, "minecraft:stone") != 0) {
-        mc_world_destroy(wp);
-        return fail("write priority anvil");
-    }
     mc_chunk_t snapshot = {0};
     if (mc_chunk_init(&snapshot, 0, 0, (mc_global_state_id_t)id_stone) != 0) {
         mc_world_destroy(wp);
@@ -1060,7 +1086,7 @@ int main(void) {
         mc_world_destroy(wp);
         return fail("priority snapshot set");
     }
-    if (mc_chunk_store_write(world3, &snapshot) != 0) {
+    if (mc_chunk_store_write(world3, &snapshot, NULL) != 0) {
         mc_chunk_destroy(&snapshot);
         mc_world_destroy(wp);
         return fail("write priority chunkstore");
@@ -1072,25 +1098,30 @@ int main(void) {
     if (!wp2) return fail("mc_world_create priority reload");
     if (wait_block_equals(wp2, 0, 60, 0, id_air) != 0) {
         mc_world_destroy(wp2);
-        return fail("chunkstore priority over anvil mismatch");
+        return fail("chunkstore reload mismatch");
     }
     mc_world_destroy(wp2);
 
-    /* Corruption fallback: bad snapshot should fall back to Anvil, then rewrite clean snapshot. */
+    /* Corruption fallback: bad snapshot should fall back to generated terrain, then rewrite clean snapshot. */
     char world4[1024];
     if (snprintf(world4, sizeof(world4), "%s/world_corrupt", dir) >= (int)sizeof(world4)) return fail("world4 path");
     mc_world_t *wc = mc_world_create(world4, 0);
     if (!wc) return fail("mc_world_create corrupt");
-    char region4[1024];
-    if (snprintf(region4, sizeof(region4), "%s/region/r.0.0.mca", world4) >= (int)sizeof(region4)) return fail("region4 path");
-    if (write_uniform_anvil_chunk(region4, 5, "minecraft:redstone_block") != 0) {
-        mc_world_destroy(wc);
-        return fail("write corrupt anvil");
-    }
     char store4[1024];
     if (chunk_store_path(store4, sizeof(store4), world4, 0, 0) != 0) {
         mc_world_destroy(wc);
         return fail("store4 path");
+    }
+    {
+        char chunks_dir4[1024];
+        if (snprintf(chunks_dir4, sizeof(chunks_dir4), "%s/chunks", world4) >= (int)sizeof(chunks_dir4)) {
+            mc_world_destroy(wc);
+            return fail("chunks4 path");
+        }
+        if (mkdir(chunks_dir4, 0755) != 0 && errno != EEXIST) {
+            mc_world_destroy(wc);
+            return fail("mkdir chunks4");
+        }
     }
     FILE *bad = fopen(store4, "wb");
     if (!bad) {
@@ -1103,15 +1134,15 @@ int main(void) {
 
     mc_world_t *wc2 = mc_world_create(world4, 0);
     if (!wc2) return fail("mc_world_create corrupt reload");
-    if (wait_block_equals(wc2, 0, 80, 0, id_redstone0) != 0) {
+    if (wait_block_equals(wc2, 0, 80, 0, id_air) != 0) {
         mc_world_destroy(wc2);
-        return fail("corrupt snapshot fallback to anvil mismatch");
+        return fail("corrupt snapshot fallback mismatch");
     }
     if (wait_chunk_saved(wc2, 0, 0) != 0) {
         mc_world_destroy(wc2);
         return fail("corrupt snapshot rewrite save");
     }
-    if (verify_chunkstore_block_equals(world4, 0, 0, 0, 80, 0, id_redstone0) != 0) {
+    if (verify_chunkstore_block_equals(world4, 0, 0, 0, 80, 0, id_air) != 0) {
         mc_world_destroy(wc2);
         return fail("corrupt snapshot rewrite verify");
     }
@@ -1196,9 +1227,7 @@ int main(void) {
     size_t nbt_len = 0;
     if (mc_nbt_write_named_root(root, &nbt_bytes, &nbt_len) != 0) return fail("nbt write");
 
-    char region[1024];
-    if (snprintf(region, sizeof(region), "%s/region/r.0.0.mca", world5) >= (int)sizeof(region)) return fail("region path");
-    if (mc_anvil_write_chunk_nbt(region, 0, 0, nbt_bytes, nbt_len) != 0) return fail("anvil write padded");
+    if (write_chunk_store_raw_nbt(world5, 0, 0, nbt_bytes, nbt_len) != 0) return fail("chunk store write padded");
 
     free(nbt_bytes);
     mc_nbt_free(root);

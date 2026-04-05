@@ -4,7 +4,6 @@
 #include <string.h>
 
 #define MC_NBT_MAX_DEPTH 512
-#define MC_ANVIL_EXPECTED_DATA_VERSION 4785
 
 typedef struct {
     const uint8_t *data;

@@ -1,5 +1,6 @@
 #include "generated_minecraft_ids.h"
 #include "mc_inventory.h"
+#include "mc_nbt.h"
 #include "mc_player_store.h"
 
 #include <errno.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <zlib.h>
 
 static int mkdir_p_local(const char *path, mode_t mode) {
     char tmp[1024];
@@ -59,6 +61,116 @@ static int check(bool cond, const char *label) {
     }
     printf("[FAIL] %s\n", label);
     return -1;
+}
+
+static int gzip_read_file_local(const char *path, uint8_t **out, size_t *out_len) {
+    gzFile gz;
+    size_t cap = 4096;
+    size_t len = 0;
+    uint8_t *buf = NULL;
+
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!path || !out || !out_len) return -1;
+
+    gz = gzopen(path, "rb");
+    if (!gz) return -1;
+
+    buf = (uint8_t *)malloc(cap);
+    if (!buf) {
+        gzclose(gz);
+        return -1;
+    }
+
+    for (;;) {
+        if (len == cap) {
+            size_t next_cap = cap * 2;
+            uint8_t *next = (uint8_t *)realloc(buf, next_cap);
+            if (!next) {
+                free(buf);
+                gzclose(gz);
+                return -1;
+            }
+            buf = next;
+            cap = next_cap;
+        }
+        int n = gzread(gz, buf + len, (unsigned)(cap - len));
+        if (n < 0) {
+            free(buf);
+            gzclose(gz);
+            return -1;
+        }
+        if (n == 0) break;
+        len += (size_t)n;
+    }
+
+    if (gzclose(gz) != Z_OK) {
+        free(buf);
+        return -1;
+    }
+
+    *out = buf;
+    *out_len = len;
+    return 0;
+}
+
+static int audit_generated_nbt(const char *player_file) {
+    uint8_t *raw = NULL;
+    size_t raw_len = 0;
+    mc_nbt_tag_t *root = NULL;
+    const mc_nbt_tag_t *pos;
+    const mc_nbt_tag_t *rot;
+    const mc_nbt_tag_t *inv;
+    const mc_nbt_tag_t *gamemode;
+    const mc_nbt_tag_t *first_item;
+    const mc_nbt_tag_t *item_id;
+    const mc_nbt_tag_t *item_count;
+    const mc_nbt_tag_t *item_slot;
+    int rc = -1;
+
+    if (gzip_read_file_local(player_file, &raw, &raw_len) != 0) {
+        printf("[FAIL] gzip read for nbt audit\n");
+        goto cleanup;
+    }
+    if (mc_nbt_read_named_root(raw, raw_len, &root, NULL) != 0) {
+        printf("[FAIL] nbt parse for audit\n");
+        goto cleanup;
+    }
+
+    pos = mc_nbt_compound_get(root, "Pos");
+    rot = mc_nbt_compound_get(root, "Rotation");
+    inv = mc_nbt_compound_get(root, "Inventory");
+    gamemode = mc_nbt_compound_get(root, "playerGameType");
+
+    if (check(pos && pos->type == MC_NBT_TAG_LIST && pos->payload.list.elem_type == MC_NBT_TAG_DOUBLE &&
+                  pos->payload.list.length == 3,
+              "NBT tag Pos = List<Double>[3]") != 0)
+        goto cleanup;
+    if (check(rot && rot->type == MC_NBT_TAG_LIST && rot->payload.list.elem_type == MC_NBT_TAG_FLOAT &&
+                  rot->payload.list.length == 2,
+              "NBT tag Rotation = List<Float>[2]") != 0)
+        goto cleanup;
+    if (check(inv && inv->type == MC_NBT_TAG_LIST && inv->payload.list.elem_type == MC_NBT_TAG_COMPOUND, "NBT tag Inventory = List<Compound>") !=
+        0)
+        goto cleanup;
+    if (check(gamemode && gamemode->type == MC_NBT_TAG_INT, "NBT tag playerGameType = Int") != 0) goto cleanup;
+
+    first_item = (inv && inv->payload.list.length > 0) ? inv->payload.list.items[0] : NULL;
+    item_id = first_item ? mc_nbt_compound_get(first_item, "id") : NULL;
+    item_count = first_item ? mc_nbt_compound_get(first_item, "count") : NULL;
+    item_slot = first_item ? mc_nbt_compound_get(first_item, "slot") : NULL;
+
+    if (check(first_item && first_item->type == MC_NBT_TAG_COMPOUND, "Inventory entry = Compound") != 0) goto cleanup;
+    if (check(item_id && item_id->type == MC_NBT_TAG_STRING, "Inventory.id = String") != 0) goto cleanup;
+    if (check(item_count && item_count->type == MC_NBT_TAG_BYTE, "Inventory.count = Byte") != 0) goto cleanup;
+    if (check(item_slot && item_slot->type == MC_NBT_TAG_BYTE, "Inventory.slot = Byte") != 0) goto cleanup;
+
+    rc = 0;
+
+cleanup:
+    mc_nbt_free(root);
+    free(raw);
+    return rc;
 }
 
 int main(void) {
@@ -142,6 +254,11 @@ int main(void) {
     fclose(fp);
     fp = NULL;
     if (check(gzip_magic[0] == 0x1f && gzip_magic[1] == 0x8b, "gzip magic 1F 8B") != 0) {
+        rc = 1;
+        goto cleanup;
+    }
+
+    if (audit_generated_nbt(player_file) != 0) {
         rc = 1;
         goto cleanup;
     }

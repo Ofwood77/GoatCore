@@ -322,29 +322,20 @@ int mc_anvil_read_chunk_nbt(const char *region_path, int local_x, int local_z, u
     return 0;
 }
 
-int mc_anvil_load_chunk(const char *region_path,
-                        int chunk_x,
-                        int chunk_z,
-                        mc_chunk_t *out_chunk,
-                        mc_block_entity_store_t *be_store,
-                        mc_arena_t *temp_arena) {
-    uint8_t *nbt_buf = NULL;
-    size_t nbt_len = 0;
+int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
+                              size_t nbt_len,
+                              int chunk_x,
+                              int chunk_z,
+                              mc_chunk_t *out_chunk,
+                              mc_block_entity_store_t *be_store,
+                              mc_arena_t *temp_arena) {
     size_t bytes_read = 0;
     mc_nbt_tag_t *root = NULL;
     const mc_nbt_tag_t *sections = NULL;
     const mc_nbt_tag_t *block_entities = NULL;
     int rc = -1;
-    int local_x;
-    int local_z;
 
-    if (!region_path || !out_chunk || !be_store || !temp_arena) return -1;
-
-    local_x = positive_mod_i32(chunk_x, 32);
-    local_z = positive_mod_i32(chunk_z, 32);
-
-    rc = mc_anvil_read_chunk_nbt(region_path, local_x, local_z, &nbt_buf, &nbt_len);
-    if (rc != 0) goto cleanup;
+    if (!nbt_buf || nbt_len == 0 || !out_chunk || !be_store || !temp_arena) return -1;
 
     if (mc_nbt_read_named_root_arena(nbt_buf, nbt_len, temp_arena, &root, &bytes_read) != 0 || !root) {
         rc = -1;
@@ -353,6 +344,20 @@ int mc_anvil_load_chunk(const char *region_path,
     if (!mc_anvil_validate_chunk(root)) {
         rc = -1;
         goto cleanup;
+    }
+
+    {
+        const mc_nbt_tag_t *xpos_tag = mc_nbt_compound_get(root, "xPos");
+        const mc_nbt_tag_t *zpos_tag = mc_nbt_compound_get(root, "zPos");
+        if (!xpos_tag || xpos_tag->type != MC_NBT_TAG_INT || !zpos_tag || zpos_tag->type != MC_NBT_TAG_INT) {
+            rc = -1;
+            goto cleanup;
+        }
+        if (xpos_tag->payload.int_val != chunk_x || zpos_tag->payload.int_val != chunk_z) {
+            errno = EIO;
+            rc = -1;
+            goto cleanup;
+        }
     }
 
     sections = mc_nbt_compound_get(root, "sections");
@@ -522,8 +527,32 @@ int mc_anvil_load_chunk(const char *region_path,
     rc = 0;
 
 cleanup:
-    free(nbt_buf);
     mc_arena_reset(temp_arena);
+    return rc;
+}
+
+int mc_anvil_load_chunk(const char *region_path,
+                        int chunk_x,
+                        int chunk_z,
+                        mc_chunk_t *out_chunk,
+                        mc_block_entity_store_t *be_store,
+                        mc_arena_t *temp_arena) {
+    uint8_t *nbt_buf = NULL;
+    size_t nbt_len = 0;
+    int local_x;
+    int local_z;
+    int rc;
+
+    if (!region_path || !out_chunk || !be_store || !temp_arena) return -1;
+
+    local_x = positive_mod_i32(chunk_x, 32);
+    local_z = positive_mod_i32(chunk_z, 32);
+
+    rc = mc_anvil_read_chunk_nbt(region_path, local_x, local_z, &nbt_buf, &nbt_len);
+    if (rc != 0) return rc;
+
+    rc = mc_anvil_decode_chunk_nbt(nbt_buf, nbt_len, chunk_x, chunk_z, out_chunk, be_store, temp_arena);
+    free(nbt_buf);
     return rc;
 }
 
@@ -593,6 +622,494 @@ static int write_zeros(FILE *f, size_t n) {
         n -= chunk;
     }
     return 0;
+}
+
+static uint32_t find_free_sector_run(const uint8_t *header, int skip_idx, uint32_t skip_off, uint8_t skip_cnt, uint8_t required_cnt, uint64_t file_size) {
+    if (!header || required_cnt == 0) return 0;
+
+    uint32_t sector_cap = (uint32_t)((file_size + (MC_ANVIL_SECTOR_BYTES - 1)) / MC_ANVIL_SECTOR_BYTES);
+    if (sector_cap < 2) sector_cap = 2;
+
+    size_t used_len = (size_t)sector_cap;
+    uint8_t *used = (uint8_t *)calloc(used_len, sizeof(*used));
+    if (!used) return 0;
+
+    used[0] = 1;
+    used[1] = 1;
+
+    for (int i = 0; i < 1024; i++) {
+        uint32_t entry = read_be32(header + (size_t)i * 4u);
+        uint32_t off = entry >> 8;
+        uint8_t cnt = (uint8_t)(entry & 0xFF);
+        if (off == 0 || cnt == 0) continue;
+        if (i == skip_idx && off == skip_off && cnt == skip_cnt) continue;
+
+        uint64_t end = (uint64_t)off + (uint64_t)cnt;
+        if (end > used_len) {
+            size_t new_len = (size_t)end;
+            uint8_t *next = (uint8_t *)realloc(used, new_len);
+            if (!next) {
+                free(used);
+                return 0;
+            }
+            memset(next + used_len, 0, new_len - used_len);
+            used = next;
+            used_len = new_len;
+        }
+        for (uint32_t s = 0; s < cnt; s++) {
+            used[off + s] = 1;
+        }
+    }
+
+    for (uint32_t start = 2; start + required_cnt <= used_len; start++) {
+        bool free_run = true;
+        for (uint32_t s = 0; s < required_cnt; s++) {
+            if (used[start + s]) {
+                free_run = false;
+                start += s;
+                break;
+            }
+        }
+        if (free_run) {
+            free(used);
+            return start;
+        }
+    }
+
+    uint32_t result = (uint32_t)used_len;
+    free(used);
+    return result;
+}
+
+static mc_nbt_tag_t *nbt_new_tag_local(mc_nbt_type_t type, const char *name) {
+    mc_nbt_tag_t *tag = (mc_nbt_tag_t *)calloc(1, sizeof(*tag));
+    if (!tag) return NULL;
+    tag->type = type;
+    if (name) {
+        tag->name = strdup(name);
+        if (!tag->name) {
+            free(tag);
+            return NULL;
+        }
+    }
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_string_local(const char *name, const char *value) {
+    mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_STRING, name);
+    if (!tag) return NULL;
+    tag->payload.string_val = strdup(value ? value : "");
+    if (!tag->payload.string_val) {
+        mc_nbt_free(tag);
+        return NULL;
+    }
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_byte_local(const char *name, int8_t value) {
+    mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_BYTE, name);
+    if (tag) tag->payload.byte_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_int_local(const char *name, int32_t value) {
+    mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_INT, name);
+    if (tag) tag->payload.int_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_long_array_local(const char *name, const int64_t *src, int32_t len) {
+    mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_LONG_ARRAY, name);
+    if (!tag) return NULL;
+    tag->payload.long_array.length = len;
+    if (len > 0) {
+        size_t nbytes = (size_t)len * sizeof(*src);
+        tag->payload.long_array.data = (int64_t *)malloc(nbytes);
+        if (!tag->payload.long_array.data) {
+            mc_nbt_free(tag);
+            return NULL;
+        }
+        memcpy(tag->payload.long_array.data, src, nbytes);
+    }
+    return tag;
+}
+
+static int compound_add_local(mc_nbt_tag_t *compound, mc_nbt_tag_t *child) {
+    mc_nbt_tag_t **next;
+    int32_t len;
+
+    if (!compound || compound->type != MC_NBT_TAG_COMPOUND || !child) return -1;
+    len = compound->payload.compound.length;
+    next = (mc_nbt_tag_t **)realloc(compound->payload.compound.children, (size_t)(len + 1) * sizeof(*next));
+    if (!next) return -1;
+    compound->payload.compound.children = next;
+    compound->payload.compound.children[len] = child;
+    compound->payload.compound.length = len + 1;
+    return 0;
+}
+
+static int list_add_local(mc_nbt_tag_t *list, mc_nbt_tag_t *item) {
+    mc_nbt_tag_t **next;
+    int32_t len;
+
+    if (!list || list->type != MC_NBT_TAG_LIST || !item) return -1;
+    if (list->payload.list.length == 0) {
+        list->payload.list.elem_type = item->type;
+    } else if (list->payload.list.elem_type != item->type) {
+        return -1;
+    }
+    len = list->payload.list.length;
+    next = (mc_nbt_tag_t **)realloc(list->payload.list.items, (size_t)(len + 1) * sizeof(*next));
+    if (!next) return -1;
+    list->payload.list.items = next;
+    list->payload.list.items[len] = item;
+    list->payload.list.length = len + 1;
+    return 0;
+}
+
+static int key_to_name_and_props(const char *key, char *name_buf, size_t name_cap, mc_nbt_tag_t **out_props) {
+    const char *open;
+    const char *close;
+    size_t name_len;
+    mc_nbt_tag_t *props = NULL;
+
+    if (out_props) *out_props = NULL;
+    if (!key || !name_buf || name_cap == 0) return -1;
+
+    open = strchr(key, '[');
+    if (!open) {
+        name_len = strlen(key);
+        if (name_len + 1 > name_cap) return -1;
+        memcpy(name_buf, key, name_len + 1);
+        return 0;
+    }
+
+    close = strrchr(open, ']');
+    if (!close || close <= open) return -1;
+    name_len = (size_t)(open - key);
+    if (name_len + 1 > name_cap) return -1;
+    memcpy(name_buf, key, name_len);
+    name_buf[name_len] = '\0';
+
+    props = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "Properties");
+    if (!props) return -1;
+
+    const char *p = open + 1;
+    while (p < close) {
+        const char *eq = memchr(p, '=', (size_t)(close - p));
+        const char *end = memchr(p, ',', (size_t)(close - p));
+        if (!end) end = close;
+        if (!eq || eq >= end) {
+            mc_nbt_free(props);
+            return -1;
+        }
+        size_t key_len = (size_t)(eq - p);
+        size_t val_len = (size_t)(end - eq - 1);
+        char prop_name[128];
+        char prop_val[128];
+        if (key_len == 0 || key_len >= sizeof(prop_name) || val_len >= sizeof(prop_val)) {
+            mc_nbt_free(props);
+            return -1;
+        }
+        memcpy(prop_name, p, key_len);
+        prop_name[key_len] = '\0';
+        memcpy(prop_val, eq + 1, val_len);
+        prop_val[val_len] = '\0';
+        if (compound_add_local(props, nbt_new_string_local(prop_name, prop_val)) != 0) {
+            mc_nbt_free(props);
+            return -1;
+        }
+        p = end + (end < close ? 1 : 0);
+    }
+
+    if (out_props) *out_props = props;
+    else mc_nbt_free(props);
+    return 0;
+}
+
+static mc_nbt_tag_t *make_block_state_entry(mc_global_state_id_t state_id) {
+    const char *key = mc_global_state_key(state_id);
+    char name_buf[256];
+    mc_nbt_tag_t *props = NULL;
+    mc_nbt_tag_t *entry = NULL;
+
+    if (!key) key = "minecraft:air";
+    if (key_to_name_and_props(key, name_buf, sizeof(name_buf), &props) != 0) return NULL;
+
+    entry = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, NULL);
+    if (!entry) {
+        mc_nbt_free(props);
+        return NULL;
+    }
+    if (compound_add_local(entry, nbt_new_string_local("Name", name_buf)) != 0) {
+        mc_nbt_free(props);
+        mc_nbt_free(entry);
+        return NULL;
+    }
+    if (props && props->payload.compound.length > 0) {
+        if (compound_add_local(entry, props) != 0) {
+            mc_nbt_free(props);
+            mc_nbt_free(entry);
+            return NULL;
+        }
+    } else {
+        mc_nbt_free(props);
+    }
+    return entry;
+}
+
+static int build_section_block_states(const mc_chunk_t *chunk, int sec_idx, mc_nbt_tag_t **out) {
+    mc_nbt_tag_t *block_states = NULL;
+    mc_nbt_tag_t *palette = NULL;
+    uint32_t values[4096];
+    mc_global_state_id_t palette_ids[4096];
+    int32_t palette_len = 0;
+    int bits;
+    int64_t *packed = NULL;
+    int32_t packed_len = 0;
+
+    if (out) *out = NULL;
+    if (!chunk || sec_idx < 0 || sec_idx >= MC_WORLD_SECTION_COUNT || !out) return -1;
+
+    for (int i = 0; i < 4096; i++) {
+        int y = i >> 8;
+        int rem = i & 255;
+        int z = rem >> 4;
+        int x = rem & 15;
+        int world_y = (sec_idx * 16) + y + MC_WORLD_MIN_Y;
+        mc_global_state_id_t state_id = mc_chunk_get_block(chunk, x, world_y, z);
+        int found = -1;
+        for (int32_t pi = 0; pi < palette_len; pi++) {
+            if (palette_ids[pi] == state_id) {
+                found = pi;
+                break;
+            }
+        }
+        if (found < 0) {
+            found = palette_len;
+            palette_ids[palette_len++] = state_id;
+        }
+        values[i] = (uint32_t)found;
+    }
+
+    block_states = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "block_states");
+    palette = nbt_new_tag_local(MC_NBT_TAG_LIST, "palette");
+    if (!block_states || !palette) goto fail;
+    palette->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+
+    for (int32_t i = 0; i < palette_len; i++) {
+        mc_nbt_tag_t *entry = make_block_state_entry(palette_ids[i]);
+        if (!entry || list_add_local(palette, entry) != 0) {
+            mc_nbt_free(entry);
+            goto fail;
+        }
+    }
+    if (compound_add_local(block_states, palette) != 0) goto fail;
+    palette = NULL;
+
+    if (palette_len > 1) {
+        bits = ceil_log2_u32((uint32_t)palette_len);
+        if (bits < 4) bits = 4;
+        if (mc_packed_pack_compact_u32(values, 4096, bits, &packed, &packed_len) != 0) goto fail;
+        mc_nbt_tag_t *data = nbt_new_long_array_local("data", packed, packed_len);
+        if (!data || compound_add_local(block_states, data) != 0) {
+            mc_nbt_free(data);
+            goto fail;
+        }
+    }
+
+    *out = block_states;
+    free(packed);
+    return 0;
+
+fail:
+    free(packed);
+    mc_nbt_free(palette);
+    mc_nbt_free(block_states);
+    return -1;
+}
+
+static int build_section_biomes(mc_nbt_tag_t **out) {
+    mc_nbt_tag_t *biomes = NULL;
+    mc_nbt_tag_t *palette = NULL;
+
+    if (out) *out = NULL;
+    if (!out) return -1;
+
+    biomes = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "biomes");
+    palette = nbt_new_tag_local(MC_NBT_TAG_LIST, "palette");
+    if (!biomes || !palette) goto fail;
+    palette->payload.list.elem_type = MC_NBT_TAG_STRING;
+    if (list_add_local(palette, nbt_new_string_local(NULL, "minecraft:plains")) != 0) goto fail;
+    if (compound_add_local(biomes, palette) != 0) goto fail;
+    palette = NULL;
+    *out = biomes;
+    return 0;
+
+fail:
+    mc_nbt_free(palette);
+    mc_nbt_free(biomes);
+    return -1;
+}
+
+static const char *block_entity_id_for_state(mc_global_state_id_t state_id) {
+    const char *key = mc_global_state_key(state_id);
+    if (!key) return NULL;
+    if (strncmp(key, "minecraft:ender_chest", 21) == 0) return "minecraft:ender_chest";
+    if (strncmp(key, "minecraft:trapped_chest", 23) == 0) return "minecraft:trapped_chest";
+    if (strncmp(key, "minecraft:chest", 15) == 0) return "minecraft:chest";
+    if (strstr(key, "sign")) return "minecraft:sign";
+    return NULL;
+}
+
+static int build_block_entities_list(const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store, mc_nbt_tag_t **out) {
+    mc_nbt_tag_t *list = NULL;
+    int32_t base_x;
+    int32_t base_z;
+
+    if (out) *out = NULL;
+    if (!chunk || !out) return -1;
+
+    list = nbt_new_tag_local(MC_NBT_TAG_LIST, "block_entities");
+    if (!list) return -1;
+    list->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    base_x = chunk->cx * MC_CHUNK_XZ;
+    base_z = chunk->cz * MC_CHUNK_XZ;
+
+    if (be_store && be_store->states) {
+        for (size_t i = 0; i < be_store->cap; i++) {
+            if (be_store->states[i] != 1) continue;
+            mc_pos_t pos = be_store->positions[i];
+            if (pos.x < base_x || pos.x >= base_x + MC_CHUNK_XZ || pos.z < base_z || pos.z >= base_z + MC_CHUNK_XZ) continue;
+            int lx = pos.x - base_x;
+            int lz = pos.z - base_z;
+            mc_global_state_id_t sid = mc_chunk_get_block(chunk, lx, pos.y, lz);
+            const char *id_name = block_entity_id_for_state(sid);
+            mc_nbt_tag_t *entry = NULL;
+            if (!id_name) continue;
+            entry = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, NULL);
+            if (!entry) goto fail;
+            if (compound_add_local(entry, nbt_new_string_local("id", id_name)) != 0 ||
+                compound_add_local(entry, nbt_new_int_local("x", pos.x)) != 0 ||
+                compound_add_local(entry, nbt_new_int_local("y", pos.y)) != 0 ||
+                compound_add_local(entry, nbt_new_int_local("z", pos.z)) != 0 ||
+                list_add_local(list, entry) != 0) {
+                mc_nbt_free(entry);
+                goto fail;
+            }
+        }
+    }
+
+    *out = list;
+    return 0;
+
+fail:
+    mc_nbt_free(list);
+    return -1;
+}
+
+static int build_chunk_nbt_root(const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store, mc_nbt_tag_t **out_root) {
+    mc_nbt_tag_t *root = NULL;
+    mc_nbt_tag_t *sections = NULL;
+    mc_nbt_tag_t *block_entities = NULL;
+    const int32_t min_section_y = MC_WORLD_MIN_Y / 16;
+
+    if (out_root) *out_root = NULL;
+    if (!chunk || !out_root) return -1;
+
+    root = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "");
+    sections = nbt_new_tag_local(MC_NBT_TAG_LIST, "sections");
+    block_entities = NULL;
+    if (!root || !sections) goto fail;
+    sections->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+
+    for (int sec_idx = 0; sec_idx < MC_WORLD_SECTION_COUNT; sec_idx++) {
+        mc_nbt_tag_t *section = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, NULL);
+        mc_nbt_tag_t *block_states = NULL;
+        mc_nbt_tag_t *biomes = NULL;
+        if (!section) goto fail;
+        if (compound_add_local(section, nbt_new_byte_local("Y", (int8_t)(min_section_y + sec_idx))) != 0) {
+            mc_nbt_free(section);
+            goto fail;
+        }
+        if (build_section_block_states(chunk, sec_idx, &block_states) != 0 ||
+            build_section_biomes(&biomes) != 0 ||
+            compound_add_local(section, block_states) != 0 ||
+            compound_add_local(section, biomes) != 0 ||
+            list_add_local(sections, section) != 0) {
+            mc_nbt_free(block_states);
+            mc_nbt_free(biomes);
+            mc_nbt_free(section);
+            goto fail;
+        }
+    }
+
+    if (build_block_entities_list(chunk, be_store, &block_entities) != 0) goto fail;
+
+    if (compound_add_local(root, nbt_new_int_local("xPos", chunk->cx)) != 0 ||
+        compound_add_local(root, nbt_new_int_local("yPos", min_section_y)) != 0 ||
+        compound_add_local(root, nbt_new_int_local("zPos", chunk->cz)) != 0 ||
+        compound_add_local(root, nbt_new_int_local("DataVersion", MC_ANVIL_EXPECTED_DATA_VERSION)) != 0 ||
+        compound_add_local(root, nbt_new_string_local("Status", "minecraft:full")) != 0 ||
+        compound_add_local(root, sections) != 0 ||
+        compound_add_local(root, block_entities) != 0) {
+        goto fail;
+    }
+
+    *out_root = root;
+    return 0;
+
+fail:
+    mc_nbt_free(block_entities);
+    mc_nbt_free(sections);
+    mc_nbt_free(root);
+    return -1;
+}
+
+int mc_anvil_write_chunk(const char *region_path, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store) {
+    mc_nbt_tag_t *root = NULL;
+    uint8_t *raw = NULL;
+    size_t raw_len = 0;
+    int local_x;
+    int local_z;
+    int rc = -1;
+
+    if (!region_path || !chunk) return -1;
+    local_x = positive_mod_i32(chunk->cx, 32);
+    local_z = positive_mod_i32(chunk->cz, 32);
+
+    if (build_chunk_nbt_root(chunk, be_store, &root) != 0) goto cleanup;
+    if (mc_nbt_write_named_root(root, &raw, &raw_len) != 0) goto cleanup;
+    rc = mc_anvil_write_chunk_nbt(region_path, local_x, local_z, raw, raw_len);
+
+cleanup:
+    free(raw);
+    mc_nbt_free(root);
+    return rc;
+}
+
+int mc_anvil_encode_chunk_nbt(const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store, uint8_t **out_raw, size_t *out_raw_len) {
+    mc_nbt_tag_t *root = NULL;
+    uint8_t *raw = NULL;
+    size_t raw_len = 0;
+    int rc = -1;
+
+    if (out_raw) *out_raw = NULL;
+    if (out_raw_len) *out_raw_len = 0;
+    if (!chunk || !out_raw || !out_raw_len) return -1;
+
+    if (build_chunk_nbt_root(chunk, be_store, &root) != 0) goto cleanup;
+    if (mc_nbt_write_named_root(root, &raw, &raw_len) != 0) goto cleanup;
+
+    *out_raw = raw;
+    *out_raw_len = raw_len;
+    raw = NULL;
+    rc = 0;
+
+cleanup:
+    free(raw);
+    mc_nbt_free(root);
+    return rc;
 }
 
 int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len) {
@@ -671,21 +1188,18 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
     uint8_t old_cnt = (uint8_t)(entry & 0xFF);
 
     uint32_t new_off = 0;
-    uint8_t new_cnt = 0;
+    uint8_t new_cnt = required_sectors;
 
     if (old_off != 0 && old_cnt != 0 && old_cnt >= required_sectors) {
         new_off = old_off;
-        new_cnt = old_cnt;
     } else {
-        uint64_t aligned = (file_size + (MC_ANVIL_SECTOR_BYTES - 1)) / MC_ANVIL_SECTOR_BYTES;
-        if (aligned < 2) aligned = 2;
-        if (aligned > 0xFFFFFFu) {
+        new_off = find_free_sector_run(header, idx, old_off, old_cnt, required_sectors, file_size);
+        if (new_off < 2) new_off = 2;
+        if (new_off > 0xFFFFFFu) {
             free(comp);
             fclose(f);
             return -1;
         }
-        new_off = (uint32_t)aligned;
-        new_cnt = required_sectors;
     }
 
     uint64_t chunk_off_bytes = (uint64_t)new_off * MC_ANVIL_SECTOR_BYTES;

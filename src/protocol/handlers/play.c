@@ -88,6 +88,8 @@ static int buf_w_u8(mc_buf_t *b, uint8_t v);
 static int buf_w_u16_be(mc_buf_t *b, uint16_t v);
 static int buf_w_varint(mc_buf_t *b, int32_t v);
 static void close_active_window(mc_conn_t *c, bool notify_client);
+static void sent_chunks_clear(mc_conn_t *c);
+static void pending_chunks_clear(mc_conn_t *c);
 static int container_block_entity_type(int32_t state_id);
 static const char *block_entity_name_for_state(int32_t state_id);
 static bool is_chest_state(int32_t state_id);
@@ -394,12 +396,29 @@ static int ensure_player_loaded(mc_conn_t *c) {
 }
 
 void proto_play_conn_cleanup(mc_conn_t *c) {
-    if (!c || !c->player) return;
+    if (!c) return;
+
     close_active_window(c, false);
-    (void)save_player_data(c);
-    mc_player_data_clear(c->player);
-    free(c->player);
-    c->player = NULL;
+    if (c->player) {
+        (void)save_player_data(c);
+        mc_player_data_clear(c->player);
+        free(c->player);
+        c->player = NULL;
+    }
+
+    c->play_init_sent = false;
+    c->play_ready = false;
+    c->teleport_id = 0;
+    c->has_pos = false;
+    c->has_center_chunk = false;
+    c->center_cx = 0;
+    c->center_cz = 0;
+    c->awaiting_keepalive = false;
+    c->keepalive_id = 0;
+    c->last_keepalive_sent_ms = 0;
+    c->remote_players_len = 0;
+    sent_chunks_clear(c);
+    pending_chunks_clear(c);
 }
 
 static int send_game_mode_event(mc_conn_t *c, int32_t gamemode) {
@@ -2951,8 +2970,6 @@ int proto_play_send_initial(mc_conn_t *c) {
     if (sent_chunks_init(c, 1024) != 0 || pending_chunks_init(c, 1024) != 0) return -1;
     sent_chunks_clear(c);
     pending_chunks_clear(c);
-    c->has_center_chunk = false;
-    if (rebuild_chunk_stream(c, world, 0, 0, view_distance) != 0) return -1;
 
     /* 26.1 default spawn packet carries LevelData.RespawnData:
      * GlobalPos(dimension + block pos) + yaw + pitch. */
@@ -2961,6 +2978,18 @@ int proto_play_send_initial(mc_conn_t *c) {
     double spawn_z = (c->player ? c->player->pos_z : 0.5);
     float spawn_yaw = (c->player ? c->player->yaw : 0.0f);
     float spawn_pitch = (c->player ? c->player->pitch : 0.0f);
+    int32_t spawn_chunk_x = block_to_chunk(floor_i32_from_f64(spawn_x));
+    int32_t spawn_chunk_z = block_to_chunk(floor_i32_from_f64(spawn_z));
+
+    c->x = spawn_x;
+    c->y = spawn_y;
+    c->z = spawn_z;
+    c->yaw = spawn_yaw;
+    c->pitch = spawn_pitch;
+    c->has_pos = true;
+    c->has_center_chunk = false;
+    if (rebuild_chunk_stream(c, world, spawn_chunk_x, spawn_chunk_z, view_distance) != 0) return -1;
+
     pos = 0;
     if (w_string(buf, sizeof(buf), &pos, "minecraft:overworld") != 0) return -1;
     if (w_position(buf, sizeof(buf), &pos, floor_i32_from_f64(spawn_x), floor_i32_from_f64(spawn_y), floor_i32_from_f64(spawn_z)) != 0) return -1;
@@ -2970,6 +2999,7 @@ int proto_play_send_initial(mc_conn_t *c) {
 
     /* Synchronize Player Position */
     if (send_sync_position(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch) != 0) return -1;
+    if (chunk_stream_tick(c) != 0) return -1;
 
     if (send_player_abilities(c) != 0) return -1;
     if (sync_inventory_full(c) != 0) return -1;

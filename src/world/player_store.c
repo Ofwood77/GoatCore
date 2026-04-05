@@ -310,9 +310,9 @@ static mc_nbt_tag_t *make_slot_compound(int32_t slot_index, const mc_slot_t *slo
 
     entry = nbt_new(MC_NBT_TAG_COMPOUND, NULL);
     if (!entry) return NULL;
-    if (compound_add(entry, nbt_new_byte("Slot", (int8_t)slot_index)) != 0 ||
+    if (compound_add(entry, nbt_new_byte("slot", (int8_t)slot_index)) != 0 ||
         compound_add(entry, nbt_new_string("id", item_name)) != 0 ||
-        compound_add(entry, nbt_new_byte("Count", (int8_t)slot->count)) != 0) {
+        compound_add(entry, nbt_new_byte("count", (int8_t)slot->count)) != 0) {
         mc_nbt_free(entry);
         return NULL;
     }
@@ -333,6 +333,23 @@ static int build_inventory_list(mc_nbt_tag_t *list, const mc_slot_t *slots, int 
     return 0;
 }
 
+static int build_single_slot_compound(mc_nbt_tag_t *compound, const char *name, const mc_slot_t *slot) {
+    mc_nbt_tag_t *entry;
+
+    if (!compound || compound->type != MC_NBT_TAG_COMPOUND || !name) return -1;
+    if (!slot || !slot->present || slot->count <= 0 || slot->item_id <= 0) return 0;
+
+    entry = make_slot_compound(0, slot);
+    if (!entry) return -1;
+    free(entry->name);
+    entry->name = strdup(name);
+    if (!entry->name) {
+        mc_nbt_free(entry);
+        return -1;
+    }
+    return compound_add(compound, entry);
+}
+
 static int parse_inventory_list(const mc_nbt_tag_t *list, mc_slot_t *slots, int slot_count) {
     if (!list || !slots || slot_count < 0) return -1;
     if (list->type != MC_NBT_TAG_LIST || list->payload.list.elem_type != MC_NBT_TAG_COMPOUND) return -1;
@@ -347,10 +364,11 @@ static int parse_inventory_list(const mc_nbt_tag_t *list, mc_slot_t *slots, int 
         int32_t item_id = -1;
 
         if (!entry || entry->type != MC_NBT_TAG_COMPOUND) continue;
-        slot_tag = mc_nbt_compound_get(entry, "Slot");
+        slot_tag = mc_nbt_compound_get(entry, "slot");
+        if (!slot_tag) slot_tag = mc_nbt_compound_get(entry, "Slot");
         id_tag = mc_nbt_compound_get(entry, "id");
-        count_tag = mc_nbt_compound_get(entry, "Count");
-        if (!count_tag) count_tag = mc_nbt_compound_get(entry, "count");
+        count_tag = mc_nbt_compound_get(entry, "count");
+        if (!count_tag) count_tag = mc_nbt_compound_get(entry, "Count");
         if (nbt_num_to_i32(slot_tag, &slot_index) != 0 || slot_index < 0 || slot_index >= slot_count) continue;
         if (!id_tag || id_tag->type != MC_NBT_TAG_STRING) continue;
         if (nbt_num_to_i32(count_tag, &count) != 0 || count <= 0) continue;
@@ -360,6 +378,23 @@ static int parse_inventory_list(const mc_nbt_tag_t *list, mc_slot_t *slots, int 
     }
 
     return 0;
+}
+
+static int parse_single_slot_compound(const mc_nbt_tag_t *entry, mc_slot_t *slot) {
+    const mc_nbt_tag_t *id_tag;
+    const mc_nbt_tag_t *count_tag;
+    int32_t count = 0;
+    int32_t item_id = -1;
+
+    if (!entry || !slot || entry->type != MC_NBT_TAG_COMPOUND) return -1;
+    id_tag = mc_nbt_compound_get(entry, "id");
+    count_tag = mc_nbt_compound_get(entry, "count");
+    if (!count_tag) count_tag = mc_nbt_compound_get(entry, "Count");
+    if (!id_tag || id_tag->type != MC_NBT_TAG_STRING) return -1;
+    if (nbt_num_to_i32(count_tag, &count) != 0 || count <= 0) return -1;
+    item_id = mc_minecraft_item_id(id_tag->payload.string_val);
+    if (item_id <= 0) return -1;
+    return mc_slot_set_simple(slot, item_id, count);
 }
 
 static int player_build_nbt(const mc_player_data_t *player, mc_nbt_tag_t **out_root) {
@@ -399,7 +434,10 @@ static int player_build_nbt(const mc_player_data_t *player, mc_nbt_tag_t **out_r
         compound_add(root, inv) != 0 ||
         compound_add(root, ender) != 0 ||
         compound_add(root, nbt_new_int("playerGameType", player->gamemode)) != 0 ||
-        compound_add(root, nbt_new_int("SelectedItemSlot", player->inventory.selected_hotbar_slot)) != 0) {
+        compound_add(root, nbt_new_int("SelectedItemSlot", player->inventory.selected_hotbar_slot)) != 0 ||
+        compound_add(root, nbt_new_int("mcInventoryStateId", player->inventory.state_id)) != 0 ||
+        compound_add(root, nbt_new_int("mcEnderStateId", player->ender_state_id)) != 0 ||
+        build_single_slot_compound(root, "mcCursorItem", &player->inventory.cursor_slot) != 0) {
         goto fail;
     }
 
@@ -424,6 +462,9 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
     const mc_nbt_tag_t *rot;
     const mc_nbt_tag_t *gamemode;
     const mc_nbt_tag_t *selected;
+    const mc_nbt_tag_t *inventory_state;
+    const mc_nbt_tag_t *ender_state;
+    const mc_nbt_tag_t *cursor_item;
     const mc_nbt_tag_t *inv;
     const mc_nbt_tag_t *ender;
     double px = 0.5;
@@ -459,8 +500,17 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
     selected = mc_nbt_compound_get(root, "SelectedItemSlot");
     if (selected) (void)nbt_num_to_i32(selected, &out->inventory.selected_hotbar_slot);
 
+    inventory_state = mc_nbt_compound_get(root, "mcInventoryStateId");
+    if (inventory_state) (void)nbt_num_to_i32(inventory_state, &out->inventory.state_id);
+
+    ender_state = mc_nbt_compound_get(root, "mcEnderStateId");
+    if (ender_state) (void)nbt_num_to_i32(ender_state, &out->ender_state_id);
+
     inv = mc_nbt_compound_get(root, "Inventory");
     if (inv) (void)parse_inventory_list(inv, out->inventory.slots, MC_PLAYER_SLOT_COUNT);
+
+    cursor_item = mc_nbt_compound_get(root, "mcCursorItem");
+    if (cursor_item) (void)parse_single_slot_compound(cursor_item, &out->inventory.cursor_slot);
 
     ender = mc_nbt_compound_get(root, "EnderItems");
     if (ender) (void)parse_inventory_list(ender, out->ender_chest, MC_CONTAINER_SLOT_COUNT);

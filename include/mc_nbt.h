@@ -8,6 +8,8 @@
 
 #include "arena.h"
 
+#define MC_ANVIL_EXPECTED_DATA_VERSION 4785
+
 typedef enum {
     MC_NBT_TAG_END = 0,
     MC_NBT_TAG_BYTE = 1,
