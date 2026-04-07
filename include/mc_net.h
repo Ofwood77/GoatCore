@@ -86,6 +86,8 @@ typedef struct mc_conn {
     int32_t center_cx;
     int32_t center_cz;
     int32_t next_window_id;
+    bool chunk_refresh_ping_pending;
+    int32_t chunk_refresh_ping_id;
 
     struct {
         int64_t *keys;

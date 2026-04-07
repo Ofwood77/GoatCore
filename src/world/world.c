@@ -269,6 +269,16 @@ bool mc_world_debug_container_match(const mc_world_t *w, int32_t x, int32_t y, i
     return w->debug_container_x == x && w->debug_container_y == y && w->debug_container_z == z;
 }
 
+mc_block_entity_t *mc_world_get_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
+    if (!w) return NULL;
+    return mc_be_store_get(&w->block_entities, (mc_pos_t){x, y, z});
+}
+
+int mc_world_put_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z, const mc_block_entity_t *entity) {
+    if (!w || !entity) return -1;
+    return mc_be_store_put(&w->block_entities, (mc_pos_t){x, y, z}, *entity) ? 0 : -1;
+}
+
 int mc_world_remove_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     if (!w) return -1;
     return mc_be_store_remove(&w->block_entities, (mc_pos_t){x, y, z}) ? 0 : 1;
@@ -1095,6 +1105,21 @@ int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
         log_info("containers debug: flush chunk=(%d,%d) block=(%d,%d,%d) state_id=%d key=%s", cx, cz, x, y, z, sid,
                  mc_block_state_key(sid) ? mc_block_state_key(sid) : "(null)");
     }
+    return 0;
+}
+
+int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z) {
+    if (!w) return -1;
+    int32_t cx = 0;
+    int32_t cz = 0;
+    int lx = 0;
+    int lz = 0;
+    if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) != 0) return -1;
+    (void)lx;
+    (void)lz;
+    mc_chunk_t *chunk = mc_world_get_chunk(w, cx, cz, UINT32_MAX);
+    if (!chunk) return -1;
+    chunk->dirty = true;
     return 0;
 }
 

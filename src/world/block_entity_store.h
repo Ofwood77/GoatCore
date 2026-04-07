@@ -1,6 +1,8 @@
 #ifndef MC_BLOCK_ENTITY_STORE_H
 #define MC_BLOCK_ENTITY_STORE_H
 
+#include "mc_inventory.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -14,7 +16,11 @@ typedef struct {
 typedef enum {
     MC_BLOCK_ENTITY_NONE = 0,
     MC_BLOCK_ENTITY_CHEST = 1,
-    MC_BLOCK_ENTITY_SIGN = 2,
+    MC_BLOCK_ENTITY_BARREL = 2,
+    MC_BLOCK_ENTITY_DROPPER = 3,
+    MC_BLOCK_ENTITY_SHULKER_BOX = 4,
+    MC_BLOCK_ENTITY_ENDER_CHEST = 5,
+    MC_BLOCK_ENTITY_SIGN = 6,
     MC_BLOCK_ENTITY_GENERIC = 255
 } mc_block_entity_type_t;
 
@@ -23,9 +29,9 @@ typedef struct {
     uint16_t flags;
     union {
         struct {
-            uint32_t inventory_ref;
             uint32_t slot_count;
-        } chest;
+            mc_slot_t slots[MC_CONTAINER_SLOT_COUNT];
+        } container;
 
         struct {
             uint32_t text_ref;

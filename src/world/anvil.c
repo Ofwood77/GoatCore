@@ -1,6 +1,7 @@
 #include "mc_anvil.h"
 
 #include "block_registry.h"
+#include "generated_minecraft_ids.h"
 #include "generated_registries.h"
 #include "mc_packed.h"
 #include "mc_world.h"
@@ -48,6 +49,17 @@ static int cmp_nbt_tag_ptr_name(const void *a, const void *b) {
     if (!ta || !tb) return (ta != NULL) - (tb != NULL);
     if (!ta->name || !tb->name) return (ta->name != NULL) - (tb->name != NULL);
     return strcmp(ta->name, tb->name);
+}
+
+static int nbt_num_to_i32_local(const mc_nbt_tag_t *tag, int32_t *out) {
+    if (!tag || !out) return -1;
+    switch (tag->type) {
+        case MC_NBT_TAG_BYTE: *out = tag->payload.byte_val; return 0;
+        case MC_NBT_TAG_SHORT: *out = tag->payload.short_val; return 0;
+        case MC_NBT_TAG_INT: *out = tag->payload.int_val; return 0;
+        case MC_NBT_TAG_LONG: *out = (int32_t)tag->payload.long_val; return 0;
+        default: return -1;
+    }
 }
 
 static char *canonicalize_palette_key_in_arena(const char *name, const mc_nbt_tag_t *props, mc_arena_t *arena) {
@@ -153,8 +165,15 @@ static mc_block_entity_type_t block_entity_type_from_id(const char *id) {
     if (!id) return MC_BLOCK_ENTITY_NONE;
     if (strcmp(id, "minecraft:chest") == 0 || strcmp(id, "minecraft:trapped_chest") == 0 ||
         strcmp(id, "minecraft:ender_chest") == 0) {
-        return MC_BLOCK_ENTITY_CHEST;
+        return strcmp(id, "minecraft:ender_chest") == 0 ? MC_BLOCK_ENTITY_ENDER_CHEST : MC_BLOCK_ENTITY_CHEST;
     }
+    if (strcmp(id, "minecraft:barrel") == 0) return MC_BLOCK_ENTITY_BARREL;
+    if (strcmp(id, "minecraft:dropper") == 0 || strcmp(id, "minecraft:dispenser") == 0 ||
+        strcmp(id, "minecraft:hopper") == 0 || strcmp(id, "minecraft:furnace") == 0 ||
+        strcmp(id, "minecraft:blast_furnace") == 0 || strcmp(id, "minecraft:smoker") == 0) {
+        return MC_BLOCK_ENTITY_DROPPER;
+    }
+    if (strstr(id, "shulker_box")) return MC_BLOCK_ENTITY_SHULKER_BOX;
     if (strcmp(id, "minecraft:sign") == 0 || strcmp(id, "minecraft:hanging_sign") == 0 ||
         strcmp(id, "minecraft:wall_sign") == 0 || strcmp(id, "minecraft:wall_hanging_sign") == 0) {
         return MC_BLOCK_ENTITY_SIGN;
@@ -493,6 +512,7 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
             const mc_nbt_tag_t *x_tag;
             const mc_nbt_tag_t *y_tag;
             const mc_nbt_tag_t *z_tag;
+            const mc_nbt_tag_t *items_tag;
             mc_block_entity_type_t type;
             mc_pos_t pos;
             mc_block_entity_t entity;
@@ -503,6 +523,7 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
             x_tag = mc_nbt_compound_get(entry, "x");
             y_tag = mc_nbt_compound_get(entry, "y");
             z_tag = mc_nbt_compound_get(entry, "z");
+            items_tag = mc_nbt_compound_get(entry, "Items");
             if (!id_tag || id_tag->type != MC_NBT_TAG_STRING || !id_tag->payload.string_val) continue;
             if (!x_tag || x_tag->type != MC_NBT_TAG_INT || !y_tag || y_tag->type != MC_NBT_TAG_INT || !z_tag ||
                 z_tag->type != MC_NBT_TAG_INT) {
@@ -517,6 +538,33 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
             pos.z = z_tag->payload.int_val;
             memset(&entity, 0, sizeof(entity));
             entity.type = type;
+            if (type == MC_BLOCK_ENTITY_CHEST || type == MC_BLOCK_ENTITY_BARREL || type == MC_BLOCK_ENTITY_DROPPER ||
+                type == MC_BLOCK_ENTITY_SHULKER_BOX || type == MC_BLOCK_ENTITY_ENDER_CHEST) {
+                entity.data.container.slot_count = MC_CONTAINER_SLOT_COUNT;
+                if (items_tag && items_tag->type == MC_NBT_TAG_LIST) {
+                    for (int32_t si = 0; si < items_tag->payload.list.length; si++) {
+                        const mc_nbt_tag_t *slot_entry = items_tag->payload.list.items ? items_tag->payload.list.items[si] : NULL;
+                        const mc_nbt_tag_t *slot_tag;
+                        const mc_nbt_tag_t *item_id_tag;
+                        const mc_nbt_tag_t *count_tag;
+                        int32_t slot_index = -1;
+                        int32_t item_count = 0;
+                        int32_t item_id = -1;
+                        if (!slot_entry || slot_entry->type != MC_NBT_TAG_COMPOUND) continue;
+                        slot_tag = mc_nbt_compound_get(slot_entry, "slot");
+                        if (!slot_tag) slot_tag = mc_nbt_compound_get(slot_entry, "Slot");
+                        item_id_tag = mc_nbt_compound_get(slot_entry, "id");
+                        count_tag = mc_nbt_compound_get(slot_entry, "count");
+                        if (!count_tag) count_tag = mc_nbt_compound_get(slot_entry, "Count");
+                        if (nbt_num_to_i32_local(slot_tag, &slot_index) != 0 || slot_index < 0 || slot_index >= MC_CONTAINER_SLOT_COUNT) continue;
+                        if (!item_id_tag || item_id_tag->type != MC_NBT_TAG_STRING) continue;
+                        if (nbt_num_to_i32_local(count_tag, &item_count) != 0 || item_count <= 0) continue;
+                        item_id = mc_minecraft_item_id(item_id_tag->payload.string_val);
+                        if (item_id <= 0) continue;
+                        (void)mc_slot_set_simple(&entity.data.container.slots[slot_index], item_id, item_count);
+                    }
+                }
+            }
             if (!mc_be_store_put(be_store, pos, entity)) {
                 rc = -1;
                 goto cleanup;
@@ -954,10 +1002,24 @@ fail:
 
 static const char *block_entity_id_for_state(mc_global_state_id_t state_id) {
     const char *key = mc_global_state_key(state_id);
+    const char *props = NULL;
+    static char name_buf[128];
+    size_t base_len = 0;
     if (!key) return NULL;
-    if (strncmp(key, "minecraft:ender_chest", 21) == 0) return "minecraft:ender_chest";
-    if (strncmp(key, "minecraft:trapped_chest", 23) == 0) return "minecraft:trapped_chest";
-    if (strncmp(key, "minecraft:chest", 15) == 0) return "minecraft:chest";
+    props = strchr(key, '[');
+    base_len = props ? (size_t)(props - key) : strlen(key);
+    if (base_len > 0 && base_len < sizeof(name_buf)) {
+        memcpy(name_buf, key, base_len);
+        name_buf[base_len] = '\0';
+        if (mc_minecraft_block_entity_type_id(name_buf) >= 0) return name_buf;
+    }
+    if (strstr(key, "ender_chest")) return "minecraft:ender_chest";
+    if (strstr(key, "trapped_chest")) return "minecraft:trapped_chest";
+    if (strstr(key, "chest")) return "minecraft:chest";
+    if (strstr(key, "barrel")) return "minecraft:barrel";
+    if (strstr(key, "dropper")) return "minecraft:dropper";
+    if (strstr(key, "dispenser")) return "minecraft:dispenser";
+    if (strstr(key, "shulker_box")) return "minecraft:shulker_box";
     if (strstr(key, "sign")) return "minecraft:sign";
     return NULL;
 }
@@ -992,8 +1054,47 @@ static int build_block_entities_list(const mc_chunk_t *chunk, const mc_block_ent
             if (compound_add_local(entry, nbt_new_string_local("id", id_name)) != 0 ||
                 compound_add_local(entry, nbt_new_int_local("x", pos.x)) != 0 ||
                 compound_add_local(entry, nbt_new_int_local("y", pos.y)) != 0 ||
-                compound_add_local(entry, nbt_new_int_local("z", pos.z)) != 0 ||
-                list_add_local(list, entry) != 0) {
+                compound_add_local(entry, nbt_new_int_local("z", pos.z)) != 0) {
+                mc_nbt_free(entry);
+                goto fail;
+            }
+            if (be_store->entities[i].type == MC_BLOCK_ENTITY_CHEST || be_store->entities[i].type == MC_BLOCK_ENTITY_BARREL ||
+                be_store->entities[i].type == MC_BLOCK_ENTITY_DROPPER || be_store->entities[i].type == MC_BLOCK_ENTITY_SHULKER_BOX ||
+                be_store->entities[i].type == MC_BLOCK_ENTITY_ENDER_CHEST) {
+                mc_nbt_tag_t *items = nbt_new_tag_local(MC_NBT_TAG_LIST, "Items");
+                if (!items) {
+                    mc_nbt_free(entry);
+                    goto fail;
+                }
+                items->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+                uint32_t slot_count = be_store->entities[i].data.container.slot_count;
+                if (slot_count > MC_CONTAINER_SLOT_COUNT) slot_count = MC_CONTAINER_SLOT_COUNT;
+                for (uint32_t slot = 0; slot < slot_count; slot++) {
+                    const mc_slot_t *src = &be_store->entities[i].data.container.slots[slot];
+                    const char *item_name;
+                    mc_nbt_tag_t *slot_entry;
+                    if (!src->present || src->count <= 0 || src->item_id <= 0) continue;
+                    item_name = mc_minecraft_item_name(src->item_id);
+                    if (!item_name || !*item_name) continue;
+                    slot_entry = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, NULL);
+                    if (!slot_entry ||
+                        compound_add_local(slot_entry, nbt_new_byte_local("slot", (int8_t)slot)) != 0 ||
+                        compound_add_local(slot_entry, nbt_new_string_local("id", item_name)) != 0 ||
+                        compound_add_local(slot_entry, nbt_new_byte_local("count", (int8_t)src->count)) != 0 ||
+                        list_add_local(items, slot_entry) != 0) {
+                        mc_nbt_free(slot_entry);
+                        mc_nbt_free(items);
+                        mc_nbt_free(entry);
+                        goto fail;
+                    }
+                }
+                if (compound_add_local(entry, items) != 0) {
+                    mc_nbt_free(items);
+                    mc_nbt_free(entry);
+                    goto fail;
+                }
+            }
+            if (list_add_local(list, entry) != 0) {
                 mc_nbt_free(entry);
                 goto fail;
             }

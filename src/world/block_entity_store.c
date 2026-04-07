@@ -3,6 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void block_entity_clear(mc_block_entity_t *entity) {
+    if (!entity) return;
+    if (entity->type == MC_BLOCK_ENTITY_CHEST || entity->type == MC_BLOCK_ENTITY_BARREL || entity->type == MC_BLOCK_ENTITY_DROPPER ||
+        entity->type == MC_BLOCK_ENTITY_SHULKER_BOX || entity->type == MC_BLOCK_ENTITY_ENDER_CHEST) {
+        uint32_t slot_count = entity->data.container.slot_count;
+        if (slot_count > MC_CONTAINER_SLOT_COUNT) slot_count = MC_CONTAINER_SLOT_COUNT;
+        for (uint32_t i = 0; i < slot_count; i++) mc_slot_clear(&entity->data.container.slots[i]);
+    }
+    memset(entity, 0, sizeof(*entity));
+}
+
 enum {
     MC_BE_SLOT_EMPTY = 0,
     MC_BE_SLOT_FILLED = 1,
@@ -124,6 +135,9 @@ void mc_be_store_init(mc_block_entity_store_t *store) {
 
 void mc_be_store_destroy(mc_block_entity_store_t *store) {
     if (!store) return;
+    for (size_t i = 0; i < store->cap; i++) {
+        if (store->states && store->states[i] == MC_BE_SLOT_FILLED) block_entity_clear(&store->entities[i]);
+    }
     free(store->positions);
     free(store->entities);
     free(store->states);
@@ -141,6 +155,7 @@ bool mc_be_store_put(mc_block_entity_store_t *store, mc_pos_t pos, mc_block_enti
     if (found < 0) return false;
 
     if (store->states[(size_t)found] == MC_BE_SLOT_FILLED) {
+        block_entity_clear(&store->entities[(size_t)found]);
         store->entities[(size_t)found] = entity;
         return true;
     }
@@ -167,8 +182,8 @@ bool mc_be_store_remove(mc_block_entity_store_t *store, mc_pos_t pos) {
     if (idx < 0) return false;
     if (store->states[(size_t)idx] != MC_BE_SLOT_FILLED) return false;
 
+    block_entity_clear(&store->entities[(size_t)idx]);
     store->states[(size_t)idx] = MC_BE_SLOT_TOMB;
-    memset(&store->entities[(size_t)idx], 0, sizeof(store->entities[(size_t)idx]));
     store->len--;
     store->tombs++;
     return true;

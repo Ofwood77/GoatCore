@@ -37,6 +37,8 @@ const char *mc_world_path(const mc_world_t *w);
 const mc_world_ids_t *mc_world_ids(const mc_world_t *w);
 int32_t mc_world_runtime_state_id_from_key(const char *key, int32_t fallback);
 int32_t mc_world_normalize_container_state_id(int32_t state_id);
+mc_block_entity_t *mc_world_get_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z);
+int mc_world_put_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z, const mc_block_entity_t *entity);
 int mc_world_remove_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z);
 bool mc_world_debug_containers_enabled(const mc_world_t *w);
 bool mc_world_debug_container_match(const mc_world_t *w, int32_t x, int32_t y, int32_t z);
@@ -49,6 +51,7 @@ mc_chunk_t *mc_world_get_chunk(mc_world_t *w, int32_t cx, int32_t cz, uint32_t p
 
 int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
+int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);
 
 void mc_world_tick(mc_world_t *w, int64_t now_ms);

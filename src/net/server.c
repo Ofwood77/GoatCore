@@ -916,6 +916,9 @@ void net_server_destroy(mc_server_t *s) {
     pthread_mutex_unlock(&s->conns_lock);
     while (c) {
         mc_conn_t *next = c->next;
+        if (atomic_load(&c->state) == MC_STATE_PLAY || c->player) {
+            proto_play_conn_cleanup(c);
+        }
         conn_destroy(c);
         c = next;
     }
