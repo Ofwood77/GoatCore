@@ -1,4 +1,4 @@
-# 🚀 Giga-Server C (Minecraft 26.1)
+# 🚀 Giga-Server C (Minecraft 26.1.1)
 
 A highly performant Minecraft server written entirely in C (C11) from scratch. This project aims to push the boundaries of Vanilla performance by ditching Java's Object-Oriented Programming (OOP) in favor of a strict **Data-Oriented Design (DOD)** architecture.
 
@@ -6,7 +6,7 @@ The ultimate goal: Zero garbage collection, zero memory fragmentation, and a min
 
 ## ✨ Current Features (Phase 2 Completed)
 
-* **Protocol 26.1 Support (Protocol 775):** Complete implementation of the network state machine (Handshake -> Login -> Configuration -> Play).
+* **Protocol 26.1.1 Support (Protocol 775):** Complete implementation of the network state machine (Handshake -> Login -> Configuration -> Play).
 * **RAM Engine (Paletted Container):** In-memory chunk storage with dynamic resizing (0-bit, 4-bit, or 15-bit fallback). The network layer reads this structure directly for "zero-copy" serialization.
 * **Ultra-fast Anvil Reader:** NBT parsing of Vanilla save files (`.mca`) via a linear **Arena Allocator** (zero `malloc` calls per tag). Strict `DataVersion` validation (4786).
 * **Block Entity Store (Spatial Isolation):** Spatial hash table (*Open Addressing*) to completely separate entities (chests, signs) from the global block grid.
