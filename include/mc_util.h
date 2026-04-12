@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 void log_info(const char *fmt, ...);
 void log_error(const char *fmt, ...);
@@ -12,5 +13,9 @@ uint16_t read_be16(const uint8_t *p);
 void write_be16(uint8_t *p, uint16_t v);
 
 int read_file(const char *path, uint8_t **out, size_t *out_len);
+
+int64_t mc_now_us(void);
+bool mc_perf_enabled(void);
+int64_t mc_perf_slow_us(void);
 
 #endif /* MC_UTIL_H */

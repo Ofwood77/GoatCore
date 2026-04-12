@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 void log_info(const char *fmt, ...) {
     va_list ap;
@@ -72,4 +74,38 @@ int read_file(const char *path, uint8_t **out, size_t *out_len) {
     *out = buf;
     *out_len = n;
     return 0;
+}
+
+int64_t mc_now_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + (ts.tv_nsec / 1000);
+}
+
+bool mc_perf_enabled(void) {
+    static int initialized = 0;
+    static bool enabled = false;
+    if (!initialized) {
+        const char *env = getenv("MC_PERF");
+        enabled = env && *env && strcmp(env, "0") != 0;
+        initialized = 1;
+    }
+    return enabled;
+}
+
+int64_t mc_perf_slow_us(void) {
+    static int initialized = 0;
+    static int64_t slow_us = 10000;
+    if (!initialized) {
+        const char *env = getenv("MC_PERF_SLOW_MS");
+        if (env && *env) {
+            char *end = NULL;
+            long ms = strtol(env, &end, 10);
+            if (end != env && *end == '\0' && ms > 0) {
+                slow_us = (int64_t)ms * 1000;
+            }
+        }
+        initialized = 1;
+    }
+    return slow_us;
 }

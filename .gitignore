@@ -1,1 +1,42 @@
+# Build artifacts
+*.o
+*.d
+/mc_server
+/mc_recorder
+/mc_anvil_dump
+/mc_gen_bench
+/test_*
+
+# Runtime-local state
+world/
+*.log
+logs/
+playerdata/
+
+# Raw/generated input data kept local, not versioned.
+data/
+mc_vania_asset/
+
+# Large backups and temporary archives
 *.tar.gz
+*.zip
+*.bak
+
+# Local diagnostics, AI/LLM notes and accidental shell-output fragments
+erreur reseau/
+PLAN*.md
+REPORT*.md
+docs/IA_*.md
+llm/
+reports/
+changed,*
+not staged for commit:
+tatus
+
+# Raw asset dumps. Keep only the minimal runtime blobs and README unignored below.
+assets/*
+!assets/
+!assets/README.txt
+!assets/registry_packets_26_1_1.bin
+!assets/tags_packet_26_1_1.bin
+!assets/chunk_0_0_26_1_1.bin

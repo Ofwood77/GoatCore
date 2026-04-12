@@ -4,6 +4,7 @@
 #include "mc_task_queue.h"
 #include "mc_util.h"
 #include "generated_minecraft_ids.h"
+#include "generated_registries.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -25,9 +26,21 @@
 #define PKT_PLAY_SPAWN_ENTITY MC_PKT_PLAY_CLIENTBOUND_ADD_ENTITY
 #define PKT_PLAY_ENTITY_METADATA MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_DATA
 #define PKT_PLAY_ENTITY_DESTROY MC_PKT_PLAY_CLIENTBOUND_REMOVE_ENTITIES
+#define PKT_PLAY_ENTITY_TELEPORT MC_PKT_PLAY_CLIENTBOUND_TELEPORT_ENTITY
 #define WORLD_EVICT_PERIOD_TICKS 20
 #define WORLD_EVICT_BUDGET 32
 #define ITEM_ENTITY_TTL_MS 30000
+#define ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS 10
+#define ITEM_ENTITY_PICKUP_RADIUS 1.5
+#define ITEM_ENTITY_PICKUP_RADIUS_SQ (ITEM_ENTITY_PICKUP_RADIUS * ITEM_ENTITY_PICKUP_RADIUS)
+#define ITEM_ENTITY_GRAVITY_PER_TICK 0.08
+#define ITEM_ENTITY_MAX_FALL_SPEED 3.92
+#define ITEM_ENTITY_AIR_DRAG 0.98
+#define ITEM_ENTITY_GROUND_DRAG 0.60
+#define ITEM_ENTITY_MIN_HORIZONTAL_SPEED 0.001
+#define ITEM_ENTITY_HALF_WIDTH 0.125
+#define ITEM_ENTITY_HALF_HEIGHT 0.125
+#define ITEM_ENTITY_COLLISION_EPSILON 0.001
 #define ITEM_ENTITY_METADATA_SLOT_INDEX 8
 
 typedef struct {
@@ -36,7 +49,11 @@ typedef struct {
     double x;
     double y;
     double z;
+    double vx;
+    double vy;
+    double vz;
     int64_t expires_at_ms;
+    int32_t pickup_delay_ticks;
     mc_slot_t slot;
 } mc_item_entity_t;
 
@@ -50,11 +67,24 @@ struct mc_server {
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
     pthread_t tick_thread;
+    atomic_int difficulty;
     mc_world_t *world;
     mc_item_entity_t *item_entities;
     size_t item_entities_len;
     size_t item_entities_cap;
 };
+
+static mc_difficulty_t normalize_difficulty(mc_difficulty_t difficulty) {
+    switch (difficulty) {
+        case MC_DIFFICULTY_PEACEFUL:
+        case MC_DIFFICULTY_EASY:
+        case MC_DIFFICULTY_NORMAL:
+        case MC_DIFFICULTY_HARD:
+            return difficulty;
+        default:
+            return MC_DIFFICULTY_NORMAL;
+    }
+}
 
 static const char *state_name(mc_proto_state_t state) {
     switch (state) {
@@ -168,11 +198,14 @@ static void conn_release(mc_conn_t *c) {
 
 static void close_matching_container_window(mc_conn_t *c) {
     if (!c || !c->active_window.open || !c->active_window.container) return;
-    uint8_t window_id = (uint8_t)c->active_window.window_id;
+    int32_t window_id = c->active_window.window_id;
+    uint8_t payload[8];
+    size_t payload_len = 0;
+    if (varint_write(payload, sizeof(payload), window_id, &payload_len) != 0) return;
     mc_container_instance_clear(c->active_window.container);
     free(c->active_window.container);
     memset(&c->active_window, 0, sizeof(c->active_window));
-    (void)conn_write_packet(c, MC_PKT_PLAY_CLIENTBOUND_CONTAINER_CLOSE, &window_id, 1, -1);
+    (void)conn_write_packet(c, MC_PKT_PLAY_CLIENTBOUND_CONTAINER_CLOSE, payload, payload_len, -1);
 }
 
 static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
@@ -198,9 +231,7 @@ static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
 }
 
 static int64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
+    return mc_now_us() / 1000;
 }
 
 static int32_t floor_i32_from_f64(double v) {
@@ -213,6 +244,28 @@ static int32_t floor_i32_from_f64(double v) {
 
 static int32_t block_to_chunk(int32_t b) {
     return (b >= 0) ? (b / 16) : ((b - 15) / 16);
+}
+
+static bool block_state_is_passable(const mc_world_ids_t *ids, int32_t state_id) {
+    if (!ids || state_id < 0) return false;
+    if (state_id == ids->air) return true;
+    for (int i = 0; i < 16; i++) {
+        if (state_id == ids->water_level[i]) return true;
+    }
+    const char *key = mc_block_state_key(state_id);
+    if (!key) return false;
+    return strcmp(key, "minecraft:cave_air") == 0 ||
+           strcmp(key, "minecraft:void_air") == 0 ||
+           strcmp(key, "minecraft:short_grass") == 0 ||
+           strncmp(key, "minecraft:tall_grass[", 21) == 0 ||
+           strcmp(key, "minecraft:fern") == 0 ||
+           strncmp(key, "minecraft:large_fern[", 21) == 0 ||
+           strcmp(key, "minecraft:seagrass") == 0 ||
+           strncmp(key, "minecraft:tall_seagrass[", 24) == 0 ||
+           strcmp(key, "minecraft:dead_bush") == 0 ||
+           strncmp(key, "minecraft:snow[", 15) == 0 ||
+           strncmp(key, "minecraft:vine[", 15) == 0 ||
+           strncmp(key, "minecraft:fire[", 15) == 0;
 }
 
 static int resolve_item_entity_type_id(void) {
@@ -266,9 +319,11 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     mc_server_t *s = (mc_server_t *)calloc(1, sizeof(mc_server_t));
     if (!s) return -1;
     s->cfg = *cfg;
+    s->cfg.difficulty = normalize_difficulty(cfg->difficulty);
     s->next_entity_id = 1;
     s->conns = NULL;
     atomic_init(&s->running, false);
+    atomic_init(&s->difficulty, (int)s->cfg.difficulty);
     if (pthread_mutex_init(&s->conns_lock, NULL) != 0) {
         free(s);
         return -1;
@@ -397,6 +452,20 @@ static int w_u64(uint8_t *buf, size_t cap, size_t *pos, uint64_t v) {
     return 0;
 }
 
+static int w_u32(uint8_t *buf, size_t cap, size_t *pos, uint32_t v) {
+    if (!buf || !pos || *pos + 4 > cap) return -1;
+    buf[*pos + 0] = (uint8_t)((v >> 24) & 0xFF);
+    buf[*pos + 1] = (uint8_t)((v >> 16) & 0xFF);
+    buf[*pos + 2] = (uint8_t)((v >> 8) & 0xFF);
+    buf[*pos + 3] = (uint8_t)(v & 0xFF);
+    *pos += 4;
+    return 0;
+}
+
+static int w_i32(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
+    return w_u32(buf, cap, pos, (uint32_t)v);
+}
+
 static int w_byte(uint8_t *buf, size_t cap, size_t *pos, int8_t v) {
     if (!buf || !pos || *pos + 1 > cap) return -1;
     buf[*pos] = (uint8_t)v;
@@ -425,6 +494,12 @@ static int w_f64(uint8_t *buf, size_t cap, size_t *pos, double v) {
     return w_u64(buf, cap, pos, u);
 }
 
+static int w_f32(uint8_t *buf, size_t cap, size_t *pos, float v) {
+    uint32_t u = 0;
+    memcpy(&u, &v, sizeof(u));
+    return w_u32(buf, cap, pos, u);
+}
+
 static int w_position(uint8_t *buf, size_t cap, size_t *pos, int32_t x, int32_t y, int32_t z) {
     uint64_t packed = ((uint64_t)(x & 0x3FFFFFF) << 38) | ((uint64_t)(z & 0x3FFFFFF) << 12) | ((uint64_t)(y & 0xFFF));
     return w_u64(buf, cap, pos, packed);
@@ -435,6 +510,10 @@ static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     if (varint_write(buf + *pos, cap - *pos, v, &n) != 0) return -1;
     *pos += n;
     return 0;
+}
+
+static int w_bool(uint8_t *buf, size_t cap, size_t *pos, bool v) {
+    return w_ubyte(buf, cap, pos, v ? 1 : 0);
 }
 
 static int w_lpvec3(uint8_t *buf, size_t cap, size_t *pos, double x, double y, double z) {
@@ -522,6 +601,40 @@ static int send_item_entity_metadata(mc_conn_t *c, const mc_item_entity_t *item)
     return rc;
 }
 
+static int send_item_entity_teleport(mc_conn_t *c, const mc_item_entity_t *item) {
+    if (!c || !item) return -1;
+    uint8_t buf[96];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, item->entity_id) != 0) return -1;
+    if (w_f64(buf, sizeof(buf), &pos, item->x) != 0 || w_f64(buf, sizeof(buf), &pos, item->y) != 0 ||
+        w_f64(buf, sizeof(buf), &pos, item->z) != 0) {
+        return -1;
+    }
+    if (w_f64(buf, sizeof(buf), &pos, 0.0) != 0 || w_f64(buf, sizeof(buf), &pos, 0.0) != 0 ||
+        w_f64(buf, sizeof(buf), &pos, 0.0) != 0) {
+        return -1;
+    }
+    if (w_f32(buf, sizeof(buf), &pos, 0.0f) != 0 || w_f32(buf, sizeof(buf), &pos, 0.0f) != 0 ||
+        w_i32(buf, sizeof(buf), &pos, 0) != 0 ||
+        w_bool(buf, sizeof(buf), &pos, item->vy == 0.0) != 0) {
+        return -1;
+    }
+    return conn_write_packet(c, PKT_PLAY_ENTITY_TELEPORT, buf, pos, -1);
+}
+
+static int broadcast_item_entity_teleport(mc_server_t *s, const mc_item_entity_t *item) {
+    if (!s || !item) return -1;
+    int rc = 0;
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
+        if (send_item_entity_teleport(c, item) != 0) {
+            conn_close(c);
+            rc = -1;
+        }
+    }
+    return rc;
+}
+
 static int send_item_entity_destroy(mc_conn_t *c, int32_t entity_id) {
     if (!c) return -1;
     uint8_t buf[16];
@@ -543,13 +656,262 @@ static void destroy_item_entity_at(mc_server_t *s, size_t idx) {
     s->item_entities_len--;
 }
 
+static bool item_entity_intersects_block_at(const mc_item_entity_t *item, int32_t bx, int32_t by, int32_t bz) {
+    if (!item) return false;
+    double min_x = item->x - ITEM_ENTITY_HALF_WIDTH;
+    double max_x = item->x + ITEM_ENTITY_HALF_WIDTH;
+    double min_y = item->y - ITEM_ENTITY_HALF_HEIGHT;
+    double max_y = item->y + ITEM_ENTITY_HALF_HEIGHT;
+    double min_z = item->z - ITEM_ENTITY_HALF_WIDTH;
+    double max_z = item->z + ITEM_ENTITY_HALF_WIDTH;
+    return max_x > (double)bx + ITEM_ENTITY_COLLISION_EPSILON &&
+           min_x < (double)bx + 1.0 - ITEM_ENTITY_COLLISION_EPSILON &&
+           max_y > (double)by + ITEM_ENTITY_COLLISION_EPSILON &&
+           min_y < (double)by + 1.0 - ITEM_ENTITY_COLLISION_EPSILON &&
+           max_z > (double)bz + ITEM_ENTITY_COLLISION_EPSILON &&
+           min_z < (double)bz + 1.0 - ITEM_ENTITY_COLLISION_EPSILON;
+}
+
+static bool item_entity_position_is_free(mc_world_t *world, const mc_world_ids_t *ids, double x, double y, double z) {
+    if (!world || !ids) return false;
+    double min_x = x - ITEM_ENTITY_HALF_WIDTH + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_x = x + ITEM_ENTITY_HALF_WIDTH - ITEM_ENTITY_COLLISION_EPSILON;
+    double min_y = y - ITEM_ENTITY_HALF_HEIGHT + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_y = y + ITEM_ENTITY_HALF_HEIGHT - ITEM_ENTITY_COLLISION_EPSILON;
+    double min_z = z - ITEM_ENTITY_HALF_WIDTH + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_z = z + ITEM_ENTITY_HALF_WIDTH - ITEM_ENTITY_COLLISION_EPSILON;
+    int32_t min_bx = floor_i32_from_f64(min_x);
+    int32_t max_bx = floor_i32_from_f64(max_x);
+    int32_t min_by = floor_i32_from_f64(min_y);
+    int32_t max_by = floor_i32_from_f64(max_y);
+    int32_t min_bz = floor_i32_from_f64(min_z);
+    int32_t max_bz = floor_i32_from_f64(max_z);
+
+    for (int32_t by = min_by; by <= max_by; by++) {
+        for (int32_t bz = min_bz; bz <= max_bz; bz++) {
+            for (int32_t bx = min_bx; bx <= max_bx; bx++) {
+                int32_t state_id = -1;
+                if (mc_world_get_block(world, bx, by, bz, &state_id) != 0) return false;
+                if (!block_state_is_passable(ids, state_id)) return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void item_entity_consider_relocation_candidate(mc_world_t *world, const mc_world_ids_t *ids, const mc_item_entity_t *item,
+                                                      double x, double y, double z, bool *found, double *best_dist_sq,
+                                                      double *best_x, double *best_y, double *best_z) {
+    if (!world || !ids || !item || !found || !best_dist_sq || !best_x || !best_y || !best_z) return;
+    if (!item_entity_position_is_free(world, ids, x, y, z)) return;
+    double dx = x - item->x;
+    double dy = y - item->y;
+    double dz = z - item->z;
+    double dist_sq = dx * dx + dy * dy + dz * dz;
+    if (!*found || dist_sq < *best_dist_sq) {
+        *found = true;
+        *best_dist_sq = dist_sq;
+        *best_x = x;
+        *best_y = y;
+        *best_z = z;
+    }
+}
+
+static bool relocate_item_entity_out_of_block(mc_server_t *s, mc_item_entity_t *item, int32_t bx, int32_t by, int32_t bz) {
+    if (!s || !s->world || !item) return false;
+    const mc_world_ids_t *ids = mc_world_ids(s->world);
+    if (!ids || !item_entity_intersects_block_at(item, bx, by, bz)) return false;
+
+    bool found = false;
+    double best_dist_sq = 0.0;
+    double best_x = item->x;
+    double best_y = item->y;
+    double best_z = item->z;
+    const double eps = ITEM_ENTITY_COLLISION_EPSILON;
+
+    item_entity_consider_relocation_candidate(s->world, ids, item,
+                                              (double)bx - ITEM_ENTITY_HALF_WIDTH - eps, item->y, item->z,
+                                              &found, &best_dist_sq, &best_x, &best_y, &best_z);
+    item_entity_consider_relocation_candidate(s->world, ids, item,
+                                              (double)bx + 1.0 + ITEM_ENTITY_HALF_WIDTH + eps, item->y, item->z,
+                                              &found, &best_dist_sq, &best_x, &best_y, &best_z);
+    item_entity_consider_relocation_candidate(s->world, ids, item,
+                                              item->x, item->y, (double)bz - ITEM_ENTITY_HALF_WIDTH - eps,
+                                              &found, &best_dist_sq, &best_x, &best_y, &best_z);
+    item_entity_consider_relocation_candidate(s->world, ids, item,
+                                              item->x, item->y, (double)bz + 1.0 + ITEM_ENTITY_HALF_WIDTH + eps,
+                                              &found, &best_dist_sq, &best_x, &best_y, &best_z);
+    item_entity_consider_relocation_candidate(s->world, ids, item,
+                                              item->x, (double)by + 1.0 + ITEM_ENTITY_HALF_HEIGHT + eps, item->z,
+                                              &found, &best_dist_sq, &best_x, &best_y, &best_z);
+
+    for (int32_t oy = 1; oy <= 2 && !found; oy++) {
+        double y = (double)by + (double)oy + ITEM_ENTITY_HALF_HEIGHT + eps;
+        for (int32_t dz = -1; dz <= 1; dz++) {
+            for (int32_t dx = -1; dx <= 1; dx++) {
+                item_entity_consider_relocation_candidate(s->world, ids, item,
+                                                          (double)bx + 0.5 + (double)dx, y, (double)bz + 0.5 + (double)dz,
+                                                          &found, &best_dist_sq, &best_x, &best_y, &best_z);
+            }
+        }
+    }
+
+    if (!found) return false;
+
+    item->x = best_x;
+    item->y = best_y;
+    item->z = best_z;
+    item->vx = 0.0;
+    item->vy = 0.0;
+    item->vz = 0.0;
+    return true;
+}
+
+static bool find_intersecting_solid_block_for_item(mc_world_t *world, const mc_world_ids_t *ids, const mc_item_entity_t *item,
+                                                   int32_t *out_x, int32_t *out_y, int32_t *out_z) {
+    if (!world || !ids || !item) return false;
+    double min_x = item->x - ITEM_ENTITY_HALF_WIDTH + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_x = item->x + ITEM_ENTITY_HALF_WIDTH - ITEM_ENTITY_COLLISION_EPSILON;
+    double min_y = item->y - ITEM_ENTITY_HALF_HEIGHT + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_y = item->y + ITEM_ENTITY_HALF_HEIGHT - ITEM_ENTITY_COLLISION_EPSILON;
+    double min_z = item->z - ITEM_ENTITY_HALF_WIDTH + ITEM_ENTITY_COLLISION_EPSILON;
+    double max_z = item->z + ITEM_ENTITY_HALF_WIDTH - ITEM_ENTITY_COLLISION_EPSILON;
+    int32_t min_bx = floor_i32_from_f64(min_x);
+    int32_t max_bx = floor_i32_from_f64(max_x);
+    int32_t min_by = floor_i32_from_f64(min_y);
+    int32_t max_by = floor_i32_from_f64(max_y);
+    int32_t min_bz = floor_i32_from_f64(min_z);
+    int32_t max_bz = floor_i32_from_f64(max_z);
+
+    for (int32_t by = min_by; by <= max_by; by++) {
+        for (int32_t bz = min_bz; bz <= max_bz; bz++) {
+            for (int32_t bx = min_bx; bx <= max_bx; bx++) {
+                int32_t state_id = -1;
+                if (mc_world_get_block(world, bx, by, bz, &state_id) != 0) continue;
+                if (block_state_is_passable(ids, state_id)) continue;
+                if (out_x) *out_x = bx;
+                if (out_y) *out_y = by;
+                if (out_z) *out_z = bz;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool resolve_item_entity_if_inside_solid(mc_server_t *s, mc_item_entity_t *item) {
+    if (!s || !s->world || !item) return false;
+    const mc_world_ids_t *ids = mc_world_ids(s->world);
+    if (!ids) return false;
+    int32_t bx = 0;
+    int32_t by = 0;
+    int32_t bz = 0;
+    if (!find_intersecting_solid_block_for_item(s->world, ids, item, &bx, &by, &bz)) return false;
+    return relocate_item_entity_out_of_block(s, item, bx, by, bz);
+}
+
 static void item_entities_tick(mc_server_t *s, int64_t now) {
     if (!s) return;
     size_t idx = 0;
     while (idx < s->item_entities_len) {
-        if (s->item_entities[idx].expires_at_ms <= now) {
+        mc_item_entity_t *item = &s->item_entities[idx];
+        if (item->expires_at_ms <= now) {
             destroy_item_entity_at(s, idx);
             continue;
+        }
+
+        if (item->pickup_delay_ticks > 0) item->pickup_delay_ticks--;
+
+        bool moved = false;
+        bool metadata_dirty = false;
+        bool on_ground = false;
+        if (resolve_item_entity_if_inside_solid(s, item)) moved = true;
+
+        double next_x = item->x + item->vx;
+        double next_y = item->y;
+        double next_z = item->z + item->vz;
+        if (s->world) {
+            item->vy -= ITEM_ENTITY_GRAVITY_PER_TICK;
+            if (item->vy < -ITEM_ENTITY_MAX_FALL_SPEED) item->vy = -ITEM_ENTITY_MAX_FALL_SPEED;
+            next_y = item->y + item->vy;
+            if (item->vy < 0.0) {
+                const mc_world_ids_t *ids = mc_world_ids(s->world);
+                int32_t block_x = floor_i32_from_f64(item->x);
+                int32_t block_z = floor_i32_from_f64(item->z);
+                double next_bottom = next_y - ITEM_ENTITY_HALF_HEIGHT;
+                int32_t block_y = floor_i32_from_f64(next_bottom);
+                int32_t state_id = -1;
+                if (mc_world_get_block(s->world, block_x, block_y, block_z, &state_id) == 0 && !block_state_is_passable(ids, state_id)) {
+                    next_y = (double)block_y + 1.0 + ITEM_ENTITY_HALF_HEIGHT;
+                    item->vy = 0.0;
+                    on_ground = true;
+                }
+            }
+            if (next_y < (double)MC_WORLD_MIN_Y + ITEM_ENTITY_HALF_HEIGHT) {
+                next_y = (double)MC_WORLD_MIN_Y + ITEM_ENTITY_HALF_HEIGHT;
+                item->vy = 0.0;
+                on_ground = true;
+            }
+        }
+
+        if (on_ground) {
+            item->vx *= ITEM_ENTITY_GROUND_DRAG;
+            item->vz *= ITEM_ENTITY_GROUND_DRAG;
+        } else {
+            item->vx *= ITEM_ENTITY_AIR_DRAG;
+            item->vz *= ITEM_ENTITY_AIR_DRAG;
+        }
+        if (fabs(item->vx) < ITEM_ENTITY_MIN_HORIZONTAL_SPEED) item->vx = 0.0;
+        if (fabs(item->vz) < ITEM_ENTITY_MIN_HORIZONTAL_SPEED) item->vz = 0.0;
+
+        if (fabs(next_x - item->x) > 0.0001) {
+            item->x = next_x;
+            moved = true;
+        }
+        if (fabs(next_y - item->y) > 0.0001) {
+            item->y = next_y;
+            moved = true;
+        }
+        if (fabs(next_z - item->z) > 0.0001) {
+            item->z = next_z;
+            moved = true;
+        }
+
+        if (moved) {
+            (void)broadcast_item_entity_teleport(s, item);
+        }
+
+        bool destroyed = false;
+        if (item->pickup_delay_ticks <= 0) {
+            for (mc_conn_t *c = s->conns; c; c = c->next) {
+                if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready || !c->has_pos) continue;
+                double dx = c->x - item->x;
+                double dy = c->y - item->y;
+                double dz = c->z - item->z;
+                double dist_sq = dx * dx + dy * dy + dz * dz;
+                if (dist_sq > ITEM_ENTITY_PICKUP_RADIUS_SQ) continue;
+
+                int pickup_rc = proto_play_try_pickup_ground_slot(c, &item->slot);
+                if (pickup_rc < 0) {
+                    conn_close(c);
+                    continue;
+                }
+                if (pickup_rc == 0) continue;
+                if (!item->slot.present || item->slot.count <= 0) {
+                    destroy_item_entity_at(s, idx);
+                    destroyed = true;
+                    break;
+                }
+                metadata_dirty = true;
+            }
+        }
+        if (destroyed) continue;
+
+        if (metadata_dirty) {
+            for (mc_conn_t *c = s->conns; c; c = c->next) {
+                if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
+                if (send_item_entity_metadata(c, item) != 0) conn_close(c);
+            }
         }
         idx++;
     }
@@ -690,6 +1052,17 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
     return rc;
 }
 
+static bool server_container_is_open_unlocked(void *ctx, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
+    mc_server_t *server = (mc_server_t *)ctx;
+    if (!server || kind == MC_CONTAINER_KIND_NONE) return false;
+    for (mc_conn_t *c = server->conns; c; c = c->next) {
+        if (c->closing || !c->active_window.open || !c->active_window.container) continue;
+        mc_container_instance_t *container = c->active_window.container;
+        if (container->kind == kind && container->x == x && container->y == y && container->z == z) return true;
+    }
+    return false;
+}
+
 static void *tick_thread_main(void *arg) {
     mc_server_t *s = (mc_server_t *)arg;
     const int64_t tick_ms = 50;
@@ -697,6 +1070,27 @@ static void *tick_thread_main(void *arg) {
     uint64_t tick_index = 0;
 
     while (atomic_load(&s->running)) {
+        bool perf = mc_perf_enabled();
+        int64_t tick_start_us = 0;
+        int64_t task_us = 0;
+        int64_t world_tick_us = 0;
+        int64_t furnace_tick_us = 0;
+        int64_t update_broadcast_us = 0;
+        int64_t proto_tick_us = 0;
+        int64_t item_entities_us = 0;
+        int64_t remote_sync_us = 0;
+        int64_t write_flush_us = 0;
+        int64_t evict_us = 0;
+        int64_t clear_updates_us = 0;
+        size_t task_count = 0;
+        size_t conn_count = 0;
+        size_t play_ready_count = 0;
+        size_t block_update_sends = 0;
+        size_t proto_tick_count = 0;
+        size_t remote_sync_attempts = 0;
+        size_t write_flush_count = 0;
+        size_t evicted_count = 0;
+
         int64_t now = now_ms();
         if (now < next_tick) {
             struct timespec ts;
@@ -707,9 +1101,12 @@ static void *tick_thread_main(void *arg) {
             now = now_ms();
         }
 
+        if (perf) tick_start_us = mc_now_us();
+        int64_t span_start_us = perf ? mc_now_us() : 0;
         mc_task_t *task = mc_task_queue_drain(&s->task_queue);
         while (task) {
             mc_task_t *next = task->next;
+            task_count++;
             if (task->type == MC_TASK_PACKET) {
                 (void)process_task(s, task, now);
             }
@@ -718,9 +1115,18 @@ static void *tick_thread_main(void *arg) {
             free(task);
             task = next;
         }
+        if (perf) task_us = mc_now_us() - span_start_us;
 
         if (s->world) {
+            span_start_us = perf ? mc_now_us() : 0;
             mc_world_tick(s->world, now);
+            if (perf) world_tick_us = mc_now_us() - span_start_us;
+
+            pthread_mutex_lock(&s->conns_lock);
+            span_start_us = perf ? mc_now_us() : 0;
+            (void)mc_world_tick_furnaces(s->world, server_container_is_open_unlocked, s);
+            if (perf) furnace_tick_us = mc_now_us() - span_start_us;
+            pthread_mutex_unlock(&s->conns_lock);
         }
 
         const mc_block_update_t *updates = NULL;
@@ -739,6 +1145,8 @@ static void *tick_thread_main(void *arg) {
 
         pthread_mutex_lock(&s->conns_lock);
         for (mc_conn_t *c = s->conns; c; c = c->next) {
+            conn_count++;
+            if (c->state == MC_STATE_PLAY && c->play_ready && !c->closing) play_ready_count++;
             if (do_evict && c->state == MC_STATE_PLAY && c->has_pos && !c->closing) {
                 int32_t bx = floor_i32_from_f64(c->x);
                 int32_t bz = floor_i32_from_f64(c->z);
@@ -759,47 +1167,101 @@ static void *tick_thread_main(void *arg) {
             }
 
             if (updates && updates_len > 0 && c->state == MC_STATE_PLAY && c->play_ready && !c->closing) {
+                span_start_us = perf ? mc_now_us() : 0;
                 for (size_t i = 0; i < updates_len; i++) {
                     const mc_block_update_t *u = &updates[i];
+                    block_update_sends++;
                     if (send_block_update(c, u->x, u->y, u->z, u->state_id) != 0) {
                         conn_close(c);
                         break;
                     }
                 }
+                if (perf) update_broadcast_us += mc_now_us() - span_start_us;
             }
             if (c->state == MC_STATE_PLAY) {
+                proto_tick_count++;
+                span_start_us = perf ? mc_now_us() : 0;
                 if (proto_play_tick(c, now) != 0) {
                     conn_close(c);
                 }
+                if (perf) proto_tick_us += mc_now_us() - span_start_us;
             }
         }
+        span_start_us = perf ? mc_now_us() : 0;
         item_entities_tick(s, now);
+        if (perf) item_entities_us = mc_now_us() - span_start_us;
+
+        span_start_us = perf ? mc_now_us() : 0;
         for (mc_conn_t *viewer = s->conns; viewer; viewer = viewer->next) {
             if (viewer->closing || viewer->state != MC_STATE_PLAY || !viewer->play_ready) continue;
             for (mc_conn_t *subject = s->conns; subject; subject = subject->next) {
                 if (subject == viewer || subject->closing || subject->state != MC_STATE_PLAY || !subject->play_ready || !subject->has_pos) {
                     continue;
                 }
+                remote_sync_attempts++;
                 if (proto_play_sync_remote_player(viewer, subject) != 0) {
                     conn_close(viewer);
                     break;
                 }
             }
         }
+        if (perf) remote_sync_us = mc_now_us() - span_start_us;
+
+        span_start_us = perf ? mc_now_us() : 0;
         for (mc_conn_t *c = s->conns; c; c = c->next) {
+            write_flush_count++;
             if (handle_client_write(c) != 0) {
                 conn_close(c);
             }
         }
+        if (perf) write_flush_us = mc_now_us() - span_start_us;
         pthread_mutex_unlock(&s->conns_lock);
 
         if (do_evict && s->world) {
-            (void)mc_world_evict_outside(s->world, keep_keys, keep_len, WORLD_EVICT_BUDGET);
+            span_start_us = perf ? mc_now_us() : 0;
+            evicted_count = mc_world_evict_outside(s->world, keep_keys, keep_len, WORLD_EVICT_BUDGET);
+            if (perf) evict_us = mc_now_us() - span_start_us;
         }
         free(keep_keys);
 
         if (s->world && updates_len > 0) {
+            span_start_us = perf ? mc_now_us() : 0;
             mc_world_clear_updates(s->world);
+            if (perf) clear_updates_us = mc_now_us() - span_start_us;
+        }
+
+        if (perf) {
+            int64_t total_us = mc_now_us() - tick_start_us;
+            int64_t slow_us = mc_perf_slow_us();
+            bool slow = total_us >= slow_us || task_us >= slow_us || world_tick_us >= slow_us || furnace_tick_us >= slow_us ||
+                        update_broadcast_us >= slow_us || proto_tick_us >= slow_us || item_entities_us >= slow_us ||
+                        remote_sync_us >= slow_us || write_flush_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us;
+            if (slow) {
+                log_info("perf tick: idx=%llu total=%.3fms tasks=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu writes=%zu item_entities=%zu keep=%zu evicted=%zu",
+                         (unsigned long long)tick_index,
+                         (double)total_us / 1000.0,
+                         (double)task_us / 1000.0,
+                         (double)world_tick_us / 1000.0,
+                         (double)furnace_tick_us / 1000.0,
+                         (double)update_broadcast_us / 1000.0,
+                         (double)proto_tick_us / 1000.0,
+                         (double)item_entities_us / 1000.0,
+                         (double)remote_sync_us / 1000.0,
+                         (double)write_flush_us / 1000.0,
+                         (double)evict_us / 1000.0,
+                         (double)clear_updates_us / 1000.0,
+                         task_count,
+                         conn_count,
+                         play_ready_count,
+                         updates_len,
+                         block_update_sends,
+                         proto_tick_count,
+                         remote_sync_attempts,
+                         write_flush_count,
+                         s->item_entities_len,
+                         keep_len,
+                         evicted_count);
+            }
         }
 
         next_tick += tick_ms;
@@ -959,14 +1421,86 @@ mc_world_t *net_server_world(mc_server_t *server) {
     return server->world;
 }
 
+mc_difficulty_t net_server_get_difficulty(mc_server_t *server) {
+    if (!server) return MC_DIFFICULTY_NORMAL;
+    return normalize_difficulty((mc_difficulty_t)atomic_load(&server->difficulty));
+}
+
+void net_server_set_difficulty(mc_server_t *server, mc_difficulty_t difficulty) {
+    if (!server) return;
+    difficulty = normalize_difficulty(difficulty);
+    atomic_store(&server->difficulty, (int)difficulty);
+    server->cfg.difficulty = difficulty;
+}
+
+const char *mc_difficulty_name(mc_difficulty_t difficulty) {
+    switch (normalize_difficulty(difficulty)) {
+        case MC_DIFFICULTY_PEACEFUL: return "peaceful";
+        case MC_DIFFICULTY_EASY: return "easy";
+        case MC_DIFFICULTY_NORMAL: return "normal";
+        case MC_DIFFICULTY_HARD: return "hard";
+        default: return "normal";
+    }
+}
+
+int net_server_broadcast_difficulty(mc_server_t *server) {
+    if (!server) return -1;
+
+    int rc = 0;
+    mc_difficulty_t difficulty = net_server_get_difficulty(server);
+    pthread_mutex_lock(&server->conns_lock);
+    for (mc_conn_t *c = server->conns; c; c = c->next) {
+        c->next_natural_regen_ms = 0;
+        c->next_starvation_damage_ms = 0;
+        if (difficulty == MC_DIFFICULTY_PEACEFUL) {
+            c->food_exhaustion = 0.0f;
+            if (c->player) c->player->food_exhaustion = 0.0f;
+        }
+        if (c->closing || c->state != MC_STATE_PLAY || !c->play_init_sent) continue;
+        if (proto_play_send_difficulty(c) != 0) {
+            conn_close(c);
+            rc = -1;
+        }
+    }
+    pthread_mutex_unlock(&server->conns_lock);
+    return rc;
+}
+
 int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
+    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
+}
+
+int net_server_spawn_item_drop_locked(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
+    return net_server_spawn_item_drop_locked_with_pickup_delay(server, x, y, z, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
+}
+
+int net_server_spawn_item_drop_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
+                                                 int32_t pickup_delay_ticks) {
+    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, pickup_delay_ticks);
+}
+
+int net_server_spawn_item_drop_with_motion(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
+                                           const mc_slot_t *slot, int32_t pickup_delay_ticks) {
     if (!server || !slot || !slot->present || slot->count <= 0) return -1;
     pthread_mutex_lock(&server->conns_lock);
+    int rc = net_server_spawn_item_drop_locked_with_pickup_delay(server, x, y, z, slot, pickup_delay_ticks);
+    if (rc == 0 && server->item_entities_len > 0) {
+        mc_item_entity_t *item = &server->item_entities[server->item_entities_len - 1];
+        item->vx = vx;
+        item->vy = vy;
+        item->vz = vz;
+    }
+    pthread_mutex_unlock(&server->conns_lock);
+    return rc;
+}
+
+int net_server_spawn_item_drop_locked_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
+                                                        int32_t pickup_delay_ticks) {
+    if (!server || !slot || !slot->present || slot->count <= 0) return -1;
     if (server->item_entities_len == server->item_entities_cap) {
         size_t new_cap = server->item_entities_cap ? server->item_entities_cap * 2 : 16;
         mc_item_entity_t *next = (mc_item_entity_t *)realloc(server->item_entities, new_cap * sizeof(*next));
         if (!next) {
-            pthread_mutex_unlock(&server->conns_lock);
             return -1;
         }
         server->item_entities = next;
@@ -980,9 +1514,12 @@ int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z
     entity.x = x;
     entity.y = y;
     entity.z = z;
+    entity.vx = 0.0;
+    entity.vy = 0.0;
+    entity.vz = 0.0;
     entity.expires_at_ms = now_ms() + ITEM_ENTITY_TTL_MS;
+    entity.pickup_delay_ticks = pickup_delay_ticks > 0 ? pickup_delay_ticks : 0;
     if (mc_slot_copy(&entity.slot, slot) != 0) {
-        pthread_mutex_unlock(&server->conns_lock);
         return -1;
     }
 
@@ -994,8 +1531,43 @@ int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z
             conn_close(c);
         }
     }
+    return 0;
+}
+
+int net_server_sync_item_entities_to_conn(mc_server_t *server, mc_conn_t *conn) {
+    if (!server || !conn) return -1;
+    pthread_mutex_lock(&server->conns_lock);
+    if (conn->closing || conn->state != MC_STATE_PLAY || !conn->play_ready) {
+        pthread_mutex_unlock(&server->conns_lock);
+        return 0;
+    }
+    for (size_t i = 0; i < server->item_entities_len; i++) {
+        mc_item_entity_t *item = &server->item_entities[i];
+        if (send_item_entity_spawn(conn, item) != 0 || send_item_entity_metadata(conn, item) != 0) {
+            conn_close(conn);
+            pthread_mutex_unlock(&server->conns_lock);
+            return -1;
+        }
+    }
     pthread_mutex_unlock(&server->conns_lock);
     return 0;
+}
+
+int net_server_resolve_item_entities_for_block(mc_server_t *server, int32_t x, int32_t y, int32_t z, int32_t state_id) {
+    if (!server || !server->world) return 0;
+    const mc_world_ids_t *ids = mc_world_ids(server->world);
+    if (!ids || block_state_is_passable(ids, state_id)) return 0;
+
+    int rc = 0;
+    pthread_mutex_lock(&server->conns_lock);
+    for (size_t i = 0; i < server->item_entities_len; i++) {
+        mc_item_entity_t *item = &server->item_entities[i];
+        if (!item_entity_intersects_block_at(item, x, y, z)) continue;
+        if (!relocate_item_entity_out_of_block(server, item, x, y, z)) continue;
+        if (broadcast_item_entity_teleport(server, item) != 0) rc = -1;
+    }
+    pthread_mutex_unlock(&server->conns_lock);
+    return rc;
 }
 
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
@@ -1019,8 +1591,13 @@ int net_server_get_open_container_snapshot(mc_server_t *server, mc_container_kin
         mc_container_instance_t *container = c->active_window.container;
         if (container->kind != kind || container->x != x || container->y != y || container->z != z) continue;
         mc_container_instance_init(out, container->kind, container->x, container->y, container->z);
+        out->slot_count = container->slot_count;
         out->state_id = container->state_id;
         out->dirty = container->dirty;
+        out->furnace_burn_time = container->furnace_burn_time;
+        out->furnace_burn_duration = container->furnace_burn_duration;
+        out->furnace_cook_time = container->furnace_cook_time;
+        out->furnace_cook_duration = container->furnace_cook_duration;
         for (int i = 0; i < MC_CONTAINER_SLOT_COUNT; i++) {
             if (mc_slot_copy(&out->slots[i], &container->slots[i]) != 0) {
                 mc_container_instance_clear(out);

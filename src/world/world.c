@@ -3,6 +3,7 @@
 #include "generated_registries.h"
 #include "mc_chunk_store.h"
 #include "mc_anvil.h"
+#include "mc_furnace.h"
 #include "mc_util.h"
 #include "stb_perlin.h"
 
@@ -1176,6 +1177,122 @@ void mc_world_tick(mc_world_t *w, int64_t now_ms) {
             }
         }
     }
+}
+
+static mc_furnace_machine_t furnace_machine_for_block_entity_type(mc_block_entity_type_t type) {
+    switch (type) {
+        case MC_BLOCK_ENTITY_FURNACE: return MC_FURNACE_MACHINE_FURNACE;
+        case MC_BLOCK_ENTITY_SMOKER: return MC_FURNACE_MACHINE_SMOKER;
+        case MC_BLOCK_ENTITY_BLAST_FURNACE: return MC_FURNACE_MACHINE_BLAST_FURNACE;
+        default: return MC_FURNACE_MACHINE_NONE;
+    }
+}
+
+static mc_container_kind_t furnace_container_kind_for_machine(mc_furnace_machine_t machine) {
+    switch (machine) {
+        case MC_FURNACE_MACHINE_FURNACE: return MC_CONTAINER_KIND_FURNACE;
+        case MC_FURNACE_MACHINE_SMOKER: return MC_CONTAINER_KIND_SMOKER;
+        case MC_FURNACE_MACHINE_BLAST_FURNACE: return MC_CONTAINER_KIND_BLAST_FURNACE;
+        default: return MC_CONTAINER_KIND_NONE;
+    }
+}
+
+static bool world_state_key_is_prefix(int32_t state_id, const char *prefix) {
+    const char *key = mc_block_state_key(state_id);
+    return key && prefix && strncmp(key, prefix, strlen(prefix)) == 0;
+}
+
+static bool world_state_is_furnace_like(int32_t state_id) {
+    return world_state_key_is_prefix(state_id, "minecraft:furnace[") ||
+           world_state_key_is_prefix(state_id, "minecraft:smoker[") ||
+           world_state_key_is_prefix(state_id, "minecraft:blast_furnace[");
+}
+
+static int32_t world_furnace_lit_state_id(int32_t state_id, bool lit) {
+    if (!world_state_is_furnace_like(state_id)) return state_id;
+    const char *key = mc_block_state_key(state_id);
+    if (!key) return state_id;
+    const char *lit_pos = strstr(key, "lit=");
+    if (!lit_pos) return state_id;
+    const char *after_lit = lit_pos + 4;
+    while ((*after_lit >= 'a' && *after_lit <= 'z') || (*after_lit >= 'A' && *after_lit <= 'Z')) after_lit++;
+
+    char next_key[192];
+    size_t prefix_len = (size_t)(lit_pos - key);
+    int n = snprintf(next_key, sizeof(next_key), "%.*slit=%s%s", (int)prefix_len, key, lit ? "true" : "false", after_lit);
+    if (n <= 0 || (size_t)n >= sizeof(next_key)) return state_id;
+    return mc_world_runtime_state_id_from_key(next_key, state_id);
+}
+
+int mc_world_tick_furnaces(mc_world_t *w, mc_world_container_open_fn is_open, void *ctx) {
+    if (!w) return 0;
+    bool perf = mc_perf_enabled();
+    int64_t perf_start_us = perf ? mc_now_us() : 0;
+    size_t scanned_entities = 0;
+    size_t machine_entities = 0;
+    size_t open_skipped = 0;
+    size_t ticked = 0;
+    size_t changed = 0;
+    size_t lit_state_changes = 0;
+    size_t errors = 0;
+    int rc = 0;
+    for (size_t i = 0; i < w->block_entities.cap; i++) {
+        scanned_entities++;
+        if (!w->block_entities.states || w->block_entities.states[i] != 1) continue;
+        mc_block_entity_t *entity = &w->block_entities.entities[i];
+        mc_furnace_machine_t machine = furnace_machine_for_block_entity_type(entity->type);
+        if (machine == MC_FURNACE_MACHINE_NONE) continue;
+        machine_entities++;
+
+        mc_pos_t pos = w->block_entities.positions[i];
+        mc_container_kind_t kind = furnace_container_kind_for_machine(machine);
+        if (is_open && is_open(ctx, kind, pos.x, pos.y, pos.z)) {
+            open_skipped++;
+            continue;
+        }
+
+        int32_t state_id = -1;
+        if (mc_world_get_block(w, pos.x, pos.y, pos.z, &state_id) != 0 || !world_state_is_furnace_like(state_id)) continue;
+        ticked++;
+        int tick_rc = mc_furnace_tick_block_entity(entity, machine);
+        if (tick_rc < 0) {
+            rc = -1;
+            errors++;
+            continue;
+        }
+        bool is_burning = entity->data.container.furnace_burn_time > 0;
+        bool state_changed = false;
+        int32_t next_state = world_furnace_lit_state_id(state_id, is_burning);
+        if (next_state >= 0 && next_state != state_id) {
+            if (mc_world_set_block(w, pos.x, pos.y, pos.z, next_state) != 0) {
+                rc = -1;
+                errors++;
+            } else {
+                state_changed = true;
+                lit_state_changes++;
+            }
+        }
+        if (tick_rc > 0 || state_changed) changed++;
+        if ((tick_rc > 0 || state_changed) && mc_world_mark_chunk_dirty_at(w, pos.x, pos.z) != 0) {
+            rc = -1;
+            errors++;
+        }
+    }
+    if (perf) {
+        int64_t elapsed_us = mc_now_us() - perf_start_us;
+        if (elapsed_us >= mc_perf_slow_us()) {
+            log_info("perf furnaces: elapsed=%.3fms scanned=%zu machines=%zu open_skipped=%zu ticked=%zu changed=%zu lit_state_changes=%zu errors=%zu",
+                     (double)elapsed_us / 1000.0,
+                     scanned_entities,
+                     machine_entities,
+                     open_skipped,
+                     ticked,
+                     changed,
+                     lit_state_changes,
+                     errors);
+        }
+    }
+    return rc;
 }
 
 static int cmp_i64(const void *a, const void *b) {
