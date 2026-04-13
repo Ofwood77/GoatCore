@@ -1125,18 +1125,25 @@ int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z) {
 }
 
 void mc_world_tick(mc_world_t *w, int64_t now_ms) {
+    mc_world_tick_profiled(w, now_ms, NULL);
+}
+
+void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t *stats) {
     (void)now_ms;
+    if (stats) memset(stats, 0, sizeof(*stats));
     if (!w) return;
     w->tick_count++;
 
     mc_chunk_done_t *done = done_queue_drain(w);
     while (done) {
         mc_chunk_done_t *next = done->next;
+        if (stats) stats->done_seen++;
         mc_chunk_entry_t *e = chunk_map_get(&w->chunks, done->key);
         if (e && e->state == CHUNK_SLOT_LOADING) {
             e->chunk = done->chunk;
             e->state = CHUNK_SLOT_READY;
             if (chunk_list_add(w, done->chunk) != 0) {
+                if (stats) stats->done_add_failed++;
                 mc_chunk_destroy(done->chunk);
                 free(done->chunk);
                 e->chunk = NULL;
@@ -1144,11 +1151,15 @@ void mc_world_tick(mc_world_t *w, int64_t now_ms) {
                 w->chunks.len--;
                 w->chunks.tombs++;
             } else if (e->pending) {
+                if (stats) stats->done_integrated++;
                 apply_pending_mods(w, done->chunk, e->pending);
                 pending_mods_free(e->pending);
                 e->pending = NULL;
+            } else {
+                if (stats) stats->done_integrated++;
             }
         } else {
+            if (stats) stats->done_discarded++;
             mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
@@ -1156,25 +1167,42 @@ void mc_world_tick(mc_world_t *w, int64_t now_ms) {
         done = next;
     }
 
-    if (!w->world_path || !*w->world_path) return;
-    if (w->chunk_list_len == 0) return;
+    if (w->world_path && *w->world_path && w->chunk_list_len > 0) {
+        size_t scanned = 0;
+        size_t attempts = 0;
+        while (scanned < w->chunk_list_len && attempts < ANVIL_SAVE_ATTEMPTS_PER_TICK) {
+            if (w->save_cursor >= w->chunk_list_len) w->save_cursor = 0;
+            mc_chunk_t *c = w->chunk_list[w->save_cursor];
+            w->save_cursor = (w->save_cursor + 1) % w->chunk_list_len;
+            scanned++;
+            if (stats) stats->saves_scanned++;
+            if (!c || !c->dirty) continue;
 
-    size_t scanned = 0;
-    size_t attempts = 0;
-    while (scanned < w->chunk_list_len && attempts < ANVIL_SAVE_ATTEMPTS_PER_TICK) {
-        if (w->save_cursor >= w->chunk_list_len) w->save_cursor = 0;
-        mc_chunk_t *c = w->chunk_list[w->save_cursor];
-        w->save_cursor = (w->save_cursor + 1) % w->chunk_list_len;
-        scanned++;
-        if (!c || !c->dirty) continue;
-
-        attempts++;
-        if (save_chunk_to_store(w, c) == 0) {
-            c->dirty = false;
-            if (c->evict_after_save) {
-                int64_t ck = chunk_key(c->cx, c->cz);
-                chunk_map_remove_key(w, ck);
+            attempts++;
+            if (stats) stats->saves_attempted++;
+            if (save_chunk_to_store(w, c) == 0) {
+                c->dirty = false;
+                if (stats) stats->saves_succeeded++;
+                if (c->evict_after_save) {
+                    int64_t ck = chunk_key(c->cx, c->cz);
+                    chunk_map_remove_key(w, ck);
+                    if (stats) stats->evict_after_save_removed++;
+                }
+            } else if (stats) {
+                stats->saves_failed++;
             }
+        }
+    }
+
+    if (stats) {
+        stats->chunk_count = w->chunk_list_len;
+        stats->updates_len = w->updates_len;
+        pthread_mutex_lock(&w->job_lock);
+        stats->jobs_pending = w->jobs_len;
+        pthread_mutex_unlock(&w->job_lock);
+        for (size_t i = 0; i < w->chunk_list_len; i++) {
+            mc_chunk_t *c = w->chunk_list[i];
+            if (c && c->dirty) stats->dirty_chunks++;
         }
     }
 }
@@ -1225,6 +1253,12 @@ static int32_t world_furnace_lit_state_id(int32_t state_id, bool lit) {
 }
 
 int mc_world_tick_furnaces(mc_world_t *w, mc_world_container_open_fn is_open, void *ctx) {
+    return mc_world_tick_furnaces_profiled(w, is_open, ctx, NULL);
+}
+
+int mc_world_tick_furnaces_profiled(mc_world_t *w, mc_world_container_open_fn is_open, void *ctx,
+                                    mc_world_furnace_tick_stats_t *stats) {
+    if (stats) memset(stats, 0, sizeof(*stats));
     if (!w) return 0;
     bool perf = mc_perf_enabled();
     int64_t perf_start_us = perf ? mc_now_us() : 0;
@@ -1277,6 +1311,15 @@ int mc_world_tick_furnaces(mc_world_t *w, mc_world_container_open_fn is_open, vo
             rc = -1;
             errors++;
         }
+    }
+    if (stats) {
+        stats->scanned_entities = scanned_entities;
+        stats->machine_entities = machine_entities;
+        stats->open_skipped = open_skipped;
+        stats->ticked = ticked;
+        stats->changed = changed;
+        stats->lit_state_changes = lit_state_changes;
+        stats->errors = errors;
     }
     if (perf) {
         int64_t elapsed_us = mc_now_us() - perf_start_us;

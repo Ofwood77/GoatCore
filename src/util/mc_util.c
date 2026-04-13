@@ -109,3 +109,20 @@ int64_t mc_perf_slow_us(void) {
     }
     return slow_us;
 }
+
+uint64_t mc_perf_summary_ticks(void) {
+    static int initialized = 0;
+    static uint64_t ticks = 200;
+    if (!initialized) {
+        const char *env = getenv("MC_PERF_SUMMARY_TICKS");
+        if (env && *env) {
+            char *end = NULL;
+            unsigned long long value = strtoull(env, &end, 10);
+            if (end != env && *end == '\0') {
+                ticks = (uint64_t)value;
+            }
+        }
+        initialized = 1;
+    }
+    return ticks;
+}

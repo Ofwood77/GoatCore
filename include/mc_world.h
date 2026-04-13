@@ -31,6 +31,32 @@ typedef struct {
 typedef struct mc_world mc_world_t;
 typedef bool (*mc_world_container_open_fn)(void *ctx, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z);
 
+typedef struct {
+    size_t done_seen;
+    size_t done_integrated;
+    size_t done_discarded;
+    size_t done_add_failed;
+    size_t saves_scanned;
+    size_t saves_attempted;
+    size_t saves_succeeded;
+    size_t saves_failed;
+    size_t evict_after_save_removed;
+    size_t chunk_count;
+    size_t dirty_chunks;
+    size_t updates_len;
+    size_t jobs_pending;
+} mc_world_tick_stats_t;
+
+typedef struct {
+    size_t scanned_entities;
+    size_t machine_entities;
+    size_t open_skipped;
+    size_t ticked;
+    size_t changed;
+    size_t lit_state_changes;
+    size_t errors;
+} mc_world_furnace_tick_stats_t;
+
 mc_world_t *mc_world_create(const char *world_path, int64_t level_seed);
 void mc_world_destroy(mc_world_t *w);
 
@@ -56,7 +82,10 @@ int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);
 
 void mc_world_tick(mc_world_t *w, int64_t now_ms);
+void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t *stats);
 int mc_world_tick_furnaces(mc_world_t *w, mc_world_container_open_fn is_open, void *ctx);
+int mc_world_tick_furnaces_profiled(mc_world_t *w, mc_world_container_open_fn is_open, void *ctx,
+                                    mc_world_furnace_tick_stats_t *stats);
 
 /* Marks chunks not in keep-set for eviction, freeing clean chunks immediately and dirty chunks after save. */
 size_t mc_world_evict_outside(mc_world_t *w, const int64_t *keep_keys, size_t keep_len, size_t budget);

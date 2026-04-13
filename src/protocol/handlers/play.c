@@ -4734,13 +4734,22 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     if (!c || !world || !chunk) return -1;
     bool perf = mc_perf_enabled();
     int64_t perf_start_us = perf ? mc_now_us() : 0;
+    int64_t span_start_us = 0;
+    int64_t chunkdata_us = 0;
+    int64_t heightmap_us = 0;
+    int64_t block_entity_scan_us = 0;
+    int64_t payload_us = 0;
+    int64_t write_queue_us = 0;
+    int64_t refresh_ping_us = 0;
 
     mc_buf_t chunkdata;
     if (buf_init(&chunkdata, 32 * 1024) != 0) return -1;
     /* Serialize the authoritative live chunk from RAM. The captured template
      * only contributes heightmaps/biomes fallback/light payload, not block
      * state storage. */
+    span_start_us = perf ? mc_now_us() : 0;
     int rc = proto_play_encode_chunkdata_for_test(world, chunk, &chunkdata);
+    if (perf) chunkdata_us = mc_now_us() - span_start_us;
     if (rc != 0) {
         buf_free(&chunkdata);
         return -1;
@@ -4760,11 +4769,14 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     int32_t block_entity_count = 0;
     uint8_t *hm = NULL;
     size_t hm_len = 0;
+    span_start_us = perf ? mc_now_us() : 0;
     if (build_motion_blocking_heightmaps(world, chunk, &hm, &hm_len) != 0) {
         hm = NULL;
         hm_len = 0;
     }
+    if (perf) heightmap_us = mc_now_us() - span_start_us;
 
+    span_start_us = perf ? mc_now_us() : 0;
     for (int y_index = 0; y_index < MC_WORLD_HEIGHT; y_index++) {
         int32_t world_y = MC_WORLD_MIN_Y + y_index;
         for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
@@ -4804,9 +4816,11 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
             }
         }
     }
+    if (perf) block_entity_scan_us = mc_now_us() - span_start_us;
 
     const uint8_t *light = g_chunk_tpl.fullbright_light ? g_chunk_tpl.fullbright_light : g_chunk_tpl.light;
     size_t light_len = g_chunk_tpl.fullbright_light ? g_chunk_tpl.fullbright_light_len : g_chunk_tpl.light_len;
+    span_start_us = perf ? mc_now_us() : 0;
     if (buf_w_i32_be(&payload, cx) != 0 || buf_w_i32_be(&payload, cz) != 0 ||
         buf_write(&payload, hm ? hm : g_chunk_tpl.heightmaps, hm ? hm_len : g_chunk_tpl.heightmaps_len) != 0 ||
         buf_w_varint(&payload, (int32_t)chunkdata.len) != 0 ||
@@ -4820,6 +4834,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
         buf_free(&chunkdata);
         return -1;
     }
+    if (perf) payload_us = mc_now_us() - span_start_us;
 
     size_t perf_payload_len = payload.len;
     size_t perf_chunkdata_len = chunkdata.len;
@@ -4827,18 +4842,31 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     size_t perf_heightmaps_len = hm ? hm_len : g_chunk_tpl.heightmaps_len;
     size_t perf_light_len = light_len;
 
+    span_start_us = perf ? mc_now_us() : 0;
     rc = conn_write_packet(c, PKT_PLAY_CHUNK_DATA, payload.data, payload.len, -1);
+    if (perf) write_queue_us = mc_now_us() - span_start_us;
     buf_free(&block_entities);
     free(hm);
     buf_free(&payload);
     buf_free(&chunkdata);
+    if (rc == 0) {
+        span_start_us = perf ? mc_now_us() : 0;
+        rc = maybe_send_chunk_refresh_ping(c);
+        if (perf) refresh_ping_us = mc_now_us() - span_start_us;
+    }
     if (perf) {
         int64_t elapsed_us = mc_now_us() - perf_start_us;
         if (elapsed_us >= mc_perf_slow_us() || rc != 0) {
-            log_info("perf chunk_ready: chunk=(%d,%d) elapsed=%.3fms payload=%zu chunkdata=%zu block_entities=%d block_entity_bytes=%zu heightmaps=%zu light=%zu rc=%d",
+            log_info("perf chunk_ready: chunk=(%d,%d) elapsed=%.3fms encode=%.3fms heightmap=%.3fms block_entities_scan=%.3fms payload_build=%.3fms write_queue=%.3fms refresh_ping=%.3fms payload=%zu chunkdata=%zu block_entities=%d block_entity_bytes=%zu heightmaps=%zu light=%zu rc=%d",
                      cx,
                      cz,
                      (double)elapsed_us / 1000.0,
+                     (double)chunkdata_us / 1000.0,
+                     (double)heightmap_us / 1000.0,
+                     (double)block_entity_scan_us / 1000.0,
+                     (double)payload_us / 1000.0,
+                     (double)write_queue_us / 1000.0,
+                     (double)refresh_ping_us / 1000.0,
                      perf_payload_len,
                      perf_chunkdata_len,
                      block_entity_count,
@@ -4848,8 +4876,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
                      rc);
         }
     }
-    if (rc != 0) return rc;
-    return maybe_send_chunk_refresh_ping(c);
+    return rc;
 }
 
 static int send_sent_chunks_post_updates(mc_conn_t *c) {
@@ -4955,6 +4982,8 @@ static int chunk_stream_tick(mc_conn_t *c) {
     if (!c || c->state != MC_STATE_PLAY || !c->cfg) return 0;
     mc_world_t *world = get_world(c);
     if (!world) return -1;
+    bool perf = mc_perf_enabled();
+    int64_t perf_start_us = perf ? mc_now_us() : 0;
 
     int view = c->cfg->view_distance;
     if (view < 2) view = 2;
@@ -4976,8 +5005,10 @@ static int chunk_stream_tick(mc_conn_t *c) {
         if (rebuild_chunk_stream(c, world, pcx, pcz, view) != 0) return -1;
     }
 
+    size_t pending_start = pending_chunks_count(c);
     int sent = 0;
     int scans = 0;
+    int misses = 0;
     while (sent < CHUNKS_PER_TICK) {
         if (pending_chunks_count(c) == 0) break;
         mc_chunk_req_t req;
@@ -4986,6 +5017,7 @@ static int chunk_stream_tick(mc_conn_t *c) {
         mc_chunk_t *chunk = mc_world_get_chunk(world, req.cx, req.cz, req.prio);
         if (!chunk) {
             if (pending_chunks_push(c, req.cx, req.cz, req.prio) != 0) return -1;
+            misses++;
             scans++;
             if (scans >= CHUNK_SEND_SCAN_LIMIT) break;
             continue;
@@ -4994,6 +5026,23 @@ static int chunk_stream_tick(mc_conn_t *c) {
         if (send_chunk_ready(c, world, req.cx, req.cz, chunk) != 0) return -1;
         if (sent_chunks_insert(c, chunk_key(req.cx, req.cz)) != 0) return -1;
         sent++;
+    }
+
+    if (perf) {
+        int64_t elapsed_us = mc_now_us() - perf_start_us;
+        if (elapsed_us >= mc_perf_slow_us()) {
+            log_info("perf chunk_stream: player=%s elapsed=%.3fms sent=%d scans=%d misses=%d pending_start=%zu pending_end=%zu view=%d center=(%d,%d)",
+                     c->username[0] ? c->username : "(unknown)",
+                     (double)elapsed_us / 1000.0,
+                     sent,
+                     scans,
+                     misses,
+                     pending_start,
+                     pending_chunks_count(c),
+                     view,
+                     pcx,
+                     pcz);
+        }
     }
 
     return 0;

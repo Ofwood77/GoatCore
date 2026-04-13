@@ -313,6 +313,29 @@ static int keep_keys_push(int64_t **arr, size_t *len, size_t *cap, int64_t key) 
     return 0;
 }
 
+typedef struct {
+    uint64_t count;
+    int64_t total_us;
+    int64_t max_us;
+} perf_accum_t;
+
+static void perf_accum_add(perf_accum_t *acc, int64_t us) {
+    if (!acc) return;
+    if (us < 0) us = 0;
+    acc->count++;
+    acc->total_us += us;
+    if (us > acc->max_us) acc->max_us = us;
+}
+
+static double perf_accum_avg_ms(const perf_accum_t *acc) {
+    if (!acc || acc->count == 0) return 0.0;
+    return ((double)acc->total_us / (double)acc->count) / 1000.0;
+}
+
+static double perf_ms(int64_t us) {
+    return (double)us / 1000.0;
+}
+
 int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     if (!out || !cfg) return -1;
 
@@ -1065,13 +1088,33 @@ static bool server_container_is_open_unlocked(void *ctx, mc_container_kind_t kin
 
 static void *tick_thread_main(void *arg) {
     mc_server_t *s = (mc_server_t *)arg;
-    const int64_t tick_ms = 50;
-    int64_t next_tick = now_ms();
+    const int64_t tick_us = 50000;
+    int64_t next_tick_us = mc_now_us();
     uint64_t tick_index = 0;
+    perf_accum_t summary_total = {0};
+    perf_accum_t summary_late = {0};
+    perf_accum_t summary_task = {0};
+    perf_accum_t summary_world = {0};
+    perf_accum_t summary_furnace = {0};
+    perf_accum_t summary_updates = {0};
+    perf_accum_t summary_proto = {0};
+    perf_accum_t summary_items = {0};
+    perf_accum_t summary_remote = {0};
+    perf_accum_t summary_write = {0};
+    perf_accum_t summary_evict = {0};
+    uint64_t summary_task_count = 0;
+    uint64_t summary_update_sends = 0;
+    uint64_t summary_proto_ticks = 0;
+    uint64_t summary_remote_syncs = 0;
+    uint64_t summary_resyncs = 0;
 
     while (atomic_load(&s->running)) {
         bool perf = mc_perf_enabled();
         int64_t tick_start_us = 0;
+        int64_t tick_late_us = 0;
+        int64_t sleep_planned_us = 0;
+        int64_t task_wait_sum_us = 0;
+        int64_t task_wait_max_us = 0;
         int64_t task_us = 0;
         int64_t world_tick_us = 0;
         int64_t furnace_tick_us = 0;
@@ -1090,23 +1133,35 @@ static void *tick_thread_main(void *arg) {
         size_t remote_sync_attempts = 0;
         size_t write_flush_count = 0;
         size_t evicted_count = 0;
+        bool schedule_resync = false;
+        mc_world_tick_stats_t world_stats = {0};
+        mc_world_furnace_tick_stats_t furnace_stats = {0};
 
-        int64_t now = now_ms();
-        if (now < next_tick) {
+        int64_t now_us_value = mc_now_us();
+        if (now_us_value < next_tick_us) {
             struct timespec ts;
-            int64_t sleep_ms = next_tick - now;
-            ts.tv_sec = sleep_ms / 1000;
-            ts.tv_nsec = (sleep_ms % 1000) * 1000000;
+            sleep_planned_us = next_tick_us - now_us_value;
+            ts.tv_sec = sleep_planned_us / 1000000;
+            ts.tv_nsec = (sleep_planned_us % 1000000) * 1000;
             nanosleep(&ts, NULL);
-            now = now_ms();
+            now_us_value = mc_now_us();
         }
+        if (now_us_value > next_tick_us) tick_late_us = now_us_value - next_tick_us;
 
-        if (perf) tick_start_us = mc_now_us();
+        int64_t now = now_us_value / 1000;
+
+        if (perf) tick_start_us = now_us_value;
         int64_t span_start_us = perf ? mc_now_us() : 0;
         mc_task_t *task = mc_task_queue_drain(&s->task_queue);
         while (task) {
             mc_task_t *next = task->next;
             task_count++;
+            if (perf && task->enqueue_ms > 0) {
+                int64_t wait_us = (now - task->enqueue_ms) * 1000;
+                if (wait_us < 0) wait_us = 0;
+                task_wait_sum_us += wait_us;
+                if (wait_us > task_wait_max_us) task_wait_max_us = wait_us;
+            }
             if (task->type == MC_TASK_PACKET) {
                 (void)process_task(s, task, now);
             }
@@ -1119,12 +1174,14 @@ static void *tick_thread_main(void *arg) {
 
         if (s->world) {
             span_start_us = perf ? mc_now_us() : 0;
-            mc_world_tick(s->world, now);
+            if (perf) mc_world_tick_profiled(s->world, now, &world_stats);
+            else mc_world_tick(s->world, now);
             if (perf) world_tick_us = mc_now_us() - span_start_us;
 
             pthread_mutex_lock(&s->conns_lock);
             span_start_us = perf ? mc_now_us() : 0;
-            (void)mc_world_tick_furnaces(s->world, server_container_is_open_unlocked, s);
+            if (perf) (void)mc_world_tick_furnaces_profiled(s->world, server_container_is_open_unlocked, s, &furnace_stats);
+            else (void)mc_world_tick_furnaces(s->world, server_container_is_open_unlocked, s);
             if (perf) furnace_tick_us = mc_now_us() - span_start_us;
             pthread_mutex_unlock(&s->conns_lock);
         }
@@ -1230,26 +1287,38 @@ static void *tick_thread_main(void *arg) {
             if (perf) clear_updates_us = mc_now_us() - span_start_us;
         }
 
+        int64_t tick_end_us = mc_now_us();
+        int64_t candidate_next_tick_us = next_tick_us + tick_us;
+        if (tick_end_us > candidate_next_tick_us + tick_us) {
+            schedule_resync = true;
+        }
+
         if (perf) {
-            int64_t total_us = mc_now_us() - tick_start_us;
+            int64_t total_us = tick_end_us - tick_start_us;
             int64_t slow_us = mc_perf_slow_us();
+            int64_t task_wait_avg_us = task_count > 0 ? task_wait_sum_us / (int64_t)task_count : 0;
             bool slow = total_us >= slow_us || task_us >= slow_us || world_tick_us >= slow_us || furnace_tick_us >= slow_us ||
                         update_broadcast_us >= slow_us || proto_tick_us >= slow_us || item_entities_us >= slow_us ||
-                        remote_sync_us >= slow_us || write_flush_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us;
+                        remote_sync_us >= slow_us || write_flush_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us ||
+                        tick_late_us >= slow_us || task_wait_max_us >= slow_us;
             if (slow) {
-                log_info("perf tick: idx=%llu total=%.3fms tasks=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu writes=%zu item_entities=%zu keep=%zu evicted=%zu",
+                log_info("perf tick: idx=%llu total=%.3fms late=%.3fms sleep=%.3fms tasks=%.3fms task_wait_avg=%.3fms task_wait_max=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu writes=%zu item_entities=%zu keep=%zu evicted=%zu world_done=%zu world_integrated=%zu world_dirty=%zu world_saves=%zu/%zu/%zu world_jobs=%zu furnaces_scanned=%zu furnaces_ticked=%zu furnaces_changed=%zu furnaces_errors=%zu",
                          (unsigned long long)tick_index,
-                         (double)total_us / 1000.0,
-                         (double)task_us / 1000.0,
-                         (double)world_tick_us / 1000.0,
-                         (double)furnace_tick_us / 1000.0,
-                         (double)update_broadcast_us / 1000.0,
-                         (double)proto_tick_us / 1000.0,
-                         (double)item_entities_us / 1000.0,
-                         (double)remote_sync_us / 1000.0,
-                         (double)write_flush_us / 1000.0,
-                         (double)evict_us / 1000.0,
-                         (double)clear_updates_us / 1000.0,
+                         perf_ms(total_us),
+                         perf_ms(tick_late_us),
+                         perf_ms(sleep_planned_us),
+                         perf_ms(task_us),
+                         perf_ms(task_wait_avg_us),
+                         perf_ms(task_wait_max_us),
+                         perf_ms(world_tick_us),
+                         perf_ms(furnace_tick_us),
+                         perf_ms(update_broadcast_us),
+                         perf_ms(proto_tick_us),
+                         perf_ms(item_entities_us),
+                         perf_ms(remote_sync_us),
+                         perf_ms(write_flush_us),
+                         perf_ms(evict_us),
+                         perf_ms(clear_updates_us),
                          task_count,
                          conn_count,
                          play_ready_count,
@@ -1260,13 +1329,82 @@ static void *tick_thread_main(void *arg) {
                          write_flush_count,
                          s->item_entities_len,
                          keep_len,
-                         evicted_count);
+                         evicted_count,
+                         world_stats.done_seen,
+                         world_stats.done_integrated,
+                         world_stats.dirty_chunks,
+                         world_stats.saves_scanned,
+                         world_stats.saves_attempted,
+                         world_stats.saves_succeeded,
+                         world_stats.jobs_pending,
+                         furnace_stats.scanned_entities,
+                         furnace_stats.ticked,
+                         furnace_stats.changed,
+                         furnace_stats.errors);
+            }
+
+            uint64_t summary_ticks = mc_perf_summary_ticks();
+            if (summary_ticks > 0) {
+                perf_accum_add(&summary_total, total_us);
+                perf_accum_add(&summary_late, tick_late_us);
+                perf_accum_add(&summary_task, task_us);
+                perf_accum_add(&summary_world, world_tick_us);
+                perf_accum_add(&summary_furnace, furnace_tick_us);
+                perf_accum_add(&summary_updates, update_broadcast_us);
+                perf_accum_add(&summary_proto, proto_tick_us);
+                perf_accum_add(&summary_items, item_entities_us);
+                perf_accum_add(&summary_remote, remote_sync_us);
+                perf_accum_add(&summary_write, write_flush_us);
+                perf_accum_add(&summary_evict, evict_us);
+                summary_task_count += task_count;
+                summary_update_sends += block_update_sends;
+                summary_proto_ticks += proto_tick_count;
+                summary_remote_syncs += remote_sync_attempts;
+                if (schedule_resync) summary_resyncs++;
+                if (summary_total.count >= summary_ticks) {
+                    log_info("perf summary: ticks=%llu avg_total=%.3fms max_total=%.3fms avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
+                             (unsigned long long)summary_total.count,
+                             perf_accum_avg_ms(&summary_total),
+                             perf_ms(summary_total.max_us),
+                             perf_accum_avg_ms(&summary_late),
+                             perf_ms(summary_late.max_us),
+                             perf_accum_avg_ms(&summary_task),
+                             perf_accum_avg_ms(&summary_world),
+                             perf_accum_avg_ms(&summary_furnace),
+                             perf_accum_avg_ms(&summary_updates),
+                             perf_accum_avg_ms(&summary_proto),
+                             perf_accum_avg_ms(&summary_items),
+                             perf_accum_avg_ms(&summary_remote),
+                             perf_accum_avg_ms(&summary_write),
+                             perf_accum_avg_ms(&summary_evict),
+                             (unsigned long long)summary_task_count,
+                             (unsigned long long)summary_update_sends,
+                             (unsigned long long)summary_proto_ticks,
+                             (unsigned long long)summary_remote_syncs,
+                             (unsigned long long)summary_resyncs);
+                    summary_total = (perf_accum_t){0};
+                    summary_late = (perf_accum_t){0};
+                    summary_task = (perf_accum_t){0};
+                    summary_world = (perf_accum_t){0};
+                    summary_furnace = (perf_accum_t){0};
+                    summary_updates = (perf_accum_t){0};
+                    summary_proto = (perf_accum_t){0};
+                    summary_items = (perf_accum_t){0};
+                    summary_remote = (perf_accum_t){0};
+                    summary_write = (perf_accum_t){0};
+                    summary_evict = (perf_accum_t){0};
+                    summary_task_count = 0;
+                    summary_update_sends = 0;
+                    summary_proto_ticks = 0;
+                    summary_remote_syncs = 0;
+                    summary_resyncs = 0;
+                }
             }
         }
 
-        next_tick += tick_ms;
-        if (now > next_tick + tick_ms) {
-            next_tick = now + tick_ms;
+        next_tick_us = candidate_next_tick_us;
+        if (schedule_resync) {
+            next_tick_us = tick_end_us + tick_us;
         }
 
         tick_index++;

@@ -17,5 +17,6 @@ int read_file(const char *path, uint8_t **out, size_t *out_len);
 int64_t mc_now_us(void);
 bool mc_perf_enabled(void);
 int64_t mc_perf_slow_us(void);
+uint64_t mc_perf_summary_ticks(void);
 
 #endif /* MC_UTIL_H */
