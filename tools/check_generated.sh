@@ -9,6 +9,7 @@ MC_IDS_SOURCE=${MC_IDS_SOURCE:-$DATA_REPORTS_DIR}
 MC_BLOCK_LOOT_SOURCE=${MC_BLOCK_LOOT_SOURCE:-mc_vania_asset/client/data/minecraft/loot_table/blocks}
 MC_RECIPE_SOURCE=${MC_RECIPE_SOURCE:-mc_vania_asset/client/data/minecraft/recipe}
 MC_ITEM_TAG_SOURCE=${MC_ITEM_TAG_SOURCE:-mc_vania_asset/client/data/minecraft/tags/item}
+MC_SERVER_JAR_SOURCE=${MC_SERVER_JAR_SOURCE:-mc_vania_asset/server/server.jar}
 COMPONENTS_ITEM_DIR=${COMPONENTS_ITEM_DIR:-$DATA_REPORTS_DIR/minecraft/components/item}
 REQUIRE_RAW_DATA=${REQUIRE_RAW_DATA:-0}
 
@@ -24,6 +25,8 @@ src/generated/generated_block_loot.c
 src/generated/generated_block_loot.h
 src/generated/generated_block_hardness.c
 src/generated/generated_block_hardness.h
+src/generated/generated_mining_data.c
+src/generated/generated_mining_data.h
 src/generated/generated_item_food.c
 src/generated/generated_item_food.h
 src/generated/generated_crafting_recipes.c
@@ -52,7 +55,8 @@ for path in \
     "$MC_BLOCK_LOOT_SOURCE" \
     "$MC_RECIPE_SOURCE" \
     "$MC_ITEM_TAG_SOURCE" \
-    "$COMPONENTS_ITEM_DIR"
+    "$COMPONENTS_ITEM_DIR" \
+    "$MC_SERVER_JAR_SOURCE"
 do
     if [ ! -e "$path" ]; then
         echo "[generated-check] raw source unavailable: $path" >&2
@@ -108,6 +112,7 @@ python3 tools/gen_minecraft_ids.py "$MC_IDS_SOURCE" "$tmp_dir/src/generated/gene
 python3 tools/gen_registries.py "$tmp_dir/src/world/block_registry.h" "$tmp_dir/src/generated/generated_registries.c" "$tmp_dir/src/generated/generated_registries.h"
 python3 tools/gen_block_loot.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$DATA_REPORTS_DIR/blocks.json" "$MC_BLOCK_LOOT_SOURCE" "$tmp_dir/src/generated/generated_block_loot.c" "$tmp_dir/src/generated/generated_block_loot.h"
 python3 tools/gen_block_hardness.py "$DATA_REPORTS_DIR/blocks.json" "$tmp_dir/src/generated/generated_block_hardness.c" "$tmp_dir/src/generated/generated_block_hardness.h"
+python3 tools/gen_mining_data.py "$DATA_REPORTS_DIR/blocks.json" "$tmp_dir/src/generated/generated_minecraft_ids.json" "$MC_SERVER_JAR_SOURCE" "$tmp_dir/src/generated/generated_mining_data.c" "$tmp_dir/src/generated/generated_mining_data.h"
 python3 tools/gen_item_food.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$COMPONENTS_ITEM_DIR" "$tmp_dir/src/generated/generated_item_food.c" "$tmp_dir/src/generated/generated_item_food.h"
 python3 tools/gen_crafting_recipes.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$MC_RECIPE_SOURCE" "$MC_ITEM_TAG_SOURCE" "$tmp_dir/src/generated/generated_crafting_recipes.c" "$tmp_dir/src/generated/generated_crafting_recipes.h"
 python3 tools/gen_cooking_recipes.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$MC_RECIPE_SOURCE" "$MC_ITEM_TAG_SOURCE" "$tmp_dir/src/generated/generated_cooking_recipes.c" "$tmp_dir/src/generated/generated_cooking_recipes.h"

@@ -84,6 +84,8 @@ struct mc_conn {
     int32_t mining_y;
     int32_t mining_z;
     int32_t mining_state_id;
+    int32_t mining_tool_item_id;
+    bool mining_can_harvest;
     int64_t mining_started_ms;
     int64_t mining_required_ms;
 

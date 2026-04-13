@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "mc_inventory.h"
+#include "generated_mining_data.h"
 
 #define MC_MINING_TICK_MS 50
 #define MC_MINING_BASE_DESTROY_TICKS 30
@@ -14,7 +15,14 @@ typedef struct {
     bool known_hardness;
     bool breakable;
     bool instant;
+    bool tool_matches;
+    bool can_harvest;
     int32_t hardness_x100;
+    uint16_t speed_x100;
+    mc_mining_tool_category_t block_category;
+    mc_mining_tool_category_t tool_category;
+    mc_mining_harvest_level_t required_harvest_level;
+    mc_mining_harvest_level_t tool_harvest_level;
     int64_t required_ms;
 } mc_mining_break_info_t;
 

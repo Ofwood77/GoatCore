@@ -11,22 +11,30 @@ bool mc_mining_state_is_air(int32_t state_id) {
     return (GLOBAL_BLOCK_STATES[state_id].flags & MC_BLOCK_FLAG_IS_AIR) != 0u;
 }
 
-static int64_t required_ms_from_hardness_x100(int32_t hardness_x100) {
+static int64_t required_ms_from_hardness_x100(int32_t hardness_x100, uint16_t speed_x100) {
     if (hardness_x100 <= 0) return 0;
-    int64_t ticks = ((int64_t)hardness_x100 * MC_MINING_BASE_DESTROY_TICKS + MC_BLOCK_HARDNESS_SCALE - 1) /
-                    MC_BLOCK_HARDNESS_SCALE;
+    if (speed_x100 < MC_MINING_TOOL_SPEED_SCALE) speed_x100 = MC_MINING_TOOL_SPEED_SCALE;
+    int64_t numerator = (int64_t)hardness_x100 * MC_MINING_BASE_DESTROY_TICKS * MC_MINING_TOOL_SPEED_SCALE;
+    int64_t denominator = (int64_t)MC_BLOCK_HARDNESS_SCALE * speed_x100;
+    int64_t ticks = (numerator + denominator - 1) / denominator;
     if (ticks < 1) ticks = 1;
     return ticks * MC_MINING_TICK_MS;
 }
 
-mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *held_item) {
-    (void)held_item;
+static int32_t held_item_id(const mc_slot_t *held_item) {
+    if (!held_item || !held_item->present || held_item->count <= 0 || held_item->item_id <= 0) return -1;
+    return held_item->item_id;
+}
 
+mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *held_item) {
     mc_mining_break_info_t info = {0};
     info.hardness_x100 = MC_MINING_UNKNOWN_HARDNESS_X100;
-    info.required_ms = required_ms_from_hardness_x100(info.hardness_x100);
+    info.speed_x100 = MC_MINING_TOOL_SPEED_SCALE;
+    info.can_harvest = true;
+    info.required_ms = required_ms_from_hardness_x100(info.hardness_x100, info.speed_x100);
 
     if (!mining_state_valid(state_id)) {
+        info.can_harvest = false;
         return info;
     }
 
@@ -51,12 +59,32 @@ mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *h
         }
     }
 
+    const mc_mining_block_tool_entry_t *block_tool = mc_mining_block_tool_entry_from_state(state_id);
+    if (block_tool && (block_tool->flags & MC_MINING_BLOCK_TOOL_FLAG_PRESENT) != 0u) {
+        info.block_category = (mc_mining_tool_category_t)block_tool->category;
+        info.required_harvest_level = (mc_mining_harvest_level_t)block_tool->required_level;
+    }
+
+    const mc_mining_tool_item_entry_t *tool = mc_mining_tool_item_entry_from_item(held_item_id(held_item));
+    if (tool) {
+        info.tool_category = (mc_mining_tool_category_t)tool->category;
+        info.tool_harvest_level = (mc_mining_harvest_level_t)tool->harvest_level;
+    }
+
+    info.tool_matches = info.block_category != MC_MINING_TOOL_CATEGORY_NONE && info.tool_category == info.block_category;
+    if (info.tool_matches && tool && tool->speed_x100 > info.speed_x100) {
+        info.speed_x100 = tool->speed_x100;
+    }
+    if (info.required_harvest_level != MC_MINING_HARVEST_LEVEL_NONE) {
+        info.can_harvest = info.tool_matches && info.tool_harvest_level >= info.required_harvest_level;
+    }
+
     info.breakable = true;
     if (info.hardness_x100 <= 0) {
         info.instant = true;
         info.required_ms = 0;
     } else {
-        info.required_ms = required_ms_from_hardness_x100(info.hardness_x100);
+        info.required_ms = required_ms_from_hardness_x100(info.hardness_x100, info.speed_x100);
     }
     return info;
 }

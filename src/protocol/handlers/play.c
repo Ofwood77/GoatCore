@@ -2639,18 +2639,22 @@ static void clear_block_mining(mc_conn_t *c) {
     c->mining_y = 0;
     c->mining_z = 0;
     c->mining_state_id = -1;
+    c->mining_tool_item_id = -1;
+    c->mining_can_harvest = false;
     c->mining_started_ms = 0;
     c->mining_required_ms = 0;
 }
 
 static void start_block_mining(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int64_t now_ms,
-                               int64_t required_ms) {
+                               int64_t required_ms, int32_t tool_item_id, bool can_harvest) {
     if (!c) return;
     c->mining_active = true;
     c->mining_x = x;
     c->mining_y = y;
     c->mining_z = z;
     c->mining_state_id = state_id;
+    c->mining_tool_item_id = tool_item_id;
+    c->mining_can_harvest = can_harvest;
     c->mining_started_ms = now_ms;
     c->mining_required_ms = required_ms;
 }
@@ -2660,13 +2664,22 @@ static bool block_mining_matches(const mc_conn_t *c, int32_t x, int32_t y, int32
            c->mining_state_id == state_id;
 }
 
+static int32_t mining_slot_item_id(const mc_slot_t *slot) {
+    if (!slot || !slot->present || slot->count <= 0 || slot->item_id <= 0) return -1;
+    return slot->item_id;
+}
+
+static bool block_mining_tool_matches(const mc_conn_t *c, const mc_slot_t *held_item) {
+    return c && c->mining_active && c->mining_tool_item_id == mining_slot_item_id(held_item);
+}
+
 static int reject_block_destroy(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int32_t seq) {
     if (state_id >= 0 && send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
     return send_block_changed_ack_packet(c, seq);
 }
 
 static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_world_ids_t *ids, int32_t x, int32_t y,
-                                     int32_t z, int32_t state_id, int32_t seq) {
+                                     int32_t z, int32_t state_id, int32_t seq, bool allow_default_drop) {
     if (!c || !world || !ids) return -1;
 
     int brc = break_container_block(c, x, y, z, state_id);
@@ -2677,7 +2690,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     }
 
     if (!mc_mining_state_is_air(state_id)) {
-        int32_t drop_item_id = mc_block_loot_default_item_id_from_state(state_id, -1);
+        int32_t drop_item_id = allow_default_drop ? mc_block_loot_default_item_id_from_state(state_id, -1) : -1;
         (void)mc_world_remove_block_entity(world, x, y, z);
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
         if (mc_world_flush_block(world, x, y, z) != 0) return -1;
@@ -5609,10 +5622,11 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                         if (!mining.breakable) {
                             return reject_block_destroy(c, x, y, z, state_id, seq);
                         }
-                        start_block_mining(c, x, y, z, state_id, now_ms, mining.required_ms);
+                        int32_t held_item_id = mining_slot_item_id(held_item);
+                        start_block_mining(c, x, y, z, state_id, now_ms, mining.required_ms, held_item_id, mining.can_harvest);
                         if (mining.instant) {
                             clear_block_mining(c);
-                            return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
+                            return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, mining.can_harvest);
                         }
                         return send_block_changed_ack_packet(c, seq);
                     }
@@ -5623,7 +5637,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     }
 
                     if (action == PLAYER_ACTION_STOP_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
-                        if (!mining.breakable || !block_mining_matches(c, x, y, z, state_id)) {
+                        if (!mining.breakable || !block_mining_matches(c, x, y, z, state_id) ||
+                            !block_mining_tool_matches(c, held_item)) {
                             clear_block_mining(c);
                             return reject_block_destroy(c, x, y, z, state_id, seq);
                         }
@@ -5632,12 +5647,13 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                             clear_block_mining(c);
                             return reject_block_destroy(c, x, y, z, state_id, seq);
                         }
+                        bool allow_default_drop = c->mining_can_harvest;
                         clear_block_mining(c);
-                        return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
+                        return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, allow_default_drop);
                     }
 
                     clear_block_mining(c);
-                    return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
+                    return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, true);
                 }
             }
             clear_block_mining(c);
