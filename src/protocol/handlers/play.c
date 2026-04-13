@@ -2,6 +2,7 @@
 #include "mc_inventory.h"
 #include "mc_crafting.h"
 #include "mc_furnace.h"
+#include "mc_mining.h"
 #include "mc_container_store.h"
 #include "mc_nbt.h"
 #include "mc_packed.h"
@@ -2629,6 +2630,74 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
         return -1;
     }
     return 0;
+}
+
+static void clear_block_mining(mc_conn_t *c) {
+    if (!c) return;
+    c->mining_active = false;
+    c->mining_x = 0;
+    c->mining_y = 0;
+    c->mining_z = 0;
+    c->mining_state_id = -1;
+    c->mining_started_ms = 0;
+    c->mining_required_ms = 0;
+}
+
+static void start_block_mining(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int64_t now_ms,
+                               int64_t required_ms) {
+    if (!c) return;
+    c->mining_active = true;
+    c->mining_x = x;
+    c->mining_y = y;
+    c->mining_z = z;
+    c->mining_state_id = state_id;
+    c->mining_started_ms = now_ms;
+    c->mining_required_ms = required_ms;
+}
+
+static bool block_mining_matches(const mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id) {
+    return c && c->mining_active && c->mining_x == x && c->mining_y == y && c->mining_z == z &&
+           c->mining_state_id == state_id;
+}
+
+static int reject_block_destroy(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int32_t seq) {
+    if (state_id >= 0 && send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
+    return send_block_changed_ack_packet(c, seq);
+}
+
+static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_world_ids_t *ids, int32_t x, int32_t y,
+                                     int32_t z, int32_t state_id, int32_t seq) {
+    if (!c || !world || !ids) return -1;
+
+    int brc = break_container_block(c, x, y, z, state_id);
+    if (brc < 0) return -1;
+    if (brc == 0) {
+        if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
+        return send_block_changed_ack_packet(c, seq);
+    }
+
+    if (!mc_mining_state_is_air(state_id)) {
+        int32_t drop_item_id = mc_block_loot_default_item_id_from_state(state_id, -1);
+        (void)mc_world_remove_block_entity(world, x, y, z);
+        if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
+        if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+        if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
+
+        if (drop_item_id >= 0) {
+            mc_slot_t block_drop = {0};
+            if (mc_slot_set_simple(&block_drop, drop_item_id, 1) == 0) {
+                if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
+                    mc_slot_clear(&block_drop);
+                    return -1;
+                }
+            }
+            mc_slot_clear(&block_drop);
+        }
+        return send_block_changed_ack_packet(c, seq);
+    }
+
+    if (send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
+    return send_block_changed_ack_packet(c, seq);
 }
 
 static int try_open_target_container(mc_conn_t *c, int32_t x, int32_t y, int32_t z) {
@@ -5530,48 +5599,48 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     log_info("place debug: break action=%d pos=(%d,%d,%d) face=%d", action, x, y, z, face);
                 }
 
-                if (action == PLAYER_ACTION_START_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
-                    return send_block_changed_ack_packet(c, seq);
-                }
-
                 int32_t state_id = -1;
                 if (mc_world_get_block(world, x, y, z, &state_id) == 0) {
-                    if (action == PLAYER_ACTION_ABORT_DESTROY_BLOCK) {
-                        if (send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
-                        return send_block_changed_ack_packet(c, seq);
-                    }
+                    const mc_slot_t *held_item = selected_mainhand_slot(c);
+                    mc_mining_break_info_t mining = mc_mining_break_info(state_id, held_item);
 
-                    int brc = break_container_block(c, x, y, z, state_id);
-                    if (brc < 0) return -1;
-                    if (brc == 0) {
-                        if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
-                        return send_block_changed_ack_packet(c, seq);
-                    }
-
-                    if (state_id != ids->air) {
-                        int32_t drop_item_id = mc_block_loot_default_item_id_from_state(state_id, -1);
-                        (void)mc_world_remove_block_entity(world, x, y, z);
-                        if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
-                        if (mc_world_flush_block(world, x, y, z) != 0) return -1;
-                        if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
-
-                        if (drop_item_id >= 0) {
-                            mc_slot_t block_drop = {0};
-                            if (mc_slot_set_simple(&block_drop, drop_item_id, 1) == 0) {
-                                if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
-                                    mc_slot_clear(&block_drop);
-                                    return -1;
-                                }
-                            }
-                            mc_slot_clear(&block_drop);
+                    if (action == PLAYER_ACTION_START_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
+                        clear_block_mining(c);
+                        if (!mining.breakable) {
+                            return reject_block_destroy(c, x, y, z, state_id, seq);
+                        }
+                        start_block_mining(c, x, y, z, state_id, now_ms, mining.required_ms);
+                        if (mining.instant) {
+                            clear_block_mining(c);
+                            return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
                         }
                         return send_block_changed_ack_packet(c, seq);
                     }
 
-                    if (send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
-                    return send_block_changed_ack_packet(c, seq);
+                    if (action == PLAYER_ACTION_ABORT_DESTROY_BLOCK) {
+                        clear_block_mining(c);
+                        return reject_block_destroy(c, x, y, z, state_id, seq);
+                    }
+
+                    if (action == PLAYER_ACTION_STOP_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
+                        if (!mining.breakable || !block_mining_matches(c, x, y, z, state_id)) {
+                            clear_block_mining(c);
+                            return reject_block_destroy(c, x, y, z, state_id, seq);
+                        }
+                        mining.required_ms = c->mining_required_ms;
+                        if (!mc_mining_elapsed_enough(&mining, c->mining_started_ms, now_ms, NULL)) {
+                            clear_block_mining(c);
+                            return reject_block_destroy(c, x, y, z, state_id, seq);
+                        }
+                        clear_block_mining(c);
+                        return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
+                    }
+
+                    clear_block_mining(c);
+                    return break_block_authoritative(c, world, ids, x, y, z, state_id, seq);
                 }
             }
+            clear_block_mining(c);
             return send_block_changed_ack_packet(c, seq);
         }
         return 0;

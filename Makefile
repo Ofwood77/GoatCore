@@ -18,6 +18,7 @@ SRC = \
     src/net/task_queue.c \
     src/gameplay/crafting.c \
     src/gameplay/furnace.c \
+    src/gameplay/mining.c \
     src/protocol/varint.c \
     src/protocol/inventory.c \
     src/protocol/framing.c \
@@ -43,6 +44,7 @@ SRC = \
     src/generated/generated_minecraft_ids.c \
     src/generated/generated_registries.c \
     src/generated/generated_block_loot.c \
+    src/generated/generated_block_hardness.c \
     src/generated/generated_item_food.c \
     src/generated/generated_crafting_recipes.c \
     src/generated/generated_cooking_recipes.c \
@@ -61,13 +63,15 @@ TEST_BINS = \
     test_paletted_container \
     test_chunk_network_codec \
     test_anvil_roundtrip \
-    test_player_nbt
+    test_player_nbt \
+    test_mining
 
 GENERATED_HEADERS = \
     src/world/block_registry.h \
     src/generated/generated_minecraft_ids.h \
     src/generated/generated_registries.h \
     src/generated/generated_block_loot.h \
+    src/generated/generated_block_hardness.h \
     src/generated/generated_item_food.h \
     src/generated/generated_crafting_recipes.h \
     src/generated/generated_cooking_recipes.h \
@@ -78,6 +82,7 @@ GENERATED_SOURCES = \
     src/generated/generated_minecraft_ids.c \
     src/generated/generated_registries.c \
     src/generated/generated_block_loot.c \
+    src/generated/generated_block_hardness.c \
     src/generated/generated_item_food.c \
     src/generated/generated_crafting_recipes.c \
     src/generated/generated_cooking_recipes.c \
@@ -110,6 +115,10 @@ src/generated/generated_block_loot.c src/generated/generated_block_loot.h: tools
 	@mkdir -p src/generated
 	python3 tools/gen_block_loot.py src/generated/generated_minecraft_ids.json $(DATA_REPORTS_DIR)/blocks.json $(MC_BLOCK_LOOT_SOURCE) src/generated/generated_block_loot.c src/generated/generated_block_loot.h
 
+src/generated/generated_block_hardness.c src/generated/generated_block_hardness.h: tools/gen_block_hardness.py $(DATA_REPORTS_DIR)/blocks.json
+	@mkdir -p src/generated
+	python3 tools/gen_block_hardness.py $(DATA_REPORTS_DIR)/blocks.json src/generated/generated_block_hardness.c src/generated/generated_block_hardness.h
+
 src/generated/generated_item_food.c src/generated/generated_item_food.h: tools/gen_item_food.py src/generated/generated_minecraft_ids.json $(wildcard $(DATA_REPORTS_DIR)/minecraft/components/item/*.json)
 	@mkdir -p src/generated
 	python3 tools/gen_item_food.py src/generated/generated_minecraft_ids.json $(DATA_REPORTS_DIR)/minecraft/components/item src/generated/generated_item_food.c src/generated/generated_item_food.h
@@ -141,11 +150,12 @@ regenerate:
 
 $(OBJ): $(GENERATED_HEADERS)
 
-src/protocol/handlers/play.o: src/generated/generated_registries.h src/generated/generated_block_loot.h src/generated/generated_item_food.h src/generated/generated_crafting_recipes.h src/generated/generated_cooking_recipes.h src/generated/generated_item_place.h src/generated/generated_minecraft_ids.h
+src/protocol/handlers/play.o: src/generated/generated_registries.h src/generated/generated_block_loot.h src/generated/generated_block_hardness.h src/generated/generated_item_food.h src/generated/generated_crafting_recipes.h src/generated/generated_cooking_recipes.h src/generated/generated_item_place.h src/generated/generated_minecraft_ids.h
 src/protocol/inventory.o: src/generated/generated_minecraft_ids.h
 src/net/server.o: src/generated/generated_minecraft_ids.h
 src/gameplay/crafting.o: src/generated/generated_crafting_recipes.h
 src/gameplay/furnace.o: src/generated/generated_cooking_recipes.h
+src/gameplay/mining.o: src/generated/generated_block_hardness.h
 
 mc_server: generated_headers generated_sources $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDFLAGS)
@@ -177,13 +187,16 @@ test_block_entity_store: tests/test_block_entity_store.c src/world/block_entity_
 test_paletted_container: tests/test_paletted_container.c src/world/paletted_container.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/crafting.c src/gameplay/furnace.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/crafting.c src/gameplay/furnace.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_player_nbt: tests/test_player_nbt.c src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_block_hardness.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: $(TEST_BINS)

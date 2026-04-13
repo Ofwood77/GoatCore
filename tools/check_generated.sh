@@ -22,6 +22,8 @@ src/generated/generated_registries.c
 src/generated/generated_registries.h
 src/generated/generated_block_loot.c
 src/generated/generated_block_loot.h
+src/generated/generated_block_hardness.c
+src/generated/generated_block_hardness.h
 src/generated/generated_item_food.c
 src/generated/generated_item_food.h
 src/generated/generated_crafting_recipes.c
@@ -105,6 +107,7 @@ python3 tools/generate_registry.py "$DATA_REPORTS_DIR/blocks.json" "$tmp_dir/src
 python3 tools/gen_minecraft_ids.py "$MC_IDS_SOURCE" "$tmp_dir/src/generated/generated_minecraft_ids.c" "$tmp_dir/src/generated/generated_minecraft_ids.h" "$tmp_dir/src/generated/generated_minecraft_ids.json"
 python3 tools/gen_registries.py "$tmp_dir/src/world/block_registry.h" "$tmp_dir/src/generated/generated_registries.c" "$tmp_dir/src/generated/generated_registries.h"
 python3 tools/gen_block_loot.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$DATA_REPORTS_DIR/blocks.json" "$MC_BLOCK_LOOT_SOURCE" "$tmp_dir/src/generated/generated_block_loot.c" "$tmp_dir/src/generated/generated_block_loot.h"
+python3 tools/gen_block_hardness.py "$DATA_REPORTS_DIR/blocks.json" "$tmp_dir/src/generated/generated_block_hardness.c" "$tmp_dir/src/generated/generated_block_hardness.h"
 python3 tools/gen_item_food.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$COMPONENTS_ITEM_DIR" "$tmp_dir/src/generated/generated_item_food.c" "$tmp_dir/src/generated/generated_item_food.h"
 python3 tools/gen_crafting_recipes.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$MC_RECIPE_SOURCE" "$MC_ITEM_TAG_SOURCE" "$tmp_dir/src/generated/generated_crafting_recipes.c" "$tmp_dir/src/generated/generated_crafting_recipes.h"
 python3 tools/gen_cooking_recipes.py "$tmp_dir/src/generated/generated_minecraft_ids.json" "$MC_RECIPE_SOURCE" "$MC_ITEM_TAG_SOURCE" "$tmp_dir/src/generated/generated_cooking_recipes.c" "$tmp_dir/src/generated/generated_cooking_recipes.h"
