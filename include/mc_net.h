@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include "mc_server.h"
 #include "mc_inventory.h"
+#include "mc_mining.h"
 #include "mc_world.h"
 
 #define MC_BUF_CAP 8192
@@ -79,15 +80,7 @@ struct mc_conn {
     int64_t last_keepalive_sent_ms;
     bool awaiting_keepalive;
 
-    bool mining_active;
-    int32_t mining_x;
-    int32_t mining_y;
-    int32_t mining_z;
-    int32_t mining_state_id;
-    int32_t mining_tool_item_id;
-    bool mining_can_harvest;
-    int64_t mining_started_ms;
-    int64_t mining_required_ms;
+    mc_mining_session_t mining;
 
     double x;
     double y;

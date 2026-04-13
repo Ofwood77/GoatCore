@@ -20,6 +20,11 @@ static mc_slot_t tool_slot(const char *item_name) {
     return slot;
 }
 
+static void assert_stop_result(mc_mining_stop_result_t got, mc_mining_stop_result_t expected) {
+    assert(got == expected);
+    assert(mc_mining_stop_result_name(got) != NULL);
+}
+
 int main(void) {
     int32_t air = state_id("minecraft:air");
     int32_t dirt = state_id("minecraft:dirt");
@@ -153,6 +158,57 @@ int main(void) {
     assert(elapsed_ms == obsidian_accept_ms - 1);
     assert(mc_mining_elapsed_enough(&obsidian_diamond_info, 1000, 1000 + obsidian_accept_ms, &elapsed_ms));
     assert(elapsed_ms == obsidian_accept_ms);
+
+    assert(mc_mining_slot_item_id(NULL) == -1);
+    assert(mc_mining_slot_item_id(&wooden_pickaxe) == mc_minecraft_item_id("minecraft:wooden_pickaxe"));
+
+    mc_mining_session_t session;
+    mc_mining_session_clear(&session);
+    assert(!session.active);
+    assert(session.state_id == -1);
+    assert(session.tool_item_id == -1);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 2, stone,
+                                                       mc_mining_slot_item_id(&wooden_pickaxe), 1000, NULL),
+                       MC_MINING_STOP_NO_SESSION);
+
+    mc_mining_session_start(&session, 1, 64, 2, stone, 1000, mc_mining_slot_item_id(&wooden_pickaxe),
+                            &stone_wood_info);
+    assert(session.active);
+    assert(session.break_info.can_harvest);
+    assert(session.break_info.required_ms == stone_wood_info.required_ms);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 3, stone,
+                                                       mc_mining_slot_item_id(&wooden_pickaxe),
+                                                       1000 + stone_accept_ms, NULL),
+                       MC_MINING_STOP_TARGET_MISMATCH);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 2, dirt,
+                                                       mc_mining_slot_item_id(&wooden_pickaxe),
+                                                       1000 + stone_accept_ms, NULL),
+                       MC_MINING_STOP_STATE_CHANGED);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 2, stone,
+                                                       mc_mining_slot_item_id(&stone_pickaxe),
+                                                       1000 + stone_accept_ms, NULL),
+                       MC_MINING_STOP_TOOL_CHANGED);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 2, stone,
+                                                       mc_mining_slot_item_id(&wooden_pickaxe),
+                                                       1000 + stone_accept_ms - 1, &elapsed_ms),
+                       MC_MINING_STOP_TOO_EARLY);
+    assert(elapsed_ms == stone_accept_ms - 1);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 1, 64, 2, stone,
+                                                       mc_mining_slot_item_id(&wooden_pickaxe),
+                                                       1000 + stone_accept_ms, &elapsed_ms),
+                       MC_MINING_STOP_OK);
+    assert(elapsed_ms == stone_accept_ms);
+
+    mc_mining_session_start(&session, 2, 64, 2, stone, 2000, mc_mining_slot_item_id(&wooden_shovel),
+                            &stone_shovel_info);
+    assert(session.active);
+    assert(!session.break_info.can_harvest);
+    assert_stop_result(mc_mining_session_validate_stop(&session, 2, 64, 2, stone,
+                                                       mc_mining_slot_item_id(&wooden_shovel),
+                                                       2000 + stone_shovel_info.required_ms,
+                                                       NULL),
+                       MC_MINING_STOP_OK);
+    assert(!session.break_info.can_harvest);
 
     mc_mining_break_info_t invalid_info = mc_mining_break_info(-1, NULL);
     assert(!invalid_info.breakable);

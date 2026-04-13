@@ -22,9 +22,9 @@ static int64_t required_ms_from_hardness_x100(int32_t hardness_x100, uint16_t sp
     return ticks * MC_MINING_TICK_MS;
 }
 
-static int32_t held_item_id(const mc_slot_t *held_item) {
-    if (!held_item || !held_item->present || held_item->count <= 0 || held_item->item_id <= 0) return -1;
-    return held_item->item_id;
+int32_t mc_mining_slot_item_id(const mc_slot_t *slot) {
+    if (!slot || !slot->present || slot->count <= 0 || slot->item_id <= 0) return -1;
+    return slot->item_id;
 }
 
 mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *held_item) {
@@ -69,7 +69,7 @@ mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *h
             (block_tool->flags & MC_MINING_BLOCK_TOOL_FLAG_REQUIRES_CORRECT_TOOL) != 0u;
     }
 
-    const mc_mining_tool_item_entry_t *tool = mc_mining_tool_item_entry_from_item(held_item_id(held_item));
+    const mc_mining_tool_item_entry_t *tool = mc_mining_tool_item_entry_from_item(mc_mining_slot_item_id(held_item));
     if (tool) {
         info.tool_category = (mc_mining_tool_category_t)tool->category;
         info.tool_harvest_level = (mc_mining_harvest_level_t)tool->harvest_level;
@@ -104,4 +104,55 @@ bool mc_mining_elapsed_enough(const mc_mining_break_info_t *info, int64_t starte
     int64_t required_ms = info->required_ms;
     if (required_ms > MC_MINING_BREAK_GRACE_MS) required_ms -= MC_MINING_BREAK_GRACE_MS;
     return elapsed_ms >= required_ms;
+}
+
+void mc_mining_session_clear(mc_mining_session_t *session) {
+    if (!session) return;
+    *session = (mc_mining_session_t){0};
+    session->state_id = -1;
+    session->tool_item_id = -1;
+}
+
+void mc_mining_session_start(mc_mining_session_t *session, int32_t x, int32_t y, int32_t z, int32_t state_id,
+                             int64_t started_ms, int32_t tool_item_id,
+                             const mc_mining_break_info_t *break_info) {
+    if (!session) return;
+    mc_mining_session_clear(session);
+    if (!break_info || !break_info->breakable) return;
+    session->active = true;
+    session->x = x;
+    session->y = y;
+    session->z = z;
+    session->state_id = state_id;
+    session->tool_item_id = tool_item_id;
+    session->started_ms = started_ms;
+    session->break_info = *break_info;
+}
+
+mc_mining_stop_result_t mc_mining_session_validate_stop(const mc_mining_session_t *session, int32_t x, int32_t y,
+                                                        int32_t z, int32_t current_state_id,
+                                                        int32_t current_tool_item_id, int64_t now_ms,
+                                                        int64_t *out_elapsed_ms) {
+    if (!session || !session->active) return MC_MINING_STOP_NO_SESSION;
+    if (session->x != x || session->y != y || session->z != z) return MC_MINING_STOP_TARGET_MISMATCH;
+    if (session->state_id != current_state_id) return MC_MINING_STOP_STATE_CHANGED;
+    if (session->tool_item_id != current_tool_item_id) return MC_MINING_STOP_TOOL_CHANGED;
+    if (!session->break_info.breakable) return MC_MINING_STOP_UNBREAKABLE;
+    if (!mc_mining_elapsed_enough(&session->break_info, session->started_ms, now_ms, out_elapsed_ms)) {
+        return MC_MINING_STOP_TOO_EARLY;
+    }
+    return MC_MINING_STOP_OK;
+}
+
+const char *mc_mining_stop_result_name(mc_mining_stop_result_t result) {
+    switch (result) {
+        case MC_MINING_STOP_OK: return "ok";
+        case MC_MINING_STOP_NO_SESSION: return "no_session";
+        case MC_MINING_STOP_TARGET_MISMATCH: return "target_mismatch";
+        case MC_MINING_STOP_STATE_CHANGED: return "state_changed";
+        case MC_MINING_STOP_TOOL_CHANGED: return "tool_changed";
+        case MC_MINING_STOP_UNBREAKABLE: return "unbreakable";
+        case MC_MINING_STOP_TOO_EARLY: return "too_early";
+        default: return "unknown";
+    }
 }
