@@ -196,6 +196,51 @@ static void conn_release(mc_conn_t *c) {
     }
 }
 
+typedef struct {
+    mc_conn_t **items;
+    size_t len;
+    size_t cap;
+} mc_conn_snapshot_t;
+
+static void conn_snapshot_clear(mc_conn_snapshot_t *snapshot) {
+    if (!snapshot) return;
+    for (size_t i = 0; i < snapshot->len; i++) {
+        conn_release(snapshot->items[i]);
+    }
+    free(snapshot->items);
+    memset(snapshot, 0, sizeof(*snapshot));
+}
+
+static int conn_snapshot_push(mc_conn_snapshot_t *snapshot, mc_conn_t *conn) {
+    if (!snapshot || !conn) return -1;
+    if (snapshot->len == snapshot->cap) {
+        size_t new_cap = snapshot->cap ? snapshot->cap * 2 : 16;
+        if (new_cap < snapshot->cap) return -1;
+        mc_conn_t **next = (mc_conn_t **)realloc(snapshot->items, new_cap * sizeof(*next));
+        if (!next) return -1;
+        snapshot->items = next;
+        snapshot->cap = new_cap;
+    }
+    conn_acquire(conn);
+    snapshot->items[snapshot->len++] = conn;
+    return 0;
+}
+
+static int server_snapshot_conns(mc_server_t *s, mc_conn_snapshot_t *snapshot) {
+    if (!s || !snapshot) return -1;
+    memset(snapshot, 0, sizeof(*snapshot));
+    pthread_mutex_lock(&s->conns_lock);
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (conn_snapshot_push(snapshot, c) != 0) {
+            pthread_mutex_unlock(&s->conns_lock);
+            conn_snapshot_clear(snapshot);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&s->conns_lock);
+    return 0;
+}
+
 static void close_matching_container_window(mc_conn_t *c) {
     if (!c || !c->active_window.open || !c->active_window.container) return;
     int32_t window_id = c->active_window.window_id;
@@ -1199,12 +1244,20 @@ static void *tick_thread_main(void *arg) {
         int64_t *keep_keys = NULL;
         size_t keep_len = 0;
         size_t keep_cap = 0;
+        mc_conn_snapshot_t conn_snapshot = {0};
 
-        pthread_mutex_lock(&s->conns_lock);
-        for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (server_snapshot_conns(s, &conn_snapshot) != 0) {
+            log_error("tick: failed to snapshot connections");
+            do_evict = false;
+        }
+
+        for (size_t ci = 0; ci < conn_snapshot.len; ci++) {
+            mc_conn_t *c = conn_snapshot.items[ci];
+            mc_proto_state_t state = (mc_proto_state_t)atomic_load(&c->state);
+            bool closing = atomic_load(&c->closing);
             conn_count++;
-            if (c->state == MC_STATE_PLAY && c->play_ready && !c->closing) play_ready_count++;
-            if (do_evict && c->state == MC_STATE_PLAY && c->has_pos && !c->closing) {
+            if (state == MC_STATE_PLAY && c->play_ready && !closing) play_ready_count++;
+            if (do_evict && state == MC_STATE_PLAY && c->has_pos && !closing) {
                 int32_t bx = floor_i32_from_f64(c->x);
                 int32_t bz = floor_i32_from_f64(c->z);
                 int32_t pcx = block_to_chunk(bx);
@@ -1223,7 +1276,7 @@ static void *tick_thread_main(void *arg) {
                 }
             }
 
-            if (updates && updates_len > 0 && c->state == MC_STATE_PLAY && c->play_ready && !c->closing) {
+            if (updates && updates_len > 0 && state == MC_STATE_PLAY && c->play_ready && !closing) {
                 span_start_us = perf ? mc_now_us() : 0;
                 for (size_t i = 0; i < updates_len; i++) {
                     const mc_block_update_t *u = &updates[i];
@@ -1235,7 +1288,7 @@ static void *tick_thread_main(void *arg) {
                 }
                 if (perf) update_broadcast_us += mc_now_us() - span_start_us;
             }
-            if (c->state == MC_STATE_PLAY) {
+            if (state == MC_STATE_PLAY && !closing) {
                 proto_tick_count++;
                 span_start_us = perf ? mc_now_us() : 0;
                 if (proto_play_tick(c, now) != 0) {
@@ -1244,15 +1297,21 @@ static void *tick_thread_main(void *arg) {
                 if (perf) proto_tick_us += mc_now_us() - span_start_us;
             }
         }
+
+        pthread_mutex_lock(&s->conns_lock);
         span_start_us = perf ? mc_now_us() : 0;
         item_entities_tick(s, now);
         if (perf) item_entities_us = mc_now_us() - span_start_us;
+        pthread_mutex_unlock(&s->conns_lock);
 
         span_start_us = perf ? mc_now_us() : 0;
-        for (mc_conn_t *viewer = s->conns; viewer; viewer = viewer->next) {
-            if (viewer->closing || viewer->state != MC_STATE_PLAY || !viewer->play_ready) continue;
-            for (mc_conn_t *subject = s->conns; subject; subject = subject->next) {
-                if (subject == viewer || subject->closing || subject->state != MC_STATE_PLAY || !subject->play_ready || !subject->has_pos) {
+        for (size_t vi = 0; vi < conn_snapshot.len; vi++) {
+            mc_conn_t *viewer = conn_snapshot.items[vi];
+            if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY || !viewer->play_ready) continue;
+            for (size_t si = 0; si < conn_snapshot.len; si++) {
+                mc_conn_t *subject = conn_snapshot.items[si];
+                if (subject == viewer || atomic_load(&subject->closing) || atomic_load(&subject->state) != MC_STATE_PLAY ||
+                    !subject->play_ready || !subject->has_pos) {
                     continue;
                 }
                 remote_sync_attempts++;
@@ -1264,6 +1323,7 @@ static void *tick_thread_main(void *arg) {
         }
         if (perf) remote_sync_us = mc_now_us() - span_start_us;
 
+        pthread_mutex_lock(&s->conns_lock);
         span_start_us = perf ? mc_now_us() : 0;
         for (mc_conn_t *c = s->conns; c; c = c->next) {
             write_flush_count++;
@@ -1273,6 +1333,7 @@ static void *tick_thread_main(void *arg) {
         }
         if (perf) write_flush_us = mc_now_us() - span_start_us;
         pthread_mutex_unlock(&s->conns_lock);
+        conn_snapshot_clear(&conn_snapshot);
 
         if (do_evict && s->world) {
             span_start_us = perf ? mc_now_us() : 0;
