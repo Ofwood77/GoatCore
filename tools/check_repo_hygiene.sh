@@ -26,10 +26,10 @@ while IFS= read -r path; do
         *.o|*.d|mc_server|mc_recorder|mc_anvil_dump|mc_gen_bench|test_*)
             flag_bad "tracked build artifact" "$path"
             ;;
-        world/*|data/*|mc_vania_asset/*|"erreur reseau"/*|llm/*|reports/*)
+        .codex|world/*|data/*|mc_vania_asset/*|"erreur reseau"/*|llm/*|reports/*)
             flag_bad "tracked local/raw data" "$path"
             ;;
-        PLAN*.md|REPORT*.md|docs/IA_*.md)
+        PLAN*.md|REPORT*.md|docs/*)
             flag_bad "tracked AI/report note" "$path"
             ;;
         assets/*)

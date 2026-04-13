@@ -14,6 +14,10 @@ typedef enum {
     MC_CONTAINER_KIND_NONE = 0,
     MC_CONTAINER_KIND_CHEST = 1,
     MC_CONTAINER_KIND_ENDER_CHEST = 2,
+    MC_CONTAINER_KIND_CRAFTING_TABLE = 3,
+    MC_CONTAINER_KIND_FURNACE = 4,
+    MC_CONTAINER_KIND_SMOKER = 5,
+    MC_CONTAINER_KIND_BLAST_FURNACE = 6,
 } mc_container_kind_t;
 
 typedef struct {
@@ -52,6 +56,10 @@ typedef struct {
     int32_t slot_count;
     int32_t state_id;
     bool dirty;
+    int32_t furnace_burn_time;
+    int32_t furnace_burn_duration;
+    int32_t furnace_cook_time;
+    int32_t furnace_cook_duration;
     mc_slot_t slots[MC_CONTAINER_SLOT_COUNT];
 } mc_container_instance_t;
 
@@ -68,6 +76,10 @@ typedef struct mc_player_data {
     bool has_uuid;
     char username[17];
     int32_t gamemode;
+    float health;
+    int32_t food_level;
+    float food_saturation;
+    float food_exhaustion;
     double pos_x;
     double pos_y;
     double pos_z;
@@ -91,6 +103,8 @@ void mc_inventory_fill_starter_loadout(mc_inventory_t *inv);
 int mc_inventory_selected_slot_index(const mc_inventory_t *inv);
 mc_slot_t *mc_inventory_selected_slot(mc_inventory_t *inv);
 const mc_slot_t *mc_inventory_selected_slot_const(const mc_inventory_t *inv);
+bool mc_inventory_can_absorb_slot(const mc_inventory_t *inv, const mc_slot_t *src);
+int mc_inventory_try_absorb_slot(mc_inventory_t *inv, mc_slot_t *src);
 
 void mc_container_instance_init(mc_container_instance_t *container, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z);
 void mc_container_instance_clear(mc_container_instance_t *container);

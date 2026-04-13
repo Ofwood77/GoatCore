@@ -434,6 +434,10 @@ static int player_build_nbt(const mc_player_data_t *player, mc_nbt_tag_t **out_r
         compound_add(root, inv) != 0 ||
         compound_add(root, ender) != 0 ||
         compound_add(root, nbt_new_int("playerGameType", player->gamemode)) != 0 ||
+        compound_add(root, nbt_new_float("Health", player->health)) != 0 ||
+        compound_add(root, nbt_new_int("foodLevel", player->food_level)) != 0 ||
+        compound_add(root, nbt_new_float("foodSaturationLevel", player->food_saturation)) != 0 ||
+        compound_add(root, nbt_new_float("foodExhaustionLevel", player->food_exhaustion)) != 0 ||
         compound_add(root, nbt_new_int("SelectedItemSlot", player->inventory.selected_hotbar_slot)) != 0 ||
         compound_add(root, nbt_new_int("mcInventoryStateId", player->inventory.state_id)) != 0 ||
         compound_add(root, nbt_new_int("mcEnderStateId", player->ender_state_id)) != 0 ||
@@ -461,6 +465,10 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
     const mc_nbt_tag_t *pos;
     const mc_nbt_tag_t *rot;
     const mc_nbt_tag_t *gamemode;
+    const mc_nbt_tag_t *health;
+    const mc_nbt_tag_t *food_level;
+    const mc_nbt_tag_t *food_saturation;
+    const mc_nbt_tag_t *food_exhaustion;
     const mc_nbt_tag_t *selected;
     const mc_nbt_tag_t *inventory_state;
     const mc_nbt_tag_t *ender_state;
@@ -468,7 +476,7 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
     const mc_nbt_tag_t *inv;
     const mc_nbt_tag_t *ender;
     double px = 0.5;
-    double py = 80.0;
+    double py = 64.0;
     double pz = 0.5;
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -496,6 +504,18 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
 
     gamemode = mc_nbt_compound_get(root, "playerGameType");
     if (gamemode) (void)nbt_num_to_i32(gamemode, &out->gamemode);
+
+    health = mc_nbt_compound_get(root, "Health");
+    if (health) (void)nbt_num_to_f32(health, &out->health);
+
+    food_level = mc_nbt_compound_get(root, "foodLevel");
+    if (food_level) (void)nbt_num_to_i32(food_level, &out->food_level);
+
+    food_saturation = mc_nbt_compound_get(root, "foodSaturationLevel");
+    if (food_saturation) (void)nbt_num_to_f32(food_saturation, &out->food_saturation);
+
+    food_exhaustion = mc_nbt_compound_get(root, "foodExhaustionLevel");
+    if (food_exhaustion) (void)nbt_num_to_f32(food_exhaustion, &out->food_exhaustion);
 
     selected = mc_nbt_compound_get(root, "SelectedItemSlot");
     if (selected) (void)nbt_num_to_i32(selected, &out->inventory.selected_hotbar_slot);
@@ -574,8 +594,11 @@ int mc_player_store_load(const char *world_path, const uint8_t uuid[16], bool ha
     if (uuid) memcpy(tmp.uuid, uuid, sizeof(tmp.uuid));
     if (username) snprintf(tmp.username, sizeof(tmp.username), "%s", username);
     tmp.gamemode = 1;
+    tmp.health = 20.0f;
+    tmp.food_level = 20;
+    tmp.food_saturation = 5.0f;
     tmp.pos_x = 0.5;
-    tmp.pos_y = 80.0;
+    tmp.pos_y = 64.0;
     tmp.pos_z = 0.5;
     tmp.yaw = 0.0f;
     tmp.pitch = 0.0f;

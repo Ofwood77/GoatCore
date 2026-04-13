@@ -169,10 +169,12 @@ static mc_block_entity_type_t block_entity_type_from_id(const char *id) {
     }
     if (strcmp(id, "minecraft:barrel") == 0) return MC_BLOCK_ENTITY_BARREL;
     if (strcmp(id, "minecraft:dropper") == 0 || strcmp(id, "minecraft:dispenser") == 0 ||
-        strcmp(id, "minecraft:hopper") == 0 || strcmp(id, "minecraft:furnace") == 0 ||
-        strcmp(id, "minecraft:blast_furnace") == 0 || strcmp(id, "minecraft:smoker") == 0) {
+        strcmp(id, "minecraft:hopper") == 0) {
         return MC_BLOCK_ENTITY_DROPPER;
     }
+    if (strcmp(id, "minecraft:furnace") == 0) return MC_BLOCK_ENTITY_FURNACE;
+    if (strcmp(id, "minecraft:smoker") == 0) return MC_BLOCK_ENTITY_SMOKER;
+    if (strcmp(id, "minecraft:blast_furnace") == 0) return MC_BLOCK_ENTITY_BLAST_FURNACE;
     if (strstr(id, "shulker_box")) return MC_BLOCK_ENTITY_SHULKER_BOX;
     if (strcmp(id, "minecraft:sign") == 0 || strcmp(id, "minecraft:hanging_sign") == 0 ||
         strcmp(id, "minecraft:wall_sign") == 0 || strcmp(id, "minecraft:wall_hanging_sign") == 0) {
@@ -539,8 +541,12 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
             memset(&entity, 0, sizeof(entity));
             entity.type = type;
             if (type == MC_BLOCK_ENTITY_CHEST || type == MC_BLOCK_ENTITY_BARREL || type == MC_BLOCK_ENTITY_DROPPER ||
-                type == MC_BLOCK_ENTITY_SHULKER_BOX || type == MC_BLOCK_ENTITY_ENDER_CHEST) {
-                entity.data.container.slot_count = MC_CONTAINER_SLOT_COUNT;
+                type == MC_BLOCK_ENTITY_SHULKER_BOX || type == MC_BLOCK_ENTITY_ENDER_CHEST ||
+                type == MC_BLOCK_ENTITY_FURNACE || type == MC_BLOCK_ENTITY_SMOKER ||
+                type == MC_BLOCK_ENTITY_BLAST_FURNACE) {
+                bool is_furnace_like = type == MC_BLOCK_ENTITY_FURNACE || type == MC_BLOCK_ENTITY_SMOKER ||
+                                       type == MC_BLOCK_ENTITY_BLAST_FURNACE;
+                entity.data.container.slot_count = is_furnace_like ? 3u : MC_CONTAINER_SLOT_COUNT;
                 if (items_tag && items_tag->type == MC_NBT_TAG_LIST) {
                     for (int32_t si = 0; si < items_tag->payload.list.length; si++) {
                         const mc_nbt_tag_t *slot_entry = items_tag->payload.list.items ? items_tag->payload.list.items[si] : NULL;
@@ -556,13 +562,30 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
                         item_id_tag = mc_nbt_compound_get(slot_entry, "id");
                         count_tag = mc_nbt_compound_get(slot_entry, "count");
                         if (!count_tag) count_tag = mc_nbt_compound_get(slot_entry, "Count");
-                        if (nbt_num_to_i32_local(slot_tag, &slot_index) != 0 || slot_index < 0 || slot_index >= MC_CONTAINER_SLOT_COUNT) continue;
+                        if (nbt_num_to_i32_local(slot_tag, &slot_index) != 0 || slot_index < 0 ||
+                            slot_index >= (int32_t)entity.data.container.slot_count) {
+                            continue;
+                        }
                         if (!item_id_tag || item_id_tag->type != MC_NBT_TAG_STRING) continue;
                         if (nbt_num_to_i32_local(count_tag, &item_count) != 0 || item_count <= 0) continue;
                         item_id = mc_minecraft_item_id(item_id_tag->payload.string_val);
                         if (item_id <= 0) continue;
                         (void)mc_slot_set_simple(&entity.data.container.slots[slot_index], item_id, item_count);
                     }
+                }
+                if (is_furnace_like) {
+                    const mc_nbt_tag_t *tag = mc_nbt_compound_get(entry, "BurnTime");
+                    if (!tag) tag = mc_nbt_compound_get(entry, "lit_time_remaining");
+                    (void)nbt_num_to_i32_local(tag, &entity.data.container.furnace_burn_time);
+                    tag = mc_nbt_compound_get(entry, "BurnDuration");
+                    if (!tag) tag = mc_nbt_compound_get(entry, "lit_total_time");
+                    (void)nbt_num_to_i32_local(tag, &entity.data.container.furnace_burn_duration);
+                    tag = mc_nbt_compound_get(entry, "CookTime");
+                    if (!tag) tag = mc_nbt_compound_get(entry, "cooking_time_spent");
+                    (void)nbt_num_to_i32_local(tag, &entity.data.container.furnace_cook_time);
+                    tag = mc_nbt_compound_get(entry, "CookTimeTotal");
+                    if (!tag) tag = mc_nbt_compound_get(entry, "cooking_total_time");
+                    (void)nbt_num_to_i32_local(tag, &entity.data.container.furnace_cook_duration);
                 }
             }
             if (!mc_be_store_put(be_store, pos, entity)) {
@@ -757,6 +780,12 @@ static mc_nbt_tag_t *nbt_new_string_local(const char *name, const char *value) {
 static mc_nbt_tag_t *nbt_new_byte_local(const char *name, int8_t value) {
     mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_BYTE, name);
     if (tag) tag->payload.byte_val = value;
+    return tag;
+}
+
+static mc_nbt_tag_t *nbt_new_short_local(const char *name, int16_t value) {
+    mc_nbt_tag_t *tag = nbt_new_tag_local(MC_NBT_TAG_SHORT, name);
+    if (tag) tag->payload.short_val = value;
     return tag;
 }
 
@@ -1017,6 +1046,9 @@ static const char *block_entity_id_for_state(mc_global_state_id_t state_id) {
     if (strstr(key, "trapped_chest")) return "minecraft:trapped_chest";
     if (strstr(key, "chest")) return "minecraft:chest";
     if (strstr(key, "barrel")) return "minecraft:barrel";
+    if (strstr(key, "blast_furnace")) return "minecraft:blast_furnace";
+    if (strstr(key, "smoker")) return "minecraft:smoker";
+    if (strstr(key, "furnace")) return "minecraft:furnace";
     if (strstr(key, "dropper")) return "minecraft:dropper";
     if (strstr(key, "dispenser")) return "minecraft:dispenser";
     if (strstr(key, "shulker_box")) return "minecraft:shulker_box";
@@ -1060,7 +1092,11 @@ static int build_block_entities_list(const mc_chunk_t *chunk, const mc_block_ent
             }
             if (be_store->entities[i].type == MC_BLOCK_ENTITY_CHEST || be_store->entities[i].type == MC_BLOCK_ENTITY_BARREL ||
                 be_store->entities[i].type == MC_BLOCK_ENTITY_DROPPER || be_store->entities[i].type == MC_BLOCK_ENTITY_SHULKER_BOX ||
-                be_store->entities[i].type == MC_BLOCK_ENTITY_ENDER_CHEST) {
+                be_store->entities[i].type == MC_BLOCK_ENTITY_ENDER_CHEST || be_store->entities[i].type == MC_BLOCK_ENTITY_FURNACE ||
+                be_store->entities[i].type == MC_BLOCK_ENTITY_SMOKER || be_store->entities[i].type == MC_BLOCK_ENTITY_BLAST_FURNACE) {
+                bool is_furnace_like = be_store->entities[i].type == MC_BLOCK_ENTITY_FURNACE ||
+                                       be_store->entities[i].type == MC_BLOCK_ENTITY_SMOKER ||
+                                       be_store->entities[i].type == MC_BLOCK_ENTITY_BLAST_FURNACE;
                 mc_nbt_tag_t *items = nbt_new_tag_local(MC_NBT_TAG_LIST, "Items");
                 if (!items) {
                     mc_nbt_free(entry);
@@ -1069,6 +1105,7 @@ static int build_block_entities_list(const mc_chunk_t *chunk, const mc_block_ent
                 items->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
                 uint32_t slot_count = be_store->entities[i].data.container.slot_count;
                 if (slot_count > MC_CONTAINER_SLOT_COUNT) slot_count = MC_CONTAINER_SLOT_COUNT;
+                if (is_furnace_like && slot_count > 3u) slot_count = 3u;
                 for (uint32_t slot = 0; slot < slot_count; slot++) {
                     const mc_slot_t *src = &be_store->entities[i].data.container.slots[slot];
                     const char *item_name;
@@ -1090,6 +1127,18 @@ static int build_block_entities_list(const mc_chunk_t *chunk, const mc_block_ent
                 }
                 if (compound_add_local(entry, items) != 0) {
                     mc_nbt_free(items);
+                    mc_nbt_free(entry);
+                    goto fail;
+                }
+                if (is_furnace_like &&
+                    (compound_add_local(entry, nbt_new_short_local("BurnTime",
+                                                                   (int16_t)be_store->entities[i].data.container.furnace_burn_time)) != 0 ||
+                     compound_add_local(entry, nbt_new_short_local("BurnDuration",
+                                                                   (int16_t)be_store->entities[i].data.container.furnace_burn_duration)) != 0 ||
+                     compound_add_local(entry, nbt_new_short_local("CookTime",
+                                                                   (int16_t)be_store->entities[i].data.container.furnace_cook_time)) != 0 ||
+                     compound_add_local(entry, nbt_new_short_local("CookTimeTotal",
+                                                                   (int16_t)be_store->entities[i].data.container.furnace_cook_duration)) != 0)) {
                     mc_nbt_free(entry);
                     goto fail;
                 }

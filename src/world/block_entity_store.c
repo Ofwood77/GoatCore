@@ -6,7 +6,9 @@
 static void block_entity_clear(mc_block_entity_t *entity) {
     if (!entity) return;
     if (entity->type == MC_BLOCK_ENTITY_CHEST || entity->type == MC_BLOCK_ENTITY_BARREL || entity->type == MC_BLOCK_ENTITY_DROPPER ||
-        entity->type == MC_BLOCK_ENTITY_SHULKER_BOX || entity->type == MC_BLOCK_ENTITY_ENDER_CHEST) {
+        entity->type == MC_BLOCK_ENTITY_SHULKER_BOX || entity->type == MC_BLOCK_ENTITY_ENDER_CHEST ||
+        entity->type == MC_BLOCK_ENTITY_FURNACE || entity->type == MC_BLOCK_ENTITY_SMOKER ||
+        entity->type == MC_BLOCK_ENTITY_BLAST_FURNACE) {
         uint32_t slot_count = entity->data.container.slot_count;
         if (slot_count > MC_CONTAINER_SLOT_COUNT) slot_count = MC_CONTAINER_SLOT_COUNT;
         for (uint32_t i = 0; i < slot_count; i++) mc_slot_clear(&entity->data.container.slots[i]);

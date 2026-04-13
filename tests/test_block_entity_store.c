@@ -14,8 +14,8 @@ static mc_block_entity_t make_entity(mc_block_entity_type_t type, uint32_t a, ui
     memset(&entity, 0, sizeof(entity));
     entity.type = type;
     if (type == MC_BLOCK_ENTITY_CHEST) {
-        entity.data.chest.inventory_ref = a;
-        entity.data.chest.slot_count = b;
+        entity.data.container.furnace_burn_time = (int32_t)a;
+        entity.data.container.slot_count = b;
     } else if (type == MC_BLOCK_ENTITY_SIGN) {
         entity.data.sign.text_ref = a;
         entity.data.sign.line_count = b;
@@ -44,7 +44,7 @@ static int test_basic_crud(void) {
     }
 
     found = mc_be_store_get(&store, chest_pos);
-    if (!found || found->type != MC_BLOCK_ENTITY_CHEST || found->data.chest.slot_count != 27) {
+    if (!found || found->type != MC_BLOCK_ENTITY_CHEST || found->data.container.slot_count != 27) {
         mc_be_store_destroy(&store);
         return fail("get chest");
     }
@@ -84,7 +84,7 @@ static int test_update_existing(void) {
     }
 
     found = mc_be_store_get(&store, pos);
-    if (!found || found->data.chest.inventory_ref != 2 || found->data.chest.slot_count != 54) {
+    if (!found || found->data.container.furnace_burn_time != 2 || found->data.container.slot_count != 54) {
         mc_be_store_destroy(&store);
         return fail("updated value mismatch");
     }

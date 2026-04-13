@@ -67,6 +67,31 @@ if [ "$missing_raw" -ne 0 ]; then
     exit 0
 fi
 
+if ! python3 - "$DATA_REPORTS_DIR/blocks.json" "$MC_BLOCK_LOOT_SOURCE" "$MC_RECIPE_SOURCE" "$MC_ITEM_TAG_SOURCE" "$COMPONENTS_ITEM_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+for root_arg in sys.argv[1:]:
+    root = Path(root_arg)
+    paths = [root] if root.is_file() else sorted(root.glob("**/*.json"))
+    for path in paths:
+        try:
+            with path.open(encoding="utf-8") as f:
+                json.load(f)
+        except Exception as exc:
+            print(f"[generated-check] invalid raw source: {path}: {exc}", file=sys.stderr)
+            raise SystemExit(1)
+PY
+then
+    if [ "$REQUIRE_RAW_DATA" = "1" ]; then
+        echo "[generated-check] raw data is required; refusing to skip regeneration" >&2
+        exit 1
+    fi
+    echo "[generated-check] raw data invalid; validated generated files only"
+    exit 0
+fi
+
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/mc_c_server_generated_check.XXXXXX")
 cleanup() {
     rm -rf "$tmp_dir"

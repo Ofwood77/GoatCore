@@ -21,6 +21,9 @@ typedef enum {
     MC_BLOCK_ENTITY_SHULKER_BOX = 4,
     MC_BLOCK_ENTITY_ENDER_CHEST = 5,
     MC_BLOCK_ENTITY_SIGN = 6,
+    MC_BLOCK_ENTITY_FURNACE = 7,
+    MC_BLOCK_ENTITY_SMOKER = 8,
+    MC_BLOCK_ENTITY_BLAST_FURNACE = 9,
     MC_BLOCK_ENTITY_GENERIC = 255
 } mc_block_entity_type_t;
 
@@ -30,6 +33,10 @@ typedef struct {
     union {
         struct {
             uint32_t slot_count;
+            int32_t furnace_burn_time;
+            int32_t furnace_burn_duration;
+            int32_t furnace_cook_time;
+            int32_t furnace_cook_duration;
             mc_slot_t slots[MC_CONTAINER_SLOT_COUNT];
         } container;
 

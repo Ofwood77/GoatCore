@@ -91,6 +91,9 @@ void mc_container_instance_init(mc_container_instance_t *container, mc_container
     container->y = y;
     container->z = z;
     container->slot_count = MC_CONTAINER_SLOT_COUNT;
+    if (kind == MC_CONTAINER_KIND_FURNACE || kind == MC_CONTAINER_KIND_SMOKER || kind == MC_CONTAINER_KIND_BLAST_FURNACE) {
+        container->slot_count = 3;
+    }
     container->state_id = 1;
 }
 
@@ -144,10 +147,103 @@ const mc_slot_t *mc_inventory_selected_slot_const(const mc_inventory_t *inv) {
     return &inv->slots[idx];
 }
 
+bool mc_inventory_can_absorb_slot(const mc_inventory_t *inv, const mc_slot_t *src) {
+    const int max_stack = 64;
+    int remaining;
+
+    if (!inv || !src) return false;
+    if (!src->present || src->count <= 0 || src->item_id <= 0) return true;
+
+    remaining = src->count;
+    for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+        int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
+        int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
+                               : (MC_PLAYER_HOTBAR_BASE - 1);
+        for (int i = first; i <= last && remaining > 0; i++) {
+            const mc_slot_t *dst = &inv->slots[i];
+            if (!dst->present || !mc_slot_is_same_item(dst, src)) continue;
+            if (dst->count >= max_stack) continue;
+            remaining -= max_stack - dst->count;
+        }
+    }
+
+    for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+        int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
+        int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
+                               : (MC_PLAYER_HOTBAR_BASE - 1);
+        for (int i = first; i <= last && remaining > 0; i++) {
+            const mc_slot_t *dst = &inv->slots[i];
+            if (dst->present) continue;
+            remaining -= max_stack;
+        }
+    }
+
+    return remaining <= 0;
+}
+
+int mc_inventory_try_absorb_slot(mc_inventory_t *inv, mc_slot_t *src) {
+    const int max_stack = 64;
+    int remaining;
+    int absorbed = 0;
+
+    if (!inv || !src) return -1;
+    if (!src->present || src->count <= 0 || src->item_id <= 0) return 0;
+
+    remaining = src->count;
+
+    for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+        int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
+        int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
+                               : (MC_PLAYER_HOTBAR_BASE - 1);
+        for (int i = first; i <= last && remaining > 0; i++) {
+            mc_slot_t *dst = &inv->slots[i];
+            if (!dst->present || !mc_slot_is_same_item(dst, src)) continue;
+            if (dst->count >= max_stack) continue;
+            int room = max_stack - dst->count;
+            int move = room < remaining ? room : remaining;
+            dst->count += move;
+            remaining -= move;
+            absorbed += move;
+        }
+    }
+
+    for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+        int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
+        int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
+                               : (MC_PLAYER_HOTBAR_BASE - 1);
+        for (int i = first; i <= last && remaining > 0; i++) {
+            mc_slot_t *dst = &inv->slots[i];
+            if (dst->present) continue;
+            int move = remaining > max_stack ? max_stack : remaining;
+            if (mc_slot_copy(dst, src) != 0) {
+                if (absorbed > 0) break;
+                return -1;
+            }
+            dst->count = move;
+            remaining -= move;
+            absorbed += move;
+        }
+    }
+
+    if (absorbed <= 0) return 0;
+
+    if (remaining <= 0) {
+        mc_slot_clear(src);
+    } else {
+        src->count = remaining;
+    }
+    inv->state_id++;
+    return absorbed;
+}
+
 void mc_player_data_init(mc_player_data_t *player) {
     if (!player) return;
     memset(player, 0, sizeof(*player));
     mc_inventory_init(&player->inventory);
+    player->health = 20.0f;
+    player->food_level = 20;
+    player->food_saturation = 5.0f;
+    player->food_exhaustion = 0.0f;
     player->ender_state_id = 1;
 }
 

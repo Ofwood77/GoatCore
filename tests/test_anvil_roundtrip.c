@@ -69,6 +69,59 @@ int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z
     return 0;
 }
 
+int net_server_spawn_item_drop_locked(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
+    return net_server_spawn_item_drop(server, x, y, z, slot);
+}
+
+int net_server_spawn_item_drop_with_motion(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
+                                           const mc_slot_t *slot, int32_t pickup_delay_ticks) {
+    (void)vx;
+    (void)vy;
+    (void)vz;
+    (void)pickup_delay_ticks;
+    return net_server_spawn_item_drop(server, x, y, z, slot);
+}
+
+int net_server_sync_item_entities_to_conn(mc_server_t *server, mc_conn_t *conn) {
+    (void)server;
+    (void)conn;
+    return 0;
+}
+
+int net_server_resolve_item_entities_for_block(mc_server_t *server, int32_t x, int32_t y, int32_t z, int32_t state_id) {
+    (void)server;
+    (void)x;
+    (void)y;
+    (void)z;
+    (void)state_id;
+    return 0;
+}
+
+mc_difficulty_t net_server_get_difficulty(mc_server_t *server) {
+    (void)server;
+    return MC_DIFFICULTY_NORMAL;
+}
+
+void net_server_set_difficulty(mc_server_t *server, mc_difficulty_t difficulty) {
+    (void)server;
+    (void)difficulty;
+}
+
+const char *mc_difficulty_name(mc_difficulty_t difficulty) {
+    switch (difficulty) {
+        case MC_DIFFICULTY_PEACEFUL: return "peaceful";
+        case MC_DIFFICULTY_EASY: return "easy";
+        case MC_DIFFICULTY_NORMAL: return "normal";
+        case MC_DIFFICULTY_HARD: return "hard";
+    }
+    return "normal";
+}
+
+int net_server_broadcast_difficulty(mc_server_t *server) {
+    (void)server;
+    return 0;
+}
+
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
     (void)server;
     (void)kind;

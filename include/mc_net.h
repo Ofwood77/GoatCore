@@ -39,7 +39,7 @@ typedef struct {
     float head_yaw;
 } mc_remote_player_t;
 
-typedef struct mc_conn {
+struct mc_conn {
     int fd;
     mc_buf_t in;
     mc_buf_t out;
@@ -62,6 +62,17 @@ typedef struct mc_conn {
 
     int32_t entity_id;
     int32_t gamemode;
+    float health;
+    int32_t food;
+    float food_saturation;
+    float food_exhaustion;
+    bool is_using_item;
+    bool use_item_input_held;
+    int32_t using_hand;
+    int32_t using_slot;
+    int32_t using_item_id;
+    int32_t use_item_remaining_ticks;
+    bool dead;
     int32_t teleport_id;
     mc_player_data_t *player;
     int64_t keepalive_id;
@@ -74,6 +85,12 @@ typedef struct mc_conn {
     float yaw;
     float pitch;
     bool has_pos;
+    bool on_ground;
+    bool fall_tracking;
+    double fall_start_y;
+    int64_t next_void_damage_ms;
+    int64_t next_natural_regen_ms;
+    int64_t next_starvation_damage_ms;
 
     bool encryption_enabled;
     void *ssl_read;  /* EVP_CIPHER_CTX* */
@@ -109,7 +126,7 @@ typedef struct mc_conn {
     size_t remote_players_cap;
 
     mc_active_window_t active_window;
-} mc_conn_t;
+};
 
 typedef struct {
     int32_t packet_id;

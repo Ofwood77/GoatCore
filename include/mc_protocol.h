@@ -25,9 +25,11 @@ void proto_play_conn_cleanup(mc_conn_t *c);
 void proto_fill_offline_uuid(const char *username, uint8_t out[16]);
 int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_remove_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
+int proto_play_send_difficulty(mc_conn_t *c);
 int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id);
 int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot);
 int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch);
+int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot);
 int proto_play_encode_chunkdata_for_test(mc_world_t *world, const mc_chunk_t *chunk, mc_buf_t *out);
 int proto_play_validate_chunkdata_for_test(const uint8_t *data, size_t len);
 

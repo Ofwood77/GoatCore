@@ -23,10 +23,12 @@ mc_vania_asset/
 *.bak
 
 # Local diagnostics, AI/LLM notes and accidental shell-output fragments
+.codex
+.ofwoodcore_notes/
 erreur reseau/
 PLAN*.md
 REPORT*.md
-docs/IA_*.md
+docs/
 llm/
 reports/
 changed,*
