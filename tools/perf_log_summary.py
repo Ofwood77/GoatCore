@@ -5,6 +5,30 @@ from pathlib import Path
 
 
 TOKEN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=([^ ]+)")
+TIME_KEYS = {
+    "total",
+    "late",
+    "sleep",
+    "tasks",
+    "task_wait_avg",
+    "task_wait_max",
+    "world",
+    "furnaces",
+    "updates",
+    "proto",
+    "items",
+    "remote",
+    "write",
+    "evict",
+    "clear",
+    "elapsed",
+    "encode",
+    "heightmap",
+    "block_entities_scan",
+    "payload_build",
+    "write_queue",
+    "refresh_ping",
+}
 
 
 def parse_perf_line(line):
@@ -39,7 +63,12 @@ def print_rows(title, rows, keys):
         for key in keys:
             value = values.get(key)
             if isinstance(value, float):
-                parts.append(f"{key}={value:.3f}ms" if key not in ("idx", "sent", "scans", "misses") else f"{key}={value:g}")
+                if key in TIME_KEYS or key.startswith(("avg_", "max_")):
+                    parts.append(f"{key}={value:.3f}ms")
+                elif value.is_integer():
+                    parts.append(f"{key}={int(value)}")
+                else:
+                    parts.append(f"{key}={value:g}")
             elif value is not None:
                 parts.append(f"{key}={value}")
         print(f"  {kind}: " + " ".join(parts))
