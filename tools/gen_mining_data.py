@@ -28,6 +28,7 @@ MATERIAL_NETHERITE = 7
 
 SPEED_SCALE = 100
 FLAG_PRESENT = 1 << 0
+FLAG_REQUIRES_CORRECT_TOOL = 1 << 1
 
 
 BLOCK_CATEGORY_TAGS = (
@@ -48,6 +49,12 @@ ITEM_CATEGORY_TAGS = (
     (CATEGORY_AXE, "minecraft:axes"),
     (CATEGORY_SHOVEL, "minecraft:shovels"),
     (CATEGORY_HOE, "minecraft:hoes"),
+)
+
+PICKAXE_DROP_EXEMPT_TAGS = (
+    "minecraft:buttons",
+    "minecraft:pressure_plates",
+    "minecraft:rails",
 )
 
 MATERIALS = {
@@ -175,6 +182,15 @@ def material_for_item(item_name: str) -> tuple[str, int, int, int, int] | None:
     return None
 
 
+def block_flags_literal(flags: int) -> str:
+    names: list[str] = []
+    if flags & FLAG_PRESENT:
+        names.append("MC_MINING_BLOCK_TOOL_FLAG_PRESENT")
+    if flags & FLAG_REQUIRES_CORRECT_TOOL:
+        names.append("MC_MINING_BLOCK_TOOL_FLAG_REQUIRES_CORRECT_TOOL")
+    return " | ".join(names) if names else "0"
+
+
 def generate_header(out_h: Path, block_count: int) -> None:
     out_h.write_text(
         f"""#ifndef GENERATED_MINING_DATA_H
@@ -215,7 +231,8 @@ typedef enum {{
 }} mc_mining_tool_material_t;
 
 enum {{
-    MC_MINING_BLOCK_TOOL_FLAG_PRESENT = 1u << 0
+    MC_MINING_BLOCK_TOOL_FLAG_PRESENT = 1u << 0,
+    MC_MINING_BLOCK_TOOL_FLAG_REQUIRES_CORRECT_TOOL = 1u << 1
 }};
 
 typedef struct {{
@@ -254,6 +271,10 @@ def generate_source(out_c: Path, block_names: list[str], item_ids: dict[str, int
         for block_name in read_tag_values(z, "block", tag_name):
             required_level_by_name[block_name] = max(required_level_by_name.get(block_name, HARVEST_NONE), level)
 
+    pickaxe_drop_exemptions: set[str] = set()
+    for tag_name in PICKAXE_DROP_EXEMPT_TAGS:
+        pickaxe_drop_exemptions.update(read_tag_values(z, "block", tag_name))
+
     tool_entries: dict[int, tuple[int, int, str, int, int, str]] = {}
     for category, tag_name in ITEM_CATEGORY_TAGS:
         for item_name in read_tag_values(z, "item", tag_name):
@@ -275,9 +296,14 @@ def generate_source(out_c: Path, block_names: list[str], item_ids: dict[str, int
         required_level = required_level_by_name.get(block_name, HARVEST_NONE)
         if category == CATEGORY_NONE and required_level == HARVEST_NONE:
             continue
+        flags = FLAG_PRESENT
+        if required_level != HARVEST_NONE or (
+            category == CATEGORY_PICKAXE and block_name not in pickaxe_drop_exemptions
+        ):
+            flags |= FLAG_REQUIRES_CORRECT_TOOL
         lines.append(
             f"    [{index}] = {{{category_literal(category)}, {harvest_literal(required_level)}, "
-            f"MC_MINING_BLOCK_TOOL_FLAG_PRESENT}}, /* {block_name} */"
+            f"{block_flags_literal(flags)}}}, /* {block_name} */"
         )
         block_entries += 1
     lines.extend(

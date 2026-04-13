@@ -42,6 +42,7 @@ int main(void) {
     mc_slot_t copper_pickaxe = tool_slot("minecraft:copper_pickaxe");
     mc_slot_t iron_pickaxe = tool_slot("minecraft:iron_pickaxe");
     mc_slot_t iron_axe = tool_slot("minecraft:iron_axe");
+    mc_slot_t stone_hoe = tool_slot("minecraft:stone_hoe");
     mc_slot_t diamond_pickaxe = tool_slot("minecraft:diamond_pickaxe");
     mc_slot_t netherite_pickaxe = tool_slot("minecraft:netherite_pickaxe");
     mc_slot_t wooden_shovel = tool_slot("minecraft:wooden_shovel");
@@ -61,16 +62,33 @@ int main(void) {
     mc_mining_break_info_t stone_info = mc_mining_break_info(stone, NULL);
     assert(dirt_info.breakable);
     assert(stone_info.breakable);
+    assert(!dirt_info.requires_correct_tool);
+    assert(stone_info.requires_correct_tool);
+    assert(dirt_info.can_harvest);
+    assert(!stone_info.can_harvest);
     assert(dirt_info.required_ms > 0);
     assert(stone_info.required_ms > dirt_info.required_ms);
 
     mc_mining_break_info_t stone_wood_info = mc_mining_break_info(stone, &wooden_pickaxe);
+    mc_mining_break_info_t stone_shovel_info = mc_mining_break_info(stone, &wooden_shovel);
+    mc_mining_break_info_t stone_axe_info = mc_mining_break_info(stone, &iron_axe);
+    mc_mining_break_info_t stone_hoe_info = mc_mining_break_info(stone, &stone_hoe);
     assert(stone_wood_info.tool_matches);
     assert(stone_wood_info.can_harvest);
+    assert(!stone_shovel_info.tool_matches);
+    assert(!stone_shovel_info.can_harvest);
+    assert(!stone_axe_info.tool_matches);
+    assert(!stone_axe_info.can_harvest);
+    assert(!stone_hoe_info.tool_matches);
+    assert(!stone_hoe_info.can_harvest);
     assert(stone_wood_info.required_ms < stone_info.required_ms);
+    assert(stone_shovel_info.required_ms == stone_info.required_ms);
+    assert(stone_axe_info.required_ms == stone_info.required_ms);
+    assert(stone_hoe_info.required_ms == stone_info.required_ms);
 
     mc_mining_break_info_t dirt_shovel_info = mc_mining_break_info(dirt, &wooden_shovel);
     assert(dirt_shovel_info.tool_matches);
+    assert(dirt_shovel_info.can_harvest);
     assert(dirt_shovel_info.required_ms < dirt_info.required_ms);
 
     mc_mining_break_info_t iron_ore_hand_info = mc_mining_break_info(iron_ore, NULL);
@@ -101,10 +119,12 @@ int main(void) {
     assert(obsidian_netherite_info.can_harvest);
 
     int64_t elapsed_ms = 0;
-    assert(!mc_mining_elapsed_enough(&stone_info, 1000, 1000 + stone_info.required_ms - 1, &elapsed_ms));
-    assert(elapsed_ms == stone_info.required_ms - 1);
-    assert(mc_mining_elapsed_enough(&stone_info, 1000, 1000 + stone_info.required_ms, &elapsed_ms));
-    assert(elapsed_ms == stone_info.required_ms);
+    int64_t stone_accept_ms = stone_wood_info.required_ms - MC_MINING_BREAK_GRACE_MS;
+    assert(stone_accept_ms > 0);
+    assert(!mc_mining_elapsed_enough(&stone_wood_info, 1000, 1000 + stone_accept_ms - 1, &elapsed_ms));
+    assert(elapsed_ms == stone_accept_ms - 1);
+    assert(mc_mining_elapsed_enough(&stone_wood_info, 1000, 1000 + stone_accept_ms, &elapsed_ms));
+    assert(elapsed_ms == stone_accept_ms);
 
     mc_mining_break_info_t invalid_info = mc_mining_break_info(-1, NULL);
     assert(!invalid_info.breakable);

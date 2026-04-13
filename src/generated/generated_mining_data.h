@@ -36,7 +36,8 @@ typedef enum {
 } mc_mining_tool_material_t;
 
 enum {
-    MC_MINING_BLOCK_TOOL_FLAG_PRESENT = 1u << 0
+    MC_MINING_BLOCK_TOOL_FLAG_PRESENT = 1u << 0,
+    MC_MINING_BLOCK_TOOL_FLAG_REQUIRES_CORRECT_TOOL = 1u << 1
 };
 
 typedef struct {

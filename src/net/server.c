@@ -987,7 +987,6 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
 
 static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
     uint8_t buf[4096];
-    int64_t now = now_ms();
     for (;;) {
         ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
         if (n == 0) return -1;
@@ -1026,7 +1025,7 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
         task->packet_id = frame.packet_id;
         task->payload = frame.payload.data;
         task->payload_len = frame.payload.len;
-        task->enqueue_ms = now;
+        task->enqueue_ms = now_ms();
         conn_acquire(c);
         mc_task_queue_push(&s->task_queue, task);
         frame.payload.data = NULL;
@@ -1106,7 +1105,8 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
             rc = -1;
         }
     } else if (c->state == MC_STATE_PLAY) {
-        if (proto_play_handle(c, &frame, now_ms) != 0) {
+        int64_t packet_now_ms = task->enqueue_ms > 0 ? task->enqueue_ms : now_ms;
+        if (proto_play_handle(c, &frame, packet_now_ms) != 0) {
             log_error("handler error (state=PLAY id=0x%02X)", frame.packet_id);
             conn_close(c);
             rc = -1;

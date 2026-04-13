@@ -9,6 +9,8 @@
 
 #define MC_MINING_TICK_MS 50
 #define MC_MINING_BASE_DESTROY_TICKS 30
+#define MC_MINING_BASE_NO_HARVEST_TICKS 100
+#define MC_MINING_BREAK_GRACE_MS MC_MINING_TICK_MS
 #define MC_MINING_UNKNOWN_HARDNESS_X100 100
 
 typedef struct {
@@ -17,6 +19,7 @@ typedef struct {
     bool instant;
     bool tool_matches;
     bool can_harvest;
+    bool requires_correct_tool;
     int32_t hardness_x100;
     uint16_t speed_x100;
     mc_mining_tool_category_t block_category;
