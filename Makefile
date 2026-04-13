@@ -130,7 +130,7 @@ $(GENERATED_HEADERS) $(GENERATED_SOURCES):
 	@test -f "$@" || { echo "missing generated file: $@; run make regenerate with local raw data" >&2; exit 1; }
 endif
 
-.PHONY: generated_headers generated_sources regenerate test generated-check hygiene-check smoke-start precommit-check clean distclean
+.PHONY: generated_headers generated_sources regenerate test generated-check hygiene-check smoke-start precommit-check dev-run clean distclean
 
 generated_headers: $(GENERATED_HEADERS)
 
@@ -213,6 +213,12 @@ smoke-start: mc_server
 	exit "$$status"
 
 precommit-check: hygiene-check generated-check test smoke-start
+
+dev-run:
+	$(MAKE) clean
+	$(MAKE) precommit-check
+	@if command -v clear >/dev/null 2>&1; then clear || true; fi
+	./mc_server
 
 clean:
 	rm -f mc_server $(TOOL_BINS) $(TEST_BINS) $(OBJ) $(OBJ:.o=.d) $(TEST_BINS:=.d)
