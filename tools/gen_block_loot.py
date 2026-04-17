@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import io
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -13,6 +15,8 @@ FLAG_IGNORES_SURVIVES_EXPLOSION = 1 << 5
 FLAG_FORTUNE_FALLBACK = 1 << 6
 FLAG_UNSUPPORTED_COMPLEX = 1 << 7
 
+_LOOT_TABLE_CACHE: dict[str, dict[str, object]] = {}
+
 
 def fail(message: str) -> None:
     print(f"[error] {message}", file=sys.stderr)
@@ -23,6 +27,55 @@ def strip_namespace(name: str) -> str:
     if name.startswith("minecraft:"):
         return name.split(":", 1)[1]
     return name
+
+
+def loot_table_path(block_name: str) -> str:
+    return f"data/minecraft/loot_table/blocks/{strip_namespace(block_name)}.json"
+
+
+def load_nested_server_jar(path: Path) -> zipfile.ZipFile:
+    try:
+        outer = zipfile.ZipFile(path)
+    except zipfile.BadZipFile as exc:
+        fail(f"{path} is not a valid jar: {exc}")
+    with outer:
+        version_jars = [name for name in outer.namelist() if name.startswith("META-INF/versions/") and name.endswith(".jar")]
+        server_jars = [name for name in version_jars if "/server-" in name]
+        candidates = server_jars or version_jars
+        if not candidates:
+            fail(f"{path} does not contain a bundled server jar")
+        candidates.sort()
+        nested = candidates[-1]
+        return zipfile.ZipFile(io.BytesIO(outer.read(nested)))
+
+
+def load_loot_table(source: Path, block_name: str) -> object | None:
+    if source.is_dir():
+        loot_path = source / f"{strip_namespace(block_name)}.json"
+        if not loot_path.exists():
+            return None
+        return json.loads(loot_path.read_text(encoding="utf-8"))
+
+    if source.is_file() and source.suffix == ".jar":
+        cache_key = str(source)
+        tables = _LOOT_TABLE_CACHE.get(cache_key)
+        if tables is None:
+            tables = {}
+            with load_nested_server_jar(source) as z:
+                for name in z.namelist():
+                    prefix = None
+                    if name.startswith("data/minecraft/loot_table/blocks/") and name.endswith(".json"):
+                        prefix = "data/minecraft/loot_table/blocks/"
+                    elif name.startswith("data/minecraft/loot_tables/blocks/") and name.endswith(".json"):
+                        prefix = "data/minecraft/loot_tables/blocks/"
+                    if not prefix:
+                        continue
+                    short = name[len(prefix):-5]
+                    tables[f"minecraft:{short}"] = json.loads(z.read(name).decode("utf-8"))
+            _LOOT_TABLE_CACHE[cache_key] = tables
+        return tables.get(block_name)
+
+    fail(f"{source} is neither a loot directory nor a server jar")
 
 
 def load_item_id_map(path: Path) -> dict[str, int]:
@@ -96,10 +149,13 @@ def classify_conditions(raw: object) -> str:
     return "silk_touch_only"
 
 
-def make_result(kind: str, *, item_name: str | None = None, flags: int = 0, reason: str = "") -> dict[str, object]:
+def make_result(kind: str, *, item_name: str | None = None, count_min: int = 1, count_max: int = 1,
+                flags: int = 0, reason: str = "") -> dict[str, object]:
     return {
         "kind": kind,
         "item_name": item_name,
+        "count_min": count_min,
+        "count_max": count_max,
         "flags": flags,
         "reason": reason,
     }
@@ -112,14 +168,70 @@ def merge_flags(*parts: int) -> int:
     return value
 
 
+def parse_count_range(raw: object) -> tuple[int, int] | None:
+    if raw is None:
+        return 1, 1
+    if isinstance(raw, (int, float)):
+        value = int(raw)
+        if float(value) != float(raw) or value < 0 or value > 65535:
+            return None
+        return value, value
+    if not isinstance(raw, dict):
+        return None
+
+    count_type = raw.get("type")
+    if count_type == "minecraft:uniform":
+        min_value = raw.get("min")
+        max_value = raw.get("max")
+        if not isinstance(min_value, (int, float)) or not isinstance(max_value, (int, float)):
+            return None
+        count_min = int(min_value)
+        count_max = int(max_value)
+        if float(count_min) != float(min_value) or float(count_max) != float(max_value):
+            return None
+        if count_min < 0 or count_max < count_min or count_max > 65535:
+            return None
+        return count_min, count_max
+
+    return None
+
+
+def reduce_functions(raw: object) -> tuple[bool, int, int, int]:
+    if raw in (None, []):
+        return True, 1, 1, 0
+    if not isinstance(raw, list):
+        return False, 0, 0, 0
+
+    count_min = 1
+    count_max = 1
+    flags = 0
+    for fn in raw:
+        if not isinstance(fn, dict):
+            return False, 0, 0, 0
+        fn_name = fn.get("function")
+        if fn_name == "minecraft:explosion_decay":
+            continue
+        if fn_name == "minecraft:apply_bonus" and fn.get("enchantment") == "minecraft:fortune":
+            flags |= FLAG_FORTUNE_FALLBACK
+            continue
+        if fn_name == "minecraft:set_count" and fn.get("add", False) is False:
+            parsed = parse_count_range(fn.get("count"))
+            if parsed is None:
+                return False, 0, 0, 0
+            count_min, count_max = parsed
+            continue
+        return False, 0, 0, 0
+    return True, count_min, count_max, flags
+
+
 def reduce_entry(entry: object) -> dict[str, object]:
     if not isinstance(entry, dict):
         return make_result("unsupported", reason="entry_not_object")
 
     entry_type = entry.get("type")
     cond_kind = classify_conditions(entry.get("conditions"))
-    functions = entry.get("functions")
-    if functions not in (None, []):
+    functions_ok, count_min, count_max, function_flags = reduce_functions(entry.get("functions"))
+    if not functions_ok:
         return make_result("unsupported", reason="entry_functions")
 
     if entry_type == "minecraft:item":
@@ -127,9 +239,11 @@ def reduce_entry(entry: object) -> dict[str, object]:
         if not isinstance(name, str) or not name:
             return make_result("unsupported", reason="item_name")
         if cond_kind == "none":
-            return make_result("drop", item_name=name, flags=FLAG_FIXED_ITEM)
+            return make_result("drop", item_name=name, count_min=count_min, count_max=count_max,
+                               flags=merge_flags(FLAG_FIXED_ITEM, function_flags))
         if cond_kind == "survives_explosion_only":
-            return make_result("drop", item_name=name, flags=merge_flags(FLAG_FIXED_ITEM, FLAG_IGNORES_SURVIVES_EXPLOSION))
+            return make_result("drop", item_name=name, count_min=count_min, count_max=count_max,
+                               flags=merge_flags(FLAG_FIXED_ITEM, FLAG_IGNORES_SURVIVES_EXPLOSION, function_flags))
         if cond_kind == "silk_touch_only":
             return make_result("conditional_skip", flags=0)
         if cond_kind == "table_bonus_only":
@@ -159,7 +273,9 @@ def reduce_entry(entry: object) -> dict[str, object]:
                 flags = int(reduced["flags"]) | combined_flags
                 if saw_skipped_child:
                     flags |= FLAG_SILK_TOUCH_FALLBACK
-                return make_result("drop", item_name=str(reduced["item_name"]), flags=flags)
+                return make_result("drop", item_name=str(reduced["item_name"]),
+                                   count_min=int(reduced["count_min"]), count_max=int(reduced["count_max"]),
+                                   flags=flags)
             if kind == "no_drop":
                 if saw_skipped_child:
                     flags = int(reduced["flags"]) | combined_flags | FLAG_SILK_TOUCH_FALLBACK
@@ -262,6 +378,7 @@ enum {
 typedef struct {
     int32_t item_id;
     uint16_t count;
+    uint16_t count_max;
     uint16_t flags;
 } mc_block_loot_entry_t;
 
@@ -282,8 +399,9 @@ def write_source(path: Path, block_names: list[str], entries: list[dict[str, obj
     for index, (block_name, entry) in enumerate(zip(block_names, entries)):
         item_id = int(entry["item_id"])
         count = int(entry["count"])
+        count_max = int(entry["count_max"])
         flags_expr = format_flags(int(entry["flags"]))
-        lines.append(f'    [{index}] = {{{item_id}, {count}u, {flags_expr}}}, /* {block_name} */')
+        lines.append(f'    [{index}] = {{{item_id}, {count}u, {count_max}u, {flags_expr}}}, /* {block_name} */')
     lines.append("};")
     lines.append("")
     lines.append("const mc_block_loot_entry_t *mc_block_loot_entry_from_state(int state_id) {")
@@ -332,37 +450,38 @@ def main() -> int:
     }
 
     for block_name in block_names:
-        loot_path = loot_dir / f"{strip_namespace(block_name)}.json"
-        if not loot_path.exists():
+        loot_table = load_loot_table(loot_dir, block_name)
+        if loot_table is None:
             stats["missing"] += 1
-            entries.append({"item_id": -1, "count": 0, "flags": 0})
+            entries.append({"item_id": -1, "count": 0, "count_max": 0, "flags": 0})
             ignored.append((block_name, "missing_loot_file"))
             continue
 
-        reduced = reduce_loot_table(json.loads(loot_path.read_text(encoding="utf-8")))
+        reduced = reduce_loot_table(loot_table)
         kind = str(reduced["kind"])
         if kind == "unsupported":
             stats["unsupported"] += 1
             flags = int(reduced["flags"])
-            entries.append({"item_id": -1, "count": 0, "flags": flags})
+            entries.append({"item_id": -1, "count": 0, "count_max": 0, "flags": flags})
             ignored.append((block_name, str(reduced["reason"])))
             continue
 
         if kind == "no_drop":
             stats["supported_no_drop"] += 1
-            entries.append({"item_id": -1, "count": 0, "flags": int(reduced["flags"])})
+            entries.append({"item_id": -1, "count": 0, "count_max": 0, "flags": int(reduced["flags"])})
             continue
 
         item_name = str(reduced["item_name"])
         item_id = item_id_by_name.get(item_name)
         if item_id is None:
             stats["unsupported"] += 1
-            entries.append({"item_id": -1, "count": 0, "flags": FLAG_PRESENT | FLAG_UNSUPPORTED_COMPLEX})
+            entries.append({"item_id": -1, "count": 0, "count_max": 0, "flags": FLAG_PRESENT | FLAG_UNSUPPORTED_COMPLEX})
             ignored.append((block_name, f"unknown_item:{item_name}"))
             continue
 
         stats["supported_drop"] += 1
-        entries.append({"item_id": item_id, "count": 1, "flags": int(reduced["flags"])})
+        entries.append({"item_id": item_id, "count": int(reduced["count_min"]),
+                        "count_max": int(reduced["count_max"]), "flags": int(reduced["flags"])})
 
     write_header(out_h, len(block_names))
     write_source(out_c, block_names, entries)

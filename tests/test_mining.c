@@ -31,6 +31,9 @@ int main(void) {
     int32_t oak_log = state_id("minecraft:oak_log[axis=y]");
     int32_t stone = state_id("minecraft:stone");
     int32_t iron_ore = state_id("minecraft:iron_ore");
+    int32_t deepslate_iron_ore = state_id("minecraft:deepslate_iron_ore");
+    int32_t gold_ore = state_id("minecraft:gold_ore");
+    int32_t copper_ore = state_id("minecraft:copper_ore");
     int32_t diamond_ore = state_id("minecraft:diamond_ore");
     int32_t obsidian = state_id("minecraft:obsidian");
     int32_t bedrock = state_id("minecraft:bedrock");
@@ -40,6 +43,9 @@ int main(void) {
     assert(oak_log >= 0);
     assert(stone >= 0);
     assert(iron_ore >= 0);
+    assert(deepslate_iron_ore >= 0);
+    assert(gold_ore >= 0);
+    assert(copper_ore >= 0);
     assert(diamond_ore >= 0);
     assert(obsidian >= 0);
     assert(bedrock >= 0);
@@ -128,6 +134,19 @@ int main(void) {
     assert(iron_ore_wood_info.required_ms < iron_ore_hand_info.required_ms);
     assert(iron_ore_wrong_tool_info.required_ms == iron_ore_hand_info.required_ms);
 
+    mc_mining_break_info_t deepslate_iron_stone_info = mc_mining_break_info(deepslate_iron_ore, &stone_pickaxe);
+    mc_mining_break_info_t deepslate_iron_copper_info = mc_mining_break_info(deepslate_iron_ore, &copper_pickaxe);
+    assert(deepslate_iron_stone_info.can_harvest);
+    assert(deepslate_iron_copper_info.can_harvest);
+
+    mc_mining_break_info_t gold_stone_info = mc_mining_break_info(gold_ore, &stone_pickaxe);
+    mc_mining_break_info_t gold_iron_info = mc_mining_break_info(gold_ore, &iron_pickaxe);
+    assert(!gold_stone_info.can_harvest);
+    assert(gold_iron_info.can_harvest);
+
+    mc_mining_break_info_t copper_stone_info = mc_mining_break_info(copper_ore, &stone_pickaxe);
+    assert(copper_stone_info.can_harvest);
+
     mc_mining_break_info_t diamond_stone_info = mc_mining_break_info(diamond_ore, &stone_pickaxe);
     mc_mining_break_info_t diamond_iron_info = mc_mining_break_info(diamond_ore, &iron_pickaxe);
     assert(!diamond_stone_info.can_harvest);
@@ -145,19 +164,32 @@ int main(void) {
     assert(obsidian_diamond_info.required_ms < 10000);
 
     int64_t elapsed_ms = 0;
-    int64_t stone_accept_ms = stone_wood_info.required_ms - MC_MINING_BREAK_GRACE_MS;
+    int64_t stone_grace_ms = mc_mining_break_grace_ms(stone_wood_info.required_ms);
+    int64_t stone_accept_ms = mc_mining_required_elapsed_ms(&stone_wood_info);
+    assert(stone_grace_ms == MC_MINING_BREAK_GRACE_MIN_MS);
     assert(stone_accept_ms > 0);
+    assert(stone_accept_ms == stone_wood_info.required_ms - stone_grace_ms);
     assert(!mc_mining_elapsed_enough(&stone_wood_info, 1000, 1000 + stone_accept_ms - 1, &elapsed_ms));
     assert(elapsed_ms == stone_accept_ms - 1);
     assert(mc_mining_elapsed_enough(&stone_wood_info, 1000, 1000 + stone_accept_ms, &elapsed_ms));
     assert(elapsed_ms == stone_accept_ms);
 
-    int64_t obsidian_accept_ms = obsidian_diamond_info.required_ms - MC_MINING_BREAK_GRACE_MS;
+    int64_t obsidian_grace_ms = mc_mining_break_grace_ms(obsidian_diamond_info.required_ms);
+    int64_t obsidian_accept_ms = mc_mining_required_elapsed_ms(&obsidian_diamond_info);
+    assert(obsidian_grace_ms > MC_MINING_BREAK_GRACE_MIN_MS);
+    assert(obsidian_grace_ms <= MC_MINING_BREAK_GRACE_MAX_MS);
+    assert(obsidian_accept_ms == obsidian_diamond_info.required_ms - obsidian_grace_ms);
     assert(obsidian_accept_ms > 0);
     assert(!mc_mining_elapsed_enough(&obsidian_diamond_info, 1000, 1000 + obsidian_accept_ms - 1, &elapsed_ms));
     assert(elapsed_ms == obsidian_accept_ms - 1);
     assert(mc_mining_elapsed_enough(&obsidian_diamond_info, 1000, 1000 + obsidian_accept_ms, &elapsed_ms));
     assert(elapsed_ms == obsidian_accept_ms);
+
+    int64_t netherite_obsidian_grace_ms = mc_mining_break_grace_ms(obsidian_netherite_info.required_ms);
+    assert(netherite_obsidian_grace_ms > MC_MINING_BREAK_GRACE_MIN_MS);
+    assert(netherite_obsidian_grace_ms <= MC_MINING_BREAK_GRACE_MAX_MS);
+    assert(mc_mining_required_elapsed_ms(&obsidian_netherite_info) ==
+           obsidian_netherite_info.required_ms - netherite_obsidian_grace_ms);
 
     assert(mc_mining_slot_item_id(NULL) == -1);
     assert(mc_mining_slot_item_id(&wooden_pickaxe) == mc_minecraft_item_id("minecraft:wooden_pickaxe"));

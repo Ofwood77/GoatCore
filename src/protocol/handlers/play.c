@@ -1,5 +1,6 @@
 #include "mc_protocol.h"
 #include "mc_inventory.h"
+#include "mc_block_drops.h"
 #include "mc_crafting.h"
 #include "mc_furnace.h"
 #include "mc_mining.h"
@@ -10,7 +11,6 @@
 #include "mc_util.h"
 #include "generated_minecraft_ids.h"
 #include "generated_registries.h"
-#include "generated_block_loot.h"
 #include "generated_item_food.h"
 #include "generated_item_place.h"
 #include <ctype.h>
@@ -2638,7 +2638,8 @@ static int reject_block_destroy(mc_conn_t *c, int32_t x, int32_t y, int32_t z, i
 }
 
 static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_world_ids_t *ids, int32_t x, int32_t y,
-                                     int32_t z, int32_t state_id, int32_t seq, bool allow_default_drop) {
+                                     int32_t z, int32_t state_id, int32_t seq, bool allow_default_drop,
+                                     int64_t now_ms) {
     if (!c || !world || !ids) return -1;
 
     int brc = break_container_block(c, x, y, z, state_id);
@@ -2649,15 +2650,16 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     }
 
     if (!mc_mining_state_is_air(state_id)) {
-        int32_t drop_item_id = allow_default_drop ? mc_block_loot_default_item_id_from_state(state_id, -1) : -1;
+        mc_block_drop_t drop = {-1, 0};
+        bool have_drop = mc_block_drop_resolve_default(state_id, allow_default_drop, x, y, z, now_ms, &drop);
         (void)mc_world_remove_block_entity(world, x, y, z);
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
         if (mc_world_flush_block(world, x, y, z) != 0) return -1;
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
 
-        if (drop_item_id >= 0) {
+        if (have_drop) {
             mc_slot_t block_drop = {0};
-            if (mc_slot_set_simple(&block_drop, drop_item_id, 1) == 0) {
+            if (mc_slot_set_simple(&block_drop, drop.item_id, drop.count) == 0) {
                 if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
                     mc_slot_clear(&block_drop);
                     return -1;
@@ -5583,7 +5585,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                         }
                         if (break_info.instant) {
                             mc_mining_session_clear(&c->mining);
-                            return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, break_info.can_harvest);
+                            return break_block_authoritative(c, world, ids, x, y, z, state_id, seq,
+                                                             break_info.can_harvest, now_ms);
                         }
                         int32_t held_item_id = mc_mining_slot_item_id(held_item);
                         mc_mining_session_start(&c->mining, x, y, z, state_id, now_ms, held_item_id, &break_info);
@@ -5603,20 +5606,26 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                                                             &elapsed_ms);
                         if (stop_result != MC_MINING_STOP_OK) {
                             if (debug_place_enabled()) {
-                                log_info("place debug: break stop reject reason=%s elapsed=%lld required=%lld pos=(%d,%d,%d) state=%d",
+                                const mc_mining_break_info_t *break_info = &c->mining.break_info;
+                                int64_t required_ms = break_info->required_ms;
+                                int64_t accepted_after_ms = mc_mining_required_elapsed_ms(break_info);
+                                int64_t grace_ms = mc_mining_break_grace_ms(required_ms);
+                                log_info("place debug: break stop reject reason=%s elapsed=%lld required=%lld accepted_after=%lld grace=%lld pos=(%d,%d,%d) state=%d",
                                          mc_mining_stop_result_name(stop_result), (long long)elapsed_ms,
-                                         (long long)c->mining.break_info.required_ms, x, y, z, state_id);
+                                         (long long)required_ms, (long long)accepted_after_ms, (long long)grace_ms,
+                                         x, y, z, state_id);
                             }
                             mc_mining_session_clear(&c->mining);
                             return reject_block_destroy(c, x, y, z, state_id, seq);
                         }
                         bool allow_default_drop = c->mining.break_info.can_harvest;
                         mc_mining_session_clear(&c->mining);
-                        return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, allow_default_drop);
+                        return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, allow_default_drop,
+                                                         now_ms);
                     }
 
                     mc_mining_session_clear(&c->mining);
-                    return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, true);
+                    return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, true, now_ms);
                 }
             }
             mc_mining_session_clear(&c->mining);

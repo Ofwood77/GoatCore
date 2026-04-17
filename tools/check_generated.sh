@@ -6,10 +6,10 @@ cd "$repo_root"
 
 DATA_REPORTS_DIR=${DATA_REPORTS_DIR:-data/26.1.1/reports}
 MC_IDS_SOURCE=${MC_IDS_SOURCE:-$DATA_REPORTS_DIR}
-MC_BLOCK_LOOT_SOURCE=${MC_BLOCK_LOOT_SOURCE:-mc_vania_asset/client/data/minecraft/loot_table/blocks}
 MC_RECIPE_SOURCE=${MC_RECIPE_SOURCE:-mc_vania_asset/client/data/minecraft/recipe}
 MC_ITEM_TAG_SOURCE=${MC_ITEM_TAG_SOURCE:-mc_vania_asset/client/data/minecraft/tags/item}
 MC_SERVER_JAR_SOURCE=${MC_SERVER_JAR_SOURCE:-mc_vania_asset/server/server.jar}
+MC_BLOCK_LOOT_SOURCE=${MC_BLOCK_LOOT_SOURCE:-$MC_SERVER_JAR_SOURCE}
 COMPONENTS_ITEM_DIR=${COMPONENTS_ITEM_DIR:-$DATA_REPORTS_DIR/minecraft/components/item}
 REQUIRE_RAW_DATA=${REQUIRE_RAW_DATA:-0}
 
@@ -80,6 +80,8 @@ from pathlib import Path
 
 for root_arg in sys.argv[1:]:
     root = Path(root_arg)
+    if root.suffix == ".jar":
+        continue
     paths = [root] if root.is_file() else sorted(root.glob("**/*.json"))
     for path in paths:
         try:

@@ -101,9 +101,28 @@ bool mc_mining_elapsed_enough(const mc_mining_break_info_t *info, int64_t starte
     if (elapsed_ms < 0) elapsed_ms = 0;
     if (out_elapsed_ms) *out_elapsed_ms = elapsed_ms;
     if (!info || !info->breakable) return false;
-    int64_t required_ms = info->required_ms;
-    if (required_ms > MC_MINING_BREAK_GRACE_MS) required_ms -= MC_MINING_BREAK_GRACE_MS;
-    return elapsed_ms >= required_ms;
+    return elapsed_ms >= mc_mining_required_elapsed_ms(info);
+}
+
+int64_t mc_mining_break_grace_ms(int64_t required_ms) {
+    if (required_ms <= MC_MINING_TICK_MS) return 0;
+
+    int64_t grace_ms = required_ms / MC_MINING_BREAK_GRACE_DIVISOR;
+    if (grace_ms < MC_MINING_BREAK_GRACE_MIN_MS) grace_ms = MC_MINING_BREAK_GRACE_MIN_MS;
+    if (grace_ms > MC_MINING_BREAK_GRACE_MAX_MS) grace_ms = MC_MINING_BREAK_GRACE_MAX_MS;
+
+    int64_t cap_ms = required_ms / MC_MINING_BREAK_GRACE_REQUIRED_DIVISOR;
+    if (grace_ms > cap_ms) grace_ms = cap_ms;
+    if (grace_ms < 0) grace_ms = 0;
+    if (grace_ms >= required_ms) return required_ms - 1;
+    return grace_ms;
+}
+
+int64_t mc_mining_required_elapsed_ms(const mc_mining_break_info_t *info) {
+    if (!info || !info->breakable || info->required_ms <= 0) return 0;
+    int64_t grace_ms = mc_mining_break_grace_ms(info->required_ms);
+    int64_t required_elapsed_ms = info->required_ms - grace_ms;
+    return required_elapsed_ms > 0 ? required_elapsed_ms : 0;
 }
 
 void mc_mining_session_clear(mc_mining_session_t *session) {

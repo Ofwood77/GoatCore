@@ -20,6 +20,7 @@ enum {
 typedef struct {
     int32_t item_id;
     uint16_t count;
+    uint16_t count_max;
     uint16_t flags;
 } mc_block_loot_entry_t;
 

@@ -10,7 +10,10 @@
 #define MC_MINING_TICK_MS 50
 #define MC_MINING_BASE_DESTROY_TICKS 30
 #define MC_MINING_BASE_NO_HARVEST_TICKS 100
-#define MC_MINING_BREAK_GRACE_MS (MC_MINING_TICK_MS * 2)
+#define MC_MINING_BREAK_GRACE_MIN_MS (MC_MINING_TICK_MS * 2)
+#define MC_MINING_BREAK_GRACE_MAX_MS 500
+#define MC_MINING_BREAK_GRACE_DIVISOR 20
+#define MC_MINING_BREAK_GRACE_REQUIRED_DIVISOR 3
 #define MC_MINING_UNKNOWN_HARDNESS_X100 100
 
 typedef struct {
@@ -53,6 +56,8 @@ typedef enum {
 bool mc_mining_state_is_air(int32_t state_id);
 int32_t mc_mining_slot_item_id(const mc_slot_t *slot);
 mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *held_item);
+int64_t mc_mining_break_grace_ms(int64_t required_ms);
+int64_t mc_mining_required_elapsed_ms(const mc_mining_break_info_t *info);
 bool mc_mining_elapsed_enough(const mc_mining_break_info_t *info, int64_t started_ms, int64_t now_ms,
                               int64_t *out_elapsed_ms);
 void mc_mining_session_clear(mc_mining_session_t *session);
