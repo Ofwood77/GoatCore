@@ -631,6 +631,7 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     c->center_cz = 0;
     c->chunk_refresh_ping_pending = false;
     c->chunk_refresh_ping_id = 0;
+    c->block_ack_sequence = -1;
     c->awaiting_keepalive = false;
     c->keepalive_id = 0;
     c->last_keepalive_sent_ms = 0;
@@ -1579,6 +1580,21 @@ static int send_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
     size_t pos = 0;
     if (w_varint(buf, sizeof(buf), &pos, sequence) != 0) return -1;
     return conn_write_packet(c, PKT_PLAY_BLOCK_CHANGED_ACK, buf, pos, -1);
+}
+
+static int queue_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
+    if (!c) return -1;
+    if (sequence < 0) return 0;
+    if (sequence > c->block_ack_sequence) c->block_ack_sequence = sequence;
+    return 0;
+}
+
+static int flush_queued_block_changed_ack_packet(mc_conn_t *c) {
+    if (!c || c->block_ack_sequence < 0) return 0;
+    int32_t sequence = c->block_ack_sequence;
+    if (send_block_changed_ack_packet(c, sequence) != 0) return -1;
+    c->block_ack_sequence = -1;
+    return 0;
 }
 
 static int resend_authoritative_chunk_at(mc_conn_t *c, mc_world_t *world, int32_t x, int32_t z) {
@@ -2634,7 +2650,7 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
 
 static int reject_block_destroy(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int32_t seq) {
     if (state_id >= 0 && send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
-    return send_block_changed_ack_packet(c, seq);
+    return queue_block_changed_ack_packet(c, seq);
 }
 
 static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_world_ids_t *ids, int32_t x, int32_t y,
@@ -2646,7 +2662,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     if (brc < 0) return -1;
     if (brc == 0) {
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
-        return send_block_changed_ack_packet(c, seq);
+        return queue_block_changed_ack_packet(c, seq);
     }
 
     if (!mc_mining_state_is_air(state_id)) {
@@ -2667,11 +2683,11 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
             }
             mc_slot_clear(&block_drop);
         }
-        return send_block_changed_ack_packet(c, seq);
+        return queue_block_changed_ack_packet(c, seq);
     }
 
     if (send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
-    return send_block_changed_ack_packet(c, seq);
+    return queue_block_changed_ack_packet(c, seq);
 }
 
 static int try_open_target_container(mc_conn_t *c, int32_t x, int32_t y, int32_t z) {
@@ -5273,6 +5289,7 @@ int proto_play_send_initial(mc_conn_t *c) {
     c->pitch = spawn_pitch;
     c->has_pos = true;
     c->has_center_chunk = false;
+    c->block_ack_sequence = -1;
     if (rebuild_chunk_stream(c, world, spawn_chunk_x, spawn_chunk_z, view_distance) != 0) return -1;
 
     if (send_default_spawn_packet(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch) != 0) return -1;
@@ -5591,7 +5608,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                         }
                         int32_t held_item_id = mc_mining_slot_item_id(held_item);
                         mc_mining_session_start(&c->mining, x, y, z, state_id, now_ms, held_item_id, &break_info);
-                        return send_block_changed_ack_packet(c, seq);
+                        return queue_block_changed_ack_packet(c, seq);
                     }
 
                     if (action == PLAYER_ACTION_ABORT_DESTROY_BLOCK) {
@@ -5633,11 +5650,11 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                                  action, x, y, z, seq);
                     }
                     mc_mining_session_clear(&c->mining);
-                    return send_block_changed_ack_packet(c, seq);
+                    return queue_block_changed_ack_packet(c, seq);
                 }
             }
             mc_mining_session_clear(&c->mining);
-            return send_block_changed_ack_packet(c, seq);
+            return queue_block_changed_ack_packet(c, seq);
         }
         return 0;
     }
@@ -5663,7 +5680,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
             has_sequence = true;
         }
         if (hand != 0) {
-            if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+            if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
             return 0;
         }
         (void)cx;
@@ -5673,7 +5690,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 
         int open_rc = try_open_target_container(c, x, y, z);
         if (open_rc != 0) {
-            if (open_rc > 0 && has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+            if (open_rc > 0 && has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
             return open_rc < 0 ? -1 : 0;
         }
 
@@ -5681,7 +5698,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
             int food_rc = try_consume_selected_food(c);
             if (food_rc < 0) return -1;
             if (food_rc > 0) {
-                if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                 return 0;
             }
         }
@@ -5727,7 +5744,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 }
                 if (target_state_id >= 0 && !block_state_is_replaceable(ids, target_state_id)) {
                     if (send_block_update_packet(c, px, py, pz, target_state_id) != 0) return -1;
-                    if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                    if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (held_idx >= 0) {
                         if (sync_inventory_slot(c, (int16_t)held_idx) != 0) return -1;
                     }
@@ -5742,7 +5759,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                                  mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(none)");
                     }
                     if (send_block_update_packet(c, px, py, pz, authoritative_target) != 0) return -1;
-                    if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                    if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (held_idx >= 0) {
                         if (sync_inventory_slot(c, (int16_t)held_idx) != 0) return -1;
                     }
@@ -5757,7 +5774,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     }
                     network_state_id = authoritative_state_id;
                     if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
-                    if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                    if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (c->server) {
                         (void)net_server_resolve_item_entities_for_block(c->server, px, py, pz, authoritative_state_id);
                     }
@@ -5796,7 +5813,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     network_state_id = authoritative_state_id;
                     if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
                 }
-                if (has_sequence && send_block_changed_ack_packet(c, seq) != 0) return -1;
+                if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                 if (held_idx >= 0) {
                     if (sync_inventory_slot(c, (int16_t)held_idx) != 0) return -1;
                 }
@@ -5830,6 +5847,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 int proto_play_tick(mc_conn_t *c, int64_t now_ms) {
     if (!c || c->state != MC_STATE_PLAY) return 0;
     if (!c->play_init_sent) return 0;
+
+    if (flush_queued_block_changed_ack_packet(c) != 0) return -1;
 
     if (c->awaiting_keepalive) {
         if (now_ms - c->last_keepalive_sent_ms > KEEPALIVE_TIMEOUT_MS) {

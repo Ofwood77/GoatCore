@@ -138,6 +138,7 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd) {
     c->cfg = &s->cfg;
     c->server = s;
     c->entity_id = s->next_entity_id++;
+    c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
     if (pthread_mutex_init(&c->out_lock, NULL) != 0) {
         free(c);

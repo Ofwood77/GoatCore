@@ -4,6 +4,7 @@
 #include "mc_net.h"
 #include "mc_server.h"
 #include "mc_inventory.h"
+#include "generated_minecraft_ids.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +12,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static int g_packet_count;
+static int32_t g_last_packet_id;
+static uint8_t g_last_payload[32];
+static size_t g_last_payload_len;
+
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold) {
     (void)c;
-    (void)packet_id;
-    (void)payload;
-    (void)payload_len;
     (void)compression_threshold;
+    g_packet_count++;
+    g_last_packet_id = packet_id;
+    g_last_payload_len = payload_len;
+    if (payload_len > sizeof(g_last_payload)) return -1;
+    if (payload_len > 0 && payload) memcpy(g_last_payload, payload, payload_len);
     return 0;
 }
 
@@ -130,6 +138,28 @@ static int mk_temp_world(char *buf, size_t cap) {
     return mkdtemp(buf) ? 0 : -1;
 }
 
+static int run_deferred_ack_case(void) {
+    mc_conn_t conn;
+    memset(&conn, 0, sizeof(conn));
+    conn.state = MC_STATE_PLAY;
+    conn.play_init_sent = true;
+    conn.block_ack_sequence = 7;
+
+    g_packet_count = 0;
+    g_last_packet_id = -1;
+    g_last_payload_len = 0;
+    if (proto_play_tick(&conn, 0) != 0) return fail("proto_play_tick ack");
+    if (g_packet_count != 1) return fail("ack packet count");
+    if (g_last_packet_id != MC_PKT_PLAY_CLIENTBOUND_BLOCK_CHANGED_ACK) return fail("ack packet id");
+    if (g_last_payload_len != 1 || g_last_payload[0] != 7) return fail("ack payload");
+    if (conn.block_ack_sequence != -1) return fail("ack reset");
+
+    g_packet_count = 0;
+    if (proto_play_tick(&conn, 0) != 0) return fail("proto_play_tick no ack");
+    if (g_packet_count != 0) return fail("unexpected second ack");
+    return 0;
+}
+
 static int run_case(mc_world_t *world, mc_chunk_t *chunk, const char *label) {
     mc_buf_t out;
     if (buf_init(&out, 8192) != 0) return fail("buf_init");
@@ -148,6 +178,8 @@ static int run_case(mc_world_t *world, mc_chunk_t *chunk, const char *label) {
 }
 
 int main(void) {
+    if (run_deferred_ack_case() != 0) return 1;
+
     char world_path[128];
     if (mk_temp_world(world_path, sizeof(world_path)) != 0) return fail("mkdtemp");
 

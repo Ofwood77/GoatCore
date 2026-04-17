@@ -108,6 +108,7 @@ struct mc_conn {
     int32_t next_window_id;
     bool chunk_refresh_ping_pending;
     int32_t chunk_refresh_ping_id;
+    int32_t block_ack_sequence;
 
     struct {
         int64_t *keys;
