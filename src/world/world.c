@@ -411,6 +411,13 @@ static void pending_mods_free(mc_pending_mods_t *p) {
 
 static int updates_push(mc_world_t *w, mc_block_update_t u) {
     if (!w) return -1;
+    for (size_t i = w->updates_len; i > 0; i--) {
+        mc_block_update_t *existing = &w->updates[i - 1];
+        if (existing->x == u.x && existing->y == u.y && existing->z == u.z) {
+            existing->state_id = u.state_id;
+            return 0;
+        }
+    }
     if (w->updates_len == w->updates_cap) {
         size_t new_cap = w->updates_cap ? w->updates_cap * 2 : 256;
         if (new_cap < w->updates_cap) return -1;
@@ -1036,6 +1043,24 @@ int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *
         *out_state_id = w->ids.air;
         return 0;
     }
+    *out_state_id = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
+    return 0;
+}
+
+int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id) {
+    if (!w || !out_state_id) return -1;
+    if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) {
+        *out_state_id = w->ids.air;
+        return 0;
+    }
+    int32_t cx = 0, cz = 0;
+    int lx = 0, lz = 0;
+    if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) != 0) {
+        *out_state_id = w->ids.air;
+        return 0;
+    }
+    mc_chunk_t *chunk = mc_world_get_chunk(w, cx, cz, UINT32_MAX);
+    if (!chunk) return 1;
     *out_state_id = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
     return 0;
 }

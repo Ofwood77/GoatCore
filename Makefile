@@ -67,7 +67,8 @@ TEST_BINS = \
     test_anvil_roundtrip \
     test_player_nbt \
     test_mining \
-    test_block_drops
+    test_block_drops \
+    test_world_consistency
 
 GENERATED_HEADERS = \
     src/world/block_registry.h \
@@ -211,6 +212,9 @@ test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_b
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_block_drops: tests/test_block_drops.c src/gameplay/block_drops.c src/gameplay/mining.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_minecraft_ids.c src/world/block_registry.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_world_consistency: tests/test_world_consistency.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: $(TEST_BINS)

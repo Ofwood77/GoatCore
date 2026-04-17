@@ -77,6 +77,8 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk);
 mc_chunk_t *mc_world_get_chunk(mc_world_t *w, int32_t cx, int32_t cz, uint32_t priority);
 
 int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
+/* Returns 0 with a state when the owning chunk is ready, 1 when it is queued/loading, and -1 on error. */
+int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);

@@ -5574,7 +5574,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 }
 
                 int32_t state_id = -1;
-                if (mc_world_get_block(world, x, y, z, &state_id) == 0) {
+                int block_rc = mc_world_get_block_ready(world, x, y, z, &state_id);
+                if (block_rc == 0) {
                     const mc_slot_t *held_item = selected_mainhand_slot(c);
 
                     if (action == PLAYER_ACTION_START_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
@@ -5626,6 +5627,13 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 
                     mc_mining_session_clear(&c->mining);
                     return break_block_authoritative(c, world, ids, x, y, z, state_id, seq, true, now_ms);
+                } else if (block_rc > 0) {
+                    if (debug_place_enabled()) {
+                        log_info("place debug: break action=%d deferred pos=(%d,%d,%d) seq=%d reason=chunk_not_ready",
+                                 action, x, y, z, seq);
+                    }
+                    mc_mining_session_clear(&c->mining);
+                    return send_block_changed_ack_packet(c, seq);
                 }
             }
             mc_mining_session_clear(&c->mining);
