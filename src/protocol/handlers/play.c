@@ -20,6 +20,7 @@
 #include "mc_player_store.h"
 #include "mc_util.h"
 #include "generated_minecraft_ids.h"
+#include "generated_block_loot.h"
 #include "generated_registries.h"
 #include "generated_item_food.h"
 #include "generated_item_place.h"
@@ -800,7 +801,7 @@ static int send_commands(mc_conn_t *c) {
     uint8_t buf[8192];
     size_t pos = 0;
 
-    const int node_count = 32;
+    const int node_count = 33;
     if (w_varint(buf, sizeof(buf), &pos, node_count) != 0) return -1;
 
     /* Parser IDs (1.19+): brigadier:string=5, minecraft:entity=6, minecraft:vec3=10 */
@@ -945,10 +946,14 @@ static int send_commands(mc_conn_t *c) {
 
     /* 31: root -> [gamemode|tp|setblock|food|health|kill|difficulty] */
     {
-        const int children[] = {5, 6, 9, 15, 22, 23, 30};
-        if (commands_write_node(buf, sizeof(buf), &pos, 0x00, children, 7,
+        const int children[] = {5, 6, 9, 15, 22, 23, 30, 32};
+        if (commands_write_node(buf, sizeof(buf), &pos, 0x00, children, 8,
                                 NULL, 0, CMD_PROP_NONE, 0) != 0) return -1;
     }
+
+    /* 32: literal mineinfo */
+    if (commands_write_node(buf, sizeof(buf), &pos, 0x05, NULL, 0,
+                            "mineinfo", 0, CMD_PROP_NONE, 0) != 0) return -1;
 
     if (w_varint(buf, sizeof(buf), &pos, 31) != 0) return -1; /* root index */
     return conn_write_packet(c, PKT_PLAY_COMMANDS, buf, pos, -1);
@@ -3069,6 +3074,167 @@ static int selected_mainhand_slot_index(const mc_conn_t *c) {
     return inv ? mc_inventory_selected_slot_index(inv) : -1;
 }
 
+static const char *mining_harvest_level_name(mc_mining_harvest_level_t level) {
+    switch (level) {
+        case MC_MINING_HARVEST_LEVEL_NONE: return "none";
+        case MC_MINING_HARVEST_LEVEL_STONE: return "stone";
+        case MC_MINING_HARVEST_LEVEL_IRON: return "iron";
+        case MC_MINING_HARVEST_LEVEL_DIAMOND: return "diamond";
+        default: return "unknown";
+    }
+}
+
+static const char *mining_tool_material_name(mc_mining_tool_material_t material) {
+    switch (material) {
+        case MC_MINING_TOOL_MATERIAL_NONE: return "none";
+        case MC_MINING_TOOL_MATERIAL_WOOD: return "wood";
+        case MC_MINING_TOOL_MATERIAL_STONE: return "stone";
+        case MC_MINING_TOOL_MATERIAL_COPPER: return "copper";
+        case MC_MINING_TOOL_MATERIAL_IRON: return "iron";
+        case MC_MINING_TOOL_MATERIAL_GOLD: return "gold";
+        case MC_MINING_TOOL_MATERIAL_DIAMOND: return "diamond";
+        case MC_MINING_TOOL_MATERIAL_NETHERITE: return "netherite";
+        default: return "unknown";
+    }
+}
+
+static int trace_target_block_from_view(mc_conn_t *c, mc_world_t *world, double max_distance, int32_t *out_x, int32_t *out_y,
+                                        int32_t *out_z, int32_t *out_state_id) {
+    const double step = 0.05;
+    const double eye_height = 1.62;
+    double ox = 0.0;
+    double oy = 0.0;
+    double oz = 0.0;
+    double dx = 0.0;
+    double dy = 0.0;
+    double dz = 1.0;
+    int last_bx = INT_MIN;
+    int last_by = INT_MIN;
+    int last_bz = INT_MIN;
+    int steps = 0;
+
+    if (!c || !world || !out_x || !out_y || !out_z || !out_state_id || !c->has_pos) return -1;
+
+    player_look_direction(c, &dx, &dy, &dz);
+    ox = c->x;
+    oy = c->y + eye_height;
+    oz = c->z;
+    steps = (int)(max_distance / step) + 1;
+
+    for (int i = 0; i <= steps; i++) {
+        double dist = (double)i * step;
+        double px = ox + dx * dist;
+        double py = oy + dy * dist;
+        double pz = oz + dz * dist;
+        int32_t bx = (int32_t)floor(px);
+        int32_t by = (int32_t)floor(py);
+        int32_t bz = (int32_t)floor(pz);
+        int32_t state_id = -1;
+        int rc = 0;
+
+        if (bx == last_bx && by == last_by && bz == last_bz) continue;
+        last_bx = bx;
+        last_by = by;
+        last_bz = bz;
+
+        rc = mc_world_get_block_ready(world, bx, by, bz, &state_id);
+        if (rc < 0) return -1;
+        if (rc > 0) return 2;
+        if (mc_mining_state_is_air(state_id)) continue;
+
+        *out_x = bx;
+        *out_y = by;
+        *out_z = bz;
+        *out_state_id = state_id;
+        return 0;
+    }
+
+    return 1;
+}
+
+static int send_mining_probe_info(mc_conn_t *c) {
+    const double max_distance = 6.0;
+    mc_world_t *world = NULL;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t z = 0;
+    int32_t state_id = -1;
+    int trace_rc = 0;
+    const mc_slot_t *held = NULL;
+    int32_t held_item_id = -1;
+    const char *held_name = NULL;
+    const char *block_key = NULL;
+    mc_mining_break_info_t info = {0};
+    const mc_mining_tool_item_entry_t *tool_entry = NULL;
+    const mc_block_loot_entry_t *loot_entry = NULL;
+    mc_block_drop_t drop = {-1, 0};
+    bool have_drop = false;
+    char line1[320];
+    char line2[320];
+    char line3[320];
+    char loot_desc[160];
+
+    if (!c) return -1;
+    world = get_world(c);
+    if (!world) return send_system_message(c, "MineInfo: monde indisponible");
+
+    trace_rc = trace_target_block_from_view(c, world, max_distance, &x, &y, &z, &state_id);
+    if (trace_rc < 0) return send_system_message(c, "MineInfo: echec du raycast serveur");
+    if (trace_rc == 1) return send_system_message(c, "MineInfo: aucun bloc vise dans la portee");
+    if (trace_rc == 2) return send_system_message(c, "MineInfo: chunk cible pas encore pret");
+
+    held = selected_mainhand_slot(c);
+    held_item_id = mc_mining_slot_item_id(held);
+    held_name = (held_item_id > 0) ? mc_minecraft_item_name(held_item_id) : NULL;
+    if (!held_name) held_name = "(main_vide)";
+
+    block_key = mc_block_state_key(state_id);
+    if (!block_key) block_key = "(unknown_state)";
+
+    info = mc_mining_break_info(state_id, held);
+    tool_entry = mc_mining_tool_item_entry_from_item(held_item_id);
+    loot_entry = mc_block_loot_entry_from_state(state_id);
+    have_drop = mc_block_drop_resolve_default(state_id, info.can_harvest, x, y, z, 0, &drop);
+
+    if (have_drop && drop.item_id > 0) {
+        const char *loot_name = mc_minecraft_item_name(drop.item_id);
+        if (!loot_name) loot_name = "(unknown_item)";
+        if (loot_entry && loot_entry->count_max > loot_entry->count) {
+            snprintf(loot_desc, sizeof(loot_desc), "%s x%u-%u", loot_name, (unsigned)loot_entry->count,
+                     (unsigned)loot_entry->count_max);
+        } else {
+            snprintf(loot_desc, sizeof(loot_desc), "%s x%d", loot_name, drop.count);
+        }
+    } else if (!info.can_harvest) {
+        snprintf(loot_desc, sizeof(loot_desc), "none (harvest=no)");
+    } else if (!loot_entry || (loot_entry->flags & MC_BLOCK_LOOT_FLAG_PRESENT) == 0u) {
+        snprintf(loot_desc, sizeof(loot_desc), "none (no_entry)");
+    } else if ((loot_entry->flags & MC_BLOCK_LOOT_FLAG_SUPPORTED) == 0u) {
+        snprintf(loot_desc, sizeof(loot_desc), "none (parser_unsupported)");
+    } else if ((loot_entry->flags & MC_BLOCK_LOOT_FLAG_NO_DROP) != 0u) {
+        snprintf(loot_desc, sizeof(loot_desc), "none (no_drop)");
+    } else {
+        snprintf(loot_desc, sizeof(loot_desc), "none");
+    }
+
+    snprintf(line1, sizeof(line1), "MineInfo: bloc=%s pos=(%d,%d,%d) outil=%s", block_key, x, y, z, held_name);
+    snprintf(line2, sizeof(line2),
+             "MineInfo: recolte=%s cassable=%s instant=%s temps=%lldms loot=%s",
+             info.can_harvest ? "oui" : "non", info.breakable ? "oui" : "non", info.instant ? "oui" : "non",
+             (long long)info.required_ms, loot_desc);
+    snprintf(line3, sizeof(line3),
+             "MineInfo: bloc_cat=%s req=%s tool_match=%s outil_cat=%s outil_tier=%s materiau=%s vitesse=%.2f",
+             mc_mining_tool_category_name(info.block_category), mining_harvest_level_name(info.required_harvest_level),
+             info.tool_matches ? "oui" : "non", mc_mining_tool_category_name(info.tool_category),
+             mining_harvest_level_name(info.tool_harvest_level),
+             tool_entry ? mining_tool_material_name((mc_mining_tool_material_t)tool_entry->material) : "none",
+             (double)info.speed_x100 / 100.0);
+
+    if (send_system_message(c, line1) != 0) return -1;
+    if (send_system_message(c, line2) != 0) return -1;
+    return send_system_message(c, line3);
+}
+
 static int send_local_player_use_item_metadata(mc_conn_t *c, bool active, int32_t hand) {
     uint8_t buf[16];
     size_t pos = 0;
@@ -3952,6 +4118,10 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
         char msg[96];
         snprintf(msg, sizeof(msg), "Difficulty set to %s", mc_difficulty_name(difficulty));
         return send_system_message(c, msg);
+    }
+
+    if (strcmp(cmd_lower, "mineinfo") == 0 || strcmp(cmd_lower, "lootinfo") == 0) {
+        return send_mining_probe_info(c);
     }
 
     if (strcmp(cmd_lower, "food") == 0) {
