@@ -1,3 +1,8 @@
+/*
+ * Authoritative mining rules shared by the PLAY handlers. START freezes the
+ * server's decision about the target block and held item into a session, and
+ * STOP only validates that frozen snapshot against the live world.
+ */
 #include "mc_mining.h"
 
 #include "generated_block_hardness.h"
@@ -15,6 +20,9 @@ static int64_t required_ms_from_hardness_x100(int32_t hardness_x100, uint16_t sp
     if (hardness_x100 <= 0) return 0;
     if (speed_x100 < MC_MINING_TOOL_SPEED_SCALE) speed_x100 = MC_MINING_TOOL_SPEED_SCALE;
     if (base_destroy_ticks <= 0) base_destroy_ticks = MC_MINING_BASE_DESTROY_TICKS;
+    /* The generated data stores hardness and tool speed as scaled integers.
+     * Keep the whole computation in integer space so START and STOP agree on
+     * the exact threshold with no float rounding drift. */
     int64_t numerator = (int64_t)hardness_x100 * base_destroy_ticks * MC_MINING_TOOL_SPEED_SCALE;
     int64_t denominator = (int64_t)MC_BLOCK_HARDNESS_SCALE * speed_x100;
     int64_t ticks = (numerator + denominator - 1) / denominator;
@@ -40,6 +48,8 @@ mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *h
         return info;
     }
 
+    /* Air is "already broken": clients may animate it, but the server should
+     * never create a mining session for it. */
     if (mc_mining_state_is_air(state_id)) {
         info.known_hardness = true;
         info.breakable = false;
@@ -79,6 +89,9 @@ mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *h
     if (info.tool_matches && tool && tool->speed_x100 > info.speed_x100) {
         info.speed_x100 = tool->speed_x100;
     }
+    /* breakable, required_ms, and can_harvest are deliberately separate:
+     * survival may allow a block to break slowly without granting its useful
+     * drop when the held tool or tier is insufficient. */
     if (info.requires_correct_tool) {
         info.can_harvest = info.tool_matches && info.tool_harvest_level >= info.required_harvest_level;
     }
@@ -107,6 +120,9 @@ bool mc_mining_elapsed_enough(const mc_mining_break_info_t *info, int64_t starte
 int64_t mc_mining_break_grace_ms(int64_t required_ms) {
     if (required_ms <= MC_MINING_TICK_MS) return 0;
 
+    /* Long breaks are validated against enqueue timestamps, but a small bounded
+     * grace still keeps STOP from being rejected by harmless client/tick jitter
+     * at the exact threshold. */
     int64_t grace_ms = required_ms / MC_MINING_BREAK_GRACE_DIVISOR;
     if (grace_ms < MC_MINING_BREAK_GRACE_MIN_MS) grace_ms = MC_MINING_BREAK_GRACE_MIN_MS;
     if (grace_ms > MC_MINING_BREAK_GRACE_MAX_MS) grace_ms = MC_MINING_BREAK_GRACE_MAX_MS;
@@ -137,6 +153,8 @@ void mc_mining_session_start(mc_mining_session_t *session, int32_t x, int32_t y,
                              const mc_mining_break_info_t *break_info) {
     if (!session) return;
     mc_mining_session_clear(session);
+    /* Unbreakable targets intentionally leave the session inactive so STOP
+     * cannot later "revive" them if the client keeps sending packets. */
     if (!break_info || !break_info->breakable) return;
     session->active = true;
     session->x = x;
@@ -153,6 +171,8 @@ mc_mining_stop_result_t mc_mining_session_validate_stop(const mc_mining_session_
                                                         int32_t current_tool_item_id, int64_t now_ms,
                                                         int64_t *out_elapsed_ms) {
     if (!session || !session->active) return MC_MINING_STOP_NO_SESSION;
+    /* STOP is intentionally strict: any change to target block or held item
+     * invalidates the frozen session and forces the client to start over. */
     if (session->x != x || session->y != y || session->z != z) return MC_MINING_STOP_TARGET_MISMATCH;
     if (session->state_id != current_state_id) return MC_MINING_STOP_STATE_CHANGED;
     if (session->tool_item_id != current_tool_item_id) return MC_MINING_STOP_TOOL_CHANGED;

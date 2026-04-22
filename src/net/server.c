@@ -1,3 +1,14 @@
+/*
+ * Network accept loop and main server tick. This file is the bridge between
+ * epoll-driven socket IO and the gameplay/world modules:
+ * - the network side decodes packets and pushes tasks
+ * - the tick thread drains tasks, mutates world state, ticks gameplay, and
+ *   flushes outbound packets in a stable order
+ *
+ * When reading this file, keep the lock model in mind: long gameplay work
+ * should happen without holding conns_lock, using refcounted snapshots when
+ * iterating over active connections.
+ */
 #include "mc_server.h"
 #include "mc_net.h"
 #include "mc_protocol.h"
@@ -56,7 +67,11 @@ typedef struct {
     int32_t pickup_delay_ticks;
     mc_slot_t slot;
 } mc_item_entity_t;
+/* Runtime entity used for block/item drops. It is owned by the server tick,
+ * not by the world module, because pickup and networking are connection-aware. */
 
+/* Global server runtime. World state is mostly mutated from the tick thread,
+ * while the network thread owns socket readiness and enqueues packet tasks. */
 struct mc_server {
     int listen_fd;
     int epoll_fd;
@@ -230,6 +245,8 @@ static int conn_snapshot_push(mc_conn_snapshot_t *snapshot, mc_conn_t *conn) {
 static int server_snapshot_conns(mc_server_t *s, mc_conn_snapshot_t *snapshot) {
     if (!s || !snapshot) return -1;
     memset(snapshot, 0, sizeof(*snapshot));
+    /* Snapshot with refcounts so the tick thread can spend time on chunk
+     * streaming and protocol work without pinning conns_lock the whole time. */
     pthread_mutex_lock(&s->conns_lock);
     for (mc_conn_t *c = s->conns; c; c = c->next) {
         if (conn_snapshot_push(snapshot, c) != 0) {
@@ -1198,6 +1215,8 @@ static void *tick_thread_main(void *arg) {
 
         if (perf) tick_start_us = now_us_value;
         int64_t span_start_us = perf ? mc_now_us() : 0;
+        /* Packet handlers run on the tick thread via the task queue so they can
+         * safely touch world state without fighting the epoll loop. */
         mc_task_t *task = mc_task_queue_drain(&s->task_queue);
         while (task) {
             mc_task_t *next = task->next;
@@ -1224,6 +1243,8 @@ static void *tick_thread_main(void *arg) {
             else mc_world_tick(s->world, now);
             if (perf) world_tick_us = mc_now_us() - span_start_us;
 
+            /* Furnace ticking consults open-container state, so it briefly
+             * shares conns_lock with the connection list. */
             pthread_mutex_lock(&s->conns_lock);
             span_start_us = perf ? mc_now_us() : 0;
             if (perf) (void)mc_world_tick_furnaces_profiled(s->world, server_container_is_open_unlocked, s, &furnace_stats);
@@ -1252,6 +1273,8 @@ static void *tick_thread_main(void *arg) {
             do_evict = false;
         }
 
+        /* Everything below can take time (chunk sends, protocol ticks, remote
+         * player sync), so operate on the snapshot instead of the live list. */
         for (size_t ci = 0; ci < conn_snapshot.len; ci++) {
             mc_conn_t *c = conn_snapshot.items[ci];
             mc_proto_state_t state = (mc_proto_state_t)atomic_load(&c->state);
@@ -1345,6 +1368,8 @@ static void *tick_thread_main(void *arg) {
 
         if (s->world && updates_len > 0) {
             span_start_us = perf ? mc_now_us() : 0;
+            /* Clear only after every live PLAY connection had a chance to see
+             * the coalesced updates for this tick. */
             mc_world_clear_updates(s->world);
             if (perf) clear_updates_us = mc_now_us() - span_start_us;
         }

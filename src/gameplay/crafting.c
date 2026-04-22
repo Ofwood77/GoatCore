@@ -1,3 +1,9 @@
+/*
+ * Server-side crafting matcher and result consumer built on generated recipe
+ * tables. play.c owns container protocol, while this file answers narrower
+ * questions: "what recipe matches this grid?" and "what changes when the
+ * player takes the result?".
+ */
 #include "mc_crafting.h"
 
 #include <string.h>
@@ -10,6 +16,8 @@ typedef struct {
     int shaped_x;
     int shaped_y;
 } mc_crafting_match_info_t;
+/* For shaped recipes we keep the matched top-left offset so consumption can
+ * replay the exact cells that produced the result. */
 
 static bool ingredient_accepts_item(const mc_crafting_ingredient_t *ingredient, int32_t item_id) {
     if (!ingredient || ingredient->item_count == 0) return false;
@@ -82,6 +90,8 @@ static bool shapeless_match_rec(const mc_crafting_recipe_t *recipe, const mc_slo
     const mc_crafting_ingredient_t *ingredient = recipe_ingredient(recipe, ingredient_index);
     if (!ingredient || ingredient->item_count == 0) return false;
 
+    /* Shapeless recipes are small (at most 3x3), so a simple backtracking
+     * matcher is easier to reason about than a more clever multiset solver. */
     for (int i = 0; i < present_count; i++) {
         int slot_index = present[i];
         if (used[i]) continue;
@@ -107,6 +117,8 @@ static bool match_shapeless(const mc_crafting_recipe_t *recipe, const mc_slot_t 
 static bool find_match(const mc_slot_t *grid, int width, int height, mc_crafting_match_info_t *out) {
     if (out) memset(out, 0, sizeof(*out));
     if (!grid || width <= 0 || height <= 0 || width > 3 || height > 3 || width * height > MC_CRAFTING_MAX_GRID_SLOTS) return false;
+    /* Recipes are pre-generated offline, so matching is a pure table walk with
+     * no registry lookups or JSON parsing in the hot path. */
     for (size_t i = 0; i < MC_CRAFTING_RECIPE_COUNT; i++) {
         const mc_crafting_recipe_t *recipe = &MC_CRAFTING_RECIPES[i];
         if (recipe->type == MC_CRAFTING_RECIPE_SHAPED) {
@@ -135,6 +147,8 @@ const mc_crafting_recipe_t *mc_crafting_match_grid(const mc_slot_t *grid, int wi
 int mc_crafting_update_result(mc_slot_t *result_slot, const mc_slot_t *grid, int width, int height) {
     if (!result_slot) return -1;
     mc_slot_t result = {0};
+    /* Always rebuild the result from the input grid instead of trusting the
+     * previous result slot. That keeps resyncs deterministic after any click. */
     (void)mc_crafting_match_grid(grid, width, height, &result);
     if (mc_slot_copy(result_slot, &result) != 0) {
         mc_slot_clear(&result);
@@ -200,6 +214,8 @@ int mc_crafting_take_result(mc_slot_t *result_slot, mc_slot_t *grid, int width, 
     mc_crafting_match_info_t match;
     mc_slot_t result = {0};
     if (!result_slot || !grid || !cursor_slot) return -1;
+    /* Re-match at the moment of pickup so the result cannot outlive a stale
+     * client prediction or a previous grid configuration. */
     if (!find_match(grid, width, height, &match) || !match.recipe) {
         mc_slot_clear(result_slot);
         return 0;
@@ -268,6 +284,9 @@ int mc_crafting_quick_move_result(mc_slot_t *result_slot, mc_slot_t *grid, int w
         mc_slot_clear(&result);
     }
 
+    /* A valid recipe should stop naturally when the grid or inventory no
+     * longer permits another craft. Hitting the safety cap means the caller has
+     * found a logic bug instead of spinning forever inside the tick. */
     return mc_crafting_update_result(result_slot, grid, width, height) == 0 ? crafted : -1;
 }
 

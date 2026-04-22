@@ -1,3 +1,14 @@
+/*
+ * World/chunk runtime, async chunk loading, and persistence glue.
+ *
+ * The important split is:
+ * - worker threads load/generate chunks and push completed results
+ * - the main world tick integrates those results, applies queued mutations,
+ *   records block updates for networking, and performs bounded saves
+ *
+ * That separation keeps mutation order deterministic for gameplay code while
+ * still allowing chunk IO and generation to happen off-thread.
+ */
 #include "mc_world.h"
 
 #include "generated_registries.h"
@@ -30,6 +41,8 @@ typedef struct {
     int32_t state_id;
 } mc_pending_mod_t;
 
+/* Writes targeting a chunk that is still loading. They are replayed exactly
+ * once when the chunk reaches READY, then converted into normal updates. */
 typedef struct {
     mc_pending_mod_t *items;
     size_t len;
@@ -49,6 +62,8 @@ typedef struct {
     mc_chunk_t *chunk;
     mc_pending_mods_t *pending;
 } mc_chunk_entry_t;
+/* One hash-slot in the chunk table. LOADING entries may accumulate pending
+ * writes; READY entries point at the live chunk owned by the main thread. */
 
 typedef struct {
     mc_chunk_entry_t *entries;
@@ -56,6 +71,8 @@ typedef struct {
     size_t len;
     size_t tombs;
 } mc_chunk_map_t;
+/* Open-addressed map keyed by chunk coordinates. Tombs matter because chunks
+ * are evicted over time, so removal cannot simply zero a slot. */
 
 typedef struct {
     int32_t cx;
@@ -70,6 +87,9 @@ typedef struct mc_chunk_done {
     struct mc_chunk_done *next;
 } mc_chunk_done_t;
 
+/* World-owned runtime. The hash map tracks chunk lifecycle, chunk_list is the
+ * stable iteration order for save/evict/tick passes, and updates is the
+ * per-tick queue consumed by the networking layer. */
 struct mc_world {
     char *world_path;
     int64_t seed;
@@ -411,6 +431,9 @@ static void pending_mods_free(mc_pending_mods_t *p) {
 
 static int updates_push(mc_world_t *w, mc_block_update_t u) {
     if (!w) return -1;
+    /* Multiple mutations can hit the same block inside one tick. Keep only the
+     * latest state so clients see the final authoritative result, not a short
+     * history of intermediate states. */
     for (size_t i = w->updates_len; i > 0; i--) {
         mc_block_update_t *existing = &w->updates[i - 1];
         if (existing->x == u.x && existing->y == u.y && existing->z == u.z) {
@@ -728,6 +751,9 @@ static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
 
 static void apply_pending_mods(mc_world_t *w, mc_chunk_t *chunk, mc_pending_mods_t *pending) {
     if (!w || !chunk || !pending) return;
+    /* Pending mods were requested against a chunk before it was ready. Apply
+     * them in enqueue order so the READY chunk reflects every earlier write the
+     * server already accepted. */
     for (size_t i = 0; i < pending->len; i++) {
         mc_pending_mod_t m = pending->items[i];
         int32_t cx = 0, cz = 0;
@@ -764,6 +790,9 @@ static void *worker_main(void *arg) {
             continue;
         }
 
+        /* Workers never publish chunks directly into the live world map. They
+         * produce a fully initialized chunk, then hand it back through the done
+         * queue so the main tick can integrate it deterministically. */
         bool generated = false;
         bool normalized_on_load = false;
 
@@ -1059,6 +1088,8 @@ int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int
         *out_state_id = w->ids.air;
         return 0;
     }
+    /* Strict variant used by protocol code that must distinguish "air" from
+     * "chunk not loaded yet". */
     mc_chunk_t *chunk = mc_world_get_chunk(w, cx, cz, UINT32_MAX);
     if (!chunk) return 1;
     *out_state_id = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
@@ -1080,6 +1111,9 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
         mc_chunk_t *chunk = e->chunk;
         int32_t old = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
         if (old == state_id) return 0;
+        /* For READY chunks, mutate memory first and record a broadcast update
+         * from that final state. Network code should never need to re-derive
+         * what changed by re-reading the chunk later in the tick. */
         if (mc_chunk_set_block(chunk, lx, y, lz, (mc_global_state_id_t)state_id) != 0) return -1;
         chunk->dirty = true;
         if (mc_world_debug_container_match(w, x, y, z) &&
@@ -1107,6 +1141,8 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
         e->pending = (mc_pending_mods_t *)calloc(1, sizeof(*e->pending));
         if (!e->pending) return -1;
     }
+    /* Writes against non-ready chunks are accepted optimistically and replayed
+     * once the worker hands the chunk back to the main thread. */
     return pending_mods_push(e->pending, (mc_pending_mod_t){x, y, z, state_id});
 }
 
@@ -1159,6 +1195,9 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
     if (!w) return;
     w->tick_count++;
 
+    /* 1) Integrate worker results and any writes that piled up while those
+     * chunks were loading. Gameplay code after this point sees only READY
+     * chunks or explicit "not ready" answers. */
     mc_chunk_done_t *done = done_queue_drain(w);
     while (done) {
         mc_chunk_done_t *next = done->next;
@@ -1192,6 +1231,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
         done = next;
     }
 
+    /* 2) Save at a bounded rate so large worlds do not monopolize the tick. */
     if (w->world_path && *w->world_path && w->chunk_list_len > 0) {
         size_t scanned = 0;
         size_t attempts = 0;
@@ -1219,6 +1259,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
         }
     }
 
+    /* 3) Export debug/perf counters after all integration and save work. */
     if (stats) {
         stats->chunk_count = w->chunk_list_len;
         stats->updates_len = w->updates_len;

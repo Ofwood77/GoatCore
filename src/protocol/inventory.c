@@ -1,3 +1,9 @@
+/*
+ * Inventory/container primitives shared by protocol handlers, gameplay code,
+ * and persistence. This file deliberately stays small and mechanical: it owns
+ * slot lifetime, stack movement, and the subset of the item-stack protocol we
+ * currently preserve, while higher-level click semantics stay in play.c.
+ */
 #include "mc_inventory.h"
 #include "mc_protocol.h"
 #include "generated_minecraft_ids.h"
@@ -44,6 +50,8 @@ int mc_slot_copy(mc_slot_t *dst, const mc_slot_t *src) {
     mc_slot_t tmp = {0};
     tmp = *src;
     tmp.components = NULL;
+    /* Slots may own opaque component blobs. Copy through a temporary first so a
+     * failed allocation does not partially destroy the destination. */
     if (src->components_len > 0) {
         tmp.components = (uint8_t *)malloc(src->components_len);
         if (!tmp.components) return -1;
@@ -94,6 +102,8 @@ void mc_container_instance_init(mc_container_instance_t *container, mc_container
     if (kind == MC_CONTAINER_KIND_FURNACE || kind == MC_CONTAINER_KIND_SMOKER || kind == MC_CONTAINER_KIND_BLAST_FURNACE) {
         container->slot_count = 3;
     }
+    /* state_id starts at 1 to match vanilla container revision semantics:
+     * "0" is often interpreted by clients as an uninitialized/open race. */
     container->state_id = 1;
 }
 
@@ -155,6 +165,9 @@ bool mc_inventory_can_absorb_slot(const mc_inventory_t *inv, const mc_slot_t *sr
     if (!src->present || src->count <= 0 || src->item_id <= 0) return true;
 
     remaining = src->count;
+    /* Mirror the insertion policy used by quick-move: prefer topping up the
+     * hotbar first, then the main inventory, so the dry-run matches the real
+     * absorb step below. */
     for (int pass = 0; pass < 2 && remaining > 0; pass++) {
         int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
         int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
@@ -191,6 +204,9 @@ int mc_inventory_try_absorb_slot(mc_inventory_t *inv, mc_slot_t *src) {
 
     remaining = src->count;
 
+    /* First merge with compatible stacks, then spill into empty slots. Keeping
+     * the two phases separate makes the result deterministic for quick-move and
+     * keeps mc_inventory_can_absorb_slot() truthful. */
     for (int pass = 0; pass < 2 && remaining > 0; pass++) {
         int first = (pass == 0) ? MC_PLAYER_HOTBAR_BASE : 9;
         int last = (pass == 0) ? (MC_PLAYER_HOTBAR_BASE + MC_PLAYER_HOTBAR_SIZE - 1)
@@ -270,6 +286,9 @@ int mc_slot_read_net(const uint8_t *buf, size_t len, size_t *pos, mc_slot_t *out
     if (read_varint_at(buf, len, pos, &item_id) != 0) return -1;
     if (read_varint_at(buf, len, pos, &added) != 0) return -1;
     if (read_varint_at(buf, len, pos, &removed) != 0) return -1;
+    /* The project currently supports only "simple" stacks on the wire. Reject
+     * component mutations here so higher layers do not accidentally accept data
+     * they cannot persist or replay faithfully. */
     if (item_id <= 0) return -1;
     if (added != 0 || removed != 0) return -1;
 
@@ -289,6 +308,8 @@ int mc_slot_write_net(uint8_t *buf, size_t cap, size_t *pos, const mc_slot_t *sl
     if (!slot || !slot->present || slot->count <= 0 || slot->item_id <= 0) {
         return write_varint_at(buf, cap, pos, 0);
     }
+    /* Symmetric with mc_slot_read_net(): do not serialize components until the
+     * rest of the codebase knows how to preserve them end to end. */
     if (slot->added_component_count != 0 || slot->removed_component_count != 0 || slot->components_len != 0) return -1;
     if (write_varint_at(buf, cap, pos, slot->count) != 0) return -1;
     if (write_varint_at(buf, cap, pos, slot->item_id) != 0) return -1;

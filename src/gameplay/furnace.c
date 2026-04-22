@@ -1,3 +1,8 @@
+/*
+ * Furnace/smoker/blast-furnace gameplay rules shared by open container windows
+ * and block-entity ticking. The core state machine lives here so both paths
+ * agree on burn time, cook progress, and output rules.
+ */
 #include "mc_furnace.h"
 
 #define MC_FURNACE_MAX_STACK 64
@@ -105,6 +110,9 @@ int mc_furnace_tick(mc_container_instance_t *container, mc_furnace_machine_t mac
     const mc_cooking_recipe_t *recipe = NULL;
     bool dirty = false;
 
+    /* burn_time counts down every tick once fuel has been accepted. The pair
+     * burn_time/burn_duration is kept so the UI can render a stable progress
+     * bar without reverse-engineering the last fuel item. */
     if (container->furnace_burn_time > 0) {
         container->furnace_burn_time--;
         dirty = true;
@@ -133,6 +141,9 @@ int mc_furnace_tick(mc_container_instance_t *container, mc_furnace_machine_t mac
             container->furnace_cook_duration = cook_duration;
             dirty = true;
         }
+        /* cook_time only advances while the machine is both lit and able to
+         * accept output. The moment output blocks, progress snaps back to the
+         * current vanilla-like baseline instead of being left half-valid. */
         container->furnace_cook_time++;
         dirty = true;
         if (container->furnace_cook_time >= container->furnace_cook_duration) {
@@ -183,6 +194,9 @@ static mc_container_kind_t container_kind_for_machine(mc_furnace_machine_t machi
 int mc_furnace_tick_block_entity(mc_block_entity_t *entity, mc_furnace_machine_t machine) {
     if (!entity || machine == MC_FURNACE_MACHINE_NONE) return 0;
 
+    /* Reuse the container tick logic by copying the persisted block-entity
+     * state into a temporary runtime container, then write it back only if the
+     * tick produced an observable change. */
     mc_container_instance_t container;
     mc_container_instance_init(&container, container_kind_for_machine(machine), 0, 0, 0);
     container.slot_count = MC_FURNACE_SLOT_COUNT;

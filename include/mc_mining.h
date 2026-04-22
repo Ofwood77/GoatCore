@@ -16,6 +16,11 @@
 #define MC_MINING_BREAK_GRACE_REQUIRED_DIVISOR 3
 #define MC_MINING_UNKNOWN_HARDNESS_X100 100
 
+/* Snapshot of the server's mining decision for one block/tool combination.
+ * The important distinction is:
+ * - breakable: the block may ever be removed
+ * - required_ms: how long the current held item must mine before STOP is valid
+ * - can_harvest: whether a successful break may yield the default useful drop */
 typedef struct {
     bool known_hardness;
     bool breakable;
@@ -32,6 +37,9 @@ typedef struct {
     int64_t required_ms;
 } mc_mining_break_info_t;
 
+/* Runtime mining session frozen at START_DESTROY_BLOCK. STOP validation should
+ * only compare the live world against this snapshot; it should not recompute
+ * tool rules from scratch. */
 typedef struct {
     bool active;
     int32_t x;
@@ -55,6 +63,7 @@ typedef enum {
 
 bool mc_mining_state_is_air(int32_t state_id);
 int32_t mc_mining_slot_item_id(const mc_slot_t *slot);
+/* Builds the full authoritative break/harvest decision for the held item. */
 mc_mining_break_info_t mc_mining_break_info(int32_t state_id, const mc_slot_t *held_item);
 int64_t mc_mining_break_grace_ms(int64_t required_ms);
 int64_t mc_mining_required_elapsed_ms(const mc_mining_break_info_t *info);
@@ -64,6 +73,8 @@ void mc_mining_session_clear(mc_mining_session_t *session);
 void mc_mining_session_start(mc_mining_session_t *session, int32_t x, int32_t y, int32_t z, int32_t state_id,
                              int64_t started_ms, int32_t tool_item_id,
                              const mc_mining_break_info_t *break_info);
+/* Returns the reason a STOP packet was refused, which is useful both for logs
+ * and for choosing the right resync path in the protocol handler. */
 mc_mining_stop_result_t mc_mining_session_validate_stop(const mc_mining_session_t *session, int32_t x, int32_t y,
                                                         int32_t z, int32_t current_state_id,
                                                         int32_t current_tool_item_id, int64_t now_ms,

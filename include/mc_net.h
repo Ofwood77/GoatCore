@@ -13,6 +13,7 @@
 
 #define MC_BUF_CAP 8192
 
+/* Simple growable byte buffer used for framed protocol IO. */
 typedef struct {
     uint8_t *data;
     size_t len;
@@ -20,12 +21,15 @@ typedef struct {
     size_t rpos;
 } mc_buf_t;
 
+/* Pending chunk-stream request remembered per connection. */
 typedef struct {
     int32_t cx;
     int32_t cz;
     uint32_t prio;
 } mc_chunk_req_t;
 
+/* Server-side view of another player as seen by one connection. This keeps
+ * stream state and the last sent transform separate from persisted player data. */
 typedef struct {
     int32_t entity_id;
     uint8_t uuid[16];
@@ -51,6 +55,7 @@ struct mc_conn {
     mc_server_t *server;
     atomic_int refcount;
 
+    /* Login/config/play identity and lifecycle flags. */
     char username[17];
     uint8_t uuid[16];
     bool has_uuid;
@@ -61,6 +66,8 @@ struct mc_conn {
     bool play_init_sent;
     bool play_ready;
 
+    /* Runtime gameplay state mirrored from mc_player_data plus transient
+     * per-connection systems such as item use and keepalive tracking. */
     int32_t entity_id;
     int32_t gamemode;
     float health;
@@ -82,6 +89,7 @@ struct mc_conn {
 
     mc_mining_session_t mining;
 
+    /* Authoritative movement/runtime data. */
     double x;
     double y;
     double z;
@@ -101,7 +109,7 @@ struct mc_conn {
 
     struct mc_conn *next;
 
-    /* Chunk streaming state (PLAY) */
+    /* Chunk streaming and prediction-ack state (PLAY). */
     bool has_center_chunk;
     int32_t center_cx;
     int32_t center_cz;

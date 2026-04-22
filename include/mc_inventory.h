@@ -10,6 +10,8 @@
 #define MC_PLAYER_HOTBAR_SIZE 9
 #define MC_CONTAINER_SLOT_COUNT 27
 
+/* Coarse-grained container kinds used by gameplay code and persistence.
+ * Protocol window types are resolved separately in play.c. */
 typedef enum {
     MC_CONTAINER_KIND_NONE = 0,
     MC_CONTAINER_KIND_CHEST = 1,
@@ -20,6 +22,9 @@ typedef enum {
     MC_CONTAINER_KIND_BLAST_FURNACE = 6,
 } mc_container_kind_t;
 
+/* Runtime representation of a stack. Components are copied verbatim for the
+ * subset of items we preserve; many gameplay paths still operate on "simple"
+ * slots with no extra components. */
 typedef struct {
     bool present;
     int32_t item_id;
@@ -31,6 +36,8 @@ typedef struct {
     size_t components_len;
 } mc_slot_t;
 
+/* Player inventory in network slot order, plus the cursor carried by container
+ * interactions. state_id is the server-side revision used for resync packets. */
 typedef struct {
     mc_slot_t slots[MC_PLAYER_SLOT_COUNT];
     mc_slot_t cursor_slot;
@@ -48,6 +55,9 @@ typedef struct {
 
 typedef mc_window_t mc_container_t;
 
+/* Concrete container state kept on the server for a block entity or an open
+ * virtual screen. Furnace timing lives here so gameplay code can tick one
+ * structure instead of special-casing block entities everywhere else. */
 typedef struct {
     mc_container_kind_t kind;
     int32_t x;
@@ -63,6 +73,7 @@ typedef struct {
     mc_slot_t slots[MC_CONTAINER_SLOT_COUNT];
 } mc_container_instance_t;
 
+/* Window bookkeeping owned by a connection while a screen is open. */
 typedef struct {
     bool open;
     int32_t window_id;
@@ -71,6 +82,8 @@ typedef struct {
     mc_container_instance_t *container;
 } mc_active_window_t;
 
+/* Persisted per-player gameplay state. Connection-local transient fields stay
+ * in mc_conn; this struct is what survives reconnects and disk saves. */
 typedef struct mc_player_data {
     uint8_t uuid[16];
     bool has_uuid;

@@ -1,3 +1,13 @@
+/*
+ * PLAY-state protocol handler. This is the widest integration point in the
+ * server: it translates packet semantics into calls into world, inventory,
+ * crafting, furnace, mining, player persistence, and chunk streaming.
+ *
+ * Most business rules live in smaller gameplay modules. The code here is
+ * primarily about protocol shape, resync policy, and ordering: when to ACK a
+ * client prediction, when to send direct block/window corrections, and when to
+ * defer to the next server tick.
+ */
 #include "mc_protocol.h"
 #include "mc_inventory.h"
 #include "mc_block_drops.h"
@@ -1585,12 +1595,18 @@ static int send_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
 static int queue_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
     if (!c) return -1;
     if (sequence < 0) return 0;
+    /* Vanilla acks block-change predictions on the tick, not inline with the
+     * mutating packet handler. Keeping only the max sequence preserves order
+     * while avoiding ACK/write races that can look like visual rollback. */
     if (sequence > c->block_ack_sequence) c->block_ack_sequence = sequence;
     return 0;
 }
 
 static int flush_queued_block_changed_ack_packet(mc_conn_t *c) {
     if (!c || c->block_ack_sequence < 0) return 0;
+    /* Flush from proto_play_tick() after this tick's world/window updates have
+     * already been queued, so the client sees the authoritative state before
+     * its prediction is acknowledged. */
     int32_t sequence = c->block_ack_sequence;
     if (send_block_changed_ack_packet(c, sequence) != 0) return -1;
     c->block_ack_sequence = -1;
@@ -2649,6 +2665,8 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
 }
 
 static int reject_block_destroy(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id, int32_t seq) {
+    /* Refusals resync the visible block immediately, then defer the prediction
+     * ACK so the client replays against the server's current truth. */
     if (state_id >= 0 && send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
     return queue_block_changed_ack_packet(c, seq);
 }
@@ -2658,6 +2676,9 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
                                      int64_t now_ms) {
     if (!c || !world || !ids) return -1;
 
+    /* Container-like blocks have extra teardown rules (contents, block entity,
+     * chest partner visuals). Let that path decide whether a full chunk resend
+     * is safer than a single block update. */
     int brc = break_container_block(c, x, y, z, state_id);
     if (brc < 0) return -1;
     if (brc == 0) {
@@ -2668,6 +2689,10 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     if (!mc_mining_state_is_air(state_id)) {
         mc_block_drop_t drop = {-1, 0};
         bool have_drop = mc_block_drop_resolve_default(state_id, allow_default_drop, x, y, z, now_ms, &drop);
+        /* Mutate world state before sending the direct block update so any
+         * later resend/reload path reads the same final state. Drops are
+         * resolved separately: a block may break successfully yet yield no
+         * useful item when harvesting conditions are not met. */
         (void)mc_world_remove_block_entity(world, x, y, z);
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
         if (mc_world_flush_block(world, x, y, z) != 0) return -1;
@@ -3604,6 +3629,9 @@ static int handle_window_click(mc_conn_t *c, const mc_frame_t *frame) {
     (void)state_id;
     (void)mouse_button;
 
+    /* Container click packets are treated as proposals, not trusted facts. For
+     * the supported click modes we apply bounded server-side mutations, then
+     * rebuild result slots and resync the full authoritative window state. */
     bool clicked_player_crafting_result = window_id == 0 && slot == PLAYER_CRAFTING_RESULT_SLOT;
     bool clicked_active_crafting_result =
         window_id != 0 && c->active_window.open && window_id == c->active_window.window_id &&
@@ -3619,6 +3647,9 @@ static int handle_window_click(mc_conn_t *c, const mc_frame_t *frame) {
     }
 
     if (container_input == MC_CONTAINER_INPUT_THROW && slot >= 0) {
+        /* THROW is the one click mode where the packet itself does not carry
+         * the spawned entity. Snapshot the slot before mutation so we can infer
+         * the dropped delta after the authoritative window update. */
         int snapshot_rc = snapshot_window_slot(c, window_id, slot, &throw_before);
         if (snapshot_rc < 0) {
             RETURN_WINDOW_CLICK(-1);
@@ -3655,6 +3686,9 @@ static int handle_window_click(mc_conn_t *c, const mc_frame_t *frame) {
             if (move_rc == 0 && sync_active_container_window(c) != 0) RETURN_WINDOW_CLICK(-1);
             RETURN_WINDOW_CLICK(0);
         }
+        /* For the generic fallback path, copy only the slots the protocol says
+         * changed, then recompute any derived state (crafting result, dirty
+         * flags, persistence revisions) on the server. */
         for (int32_t i = 0; i < changed_count; i++) {
             int16_t location = -1;
             mc_slot_t item = {0};
@@ -4944,6 +4978,9 @@ static int send_sent_chunks_post_updates(mc_conn_t *c) {
     if (!world) return -1;
     if (!c->sent_chunks.cap || !c->sent_chunks.states) return 0;
 
+    /* ChunkData packets do not cover every live block-entity refresh we need.
+     * After the initial stream, resend container-bearing blocks so the client
+     * has both the latest block state and the matching block-entity payload. */
     for (size_t i = 0; i < c->sent_chunks.cap; i++) {
         if (c->sent_chunks.states[i] != 1) continue;
         int64_t key = c->sent_chunks.keys[i];
@@ -5596,6 +5633,10 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     const mc_slot_t *held_item = selected_mainhand_slot(c);
 
                     if (action == PLAYER_ACTION_START_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
+                        /* START freezes the authoritative mining session. From
+                         * here on, STOP should validate against this snapshot
+                         * instead of recomputing from whatever the client sends
+                         * later. */
                         mc_mining_session_clear(&c->mining);
                         mc_mining_break_info_t break_info = mc_mining_break_info(state_id, held_item);
                         if (!break_info.breakable) {
@@ -5612,6 +5653,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     }
 
                     if (action == PLAYER_ACTION_ABORT_DESTROY_BLOCK) {
+                        /* ABORT is a visible correction path: drop the frozen
+                         * session and immediately restate the current block. */
                         mc_mining_session_clear(&c->mining);
                         return reject_block_destroy(c, x, y, z, state_id, seq);
                     }
@@ -5848,6 +5891,9 @@ int proto_play_tick(mc_conn_t *c, int64_t now_ms) {
     if (!c || c->state != MC_STATE_PLAY) return 0;
     if (!c->play_init_sent) return 0;
 
+    /* Block-change ACKs are intentionally deferred to the tick so client-side
+     * prediction is acknowledged only after this tick's authoritative updates
+     * have been queued. */
     if (flush_queued_block_changed_ack_packet(c) != 0) return -1;
 
     if (c->awaiting_keepalive) {

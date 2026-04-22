@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Per-tick block changes to broadcast after the world has been mutated. */
 typedef struct {
     int32_t x;
     int32_t y;
@@ -15,6 +16,8 @@ typedef struct {
     int32_t state_id;
 } mc_block_update_t;
 
+/* Cached runtime IDs for the handful of blocks that world generation and
+ * gameplay touch constantly. */
 typedef struct {
     int32_t air;
     int32_t stone;
@@ -31,6 +34,8 @@ typedef struct {
 typedef struct mc_world mc_world_t;
 typedef bool (*mc_world_container_open_fn)(void *ctx, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z);
 
+/* Optional counters for the main tick loop so server.c can explain where time
+ * is spent without teaching the world module about logging policy. */
 typedef struct {
     size_t done_seen;
     size_t done_integrated;
@@ -73,11 +78,15 @@ bool mc_world_debug_container_match(const mc_world_t *w, int32_t x, int32_t y, i
 void mc_world_set_generation_params(mc_world_t *w, float freq, int32_t base_y, int32_t amp);
 void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk);
 
-/* Returns the chunk if it is ready in memory; otherwise enqueues an async load/gen and returns NULL. */
+/* Returns the chunk if it is ready in memory; otherwise enqueues an async
+ * load/gen and returns NULL. Callers that need a deterministic answer should
+ * use mc_world_get_block_ready instead of treating NULL as air. */
 mc_chunk_t *mc_world_get_chunk(mc_world_t *w, int32_t cx, int32_t cz, uint32_t priority);
 
 int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
-/* Returns 0 with a state when the owning chunk is ready, 1 when it is queued/loading, and -1 on error. */
+/* Returns 0 with a state when the owning chunk is ready, 1 when it is
+ * queued/loading, and -1 on error. This is the strict read used by mining and
+ * other protocol flows that must not guess when the world is still loading. */
 int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
