@@ -1,31 +1,102 @@
-# 🚀 Giga-Server C (Minecraft 26.1.1)
+# OfwoodCore
 
-A highly performant Minecraft server written entirely in C (C11) from scratch. This project aims to push the boundaries of Vanilla performance by ditching Java's Object-Oriented Programming (OOP) in favor of a strict **Data-Oriented Design (DOD)** architecture.
+OfwoodCore is an experimental Minecraft 26.1.1 server implementation written entirely in C.
 
-The ultimate goal: Zero garbage collection, zero memory fragmentation, and a minimal RAM footprint through aggressive bit-packing.
+The goal of the project is to understand and control the full server stack — from networking to gameplay — without relying on the JVM or the official server codebase.
 
-## ✨ Current Features (Phase 2 Completed)
+---
 
-* **Protocol 26.1.1 Support (Protocol 775):** Complete implementation of the network state machine (Handshake -> Login -> Configuration -> Play).
-* **RAM Engine (Paletted Container):** In-memory chunk storage with dynamic resizing (0-bit, 4-bit, or 15-bit fallback). The network layer reads this structure directly for "zero-copy" serialization.
-* **Ultra-fast Anvil Reader:** NBT parsing of Vanilla save files (`.mca`) via a linear **Arena Allocator** (zero `malloc` calls per tag). Strict `DataVersion` validation (4786).
-* **Block Entity Store (Spatial Isolation):** Spatial hash table (*Open Addressing*) to completely separate entities (chests, signs) from the global block grid.
-* **1:1 Vanilla Synchronization:** Automatic C code generation from official Mojang data reports (`registries.json`, `blocks.json`) to guarantee 100% accurate network IDs and Item -> BlockState mapping.
-* **Built-in `mc_recorder` tool:** A custom "Man-in-the-Middle" network tool to capture complex Vanilla packets (like registry blobs or Chunk Templates) for local reuse and testing.
+## Features
 
-## 🧠 Architecture (Data-Oriented Design)
+- Standalone implementation (not a fork, not a wrapper)
+- Modern protocol support (`26.1.1`, protocol `775`)
+- Server-authoritative architecture (20 TPS tick loop)
+- Non-blocking networking using `epoll`
+- Chunk streaming with async generation workers
+- Custom world and player persistence
+- Player inventory and containers (chest, furnace, etc.)
+- Crafting and cooking (MVP)
+- Health, hunger, death, and respawn systems
+- Item entities with basic physics
+- Server-authoritative mining (timing validation)
 
-This server is designed to fit snugly inside your CPU's L1/L2 caches. 
-* Physical block properties are heavily packed into `uint8_t` bitfields.
-* Complex blocks with directional properties and their placement/drop logic are resolved via a static lookup table generated at compile time, eliminating expensive runtime "overrides" and branching.
+---
 
-## 🛠️ Build & Run
+## Architecture
 
-### Prerequisites
-* A C compiler (GCC/Clang) with `C11` support.
-* `Python 3` (for the code generation toolchain).
-* `Make`.
+The server is structured around three main subsystems:
 
-### Instructions
+- Network thread  
+  Handles accept, socket I/O, packet decoding, and enqueues tasks.
 
-1. **Generate assets and compile
+- Tick thread (20 TPS)  
+  Executes gameplay logic, world updates, protocol handling, and outgoing flush.
+
+- World workers  
+  Handle chunk loading, generation, and Anvil fallback.
+
+This model ensures that all gameplay logic remains authoritative on the server side.
+
+---
+
+## Protocol
+
+Supported states:
+
+- Handshake
+- Status
+- Login (offline mode)
+- Configuration
+- Play
+
+The protocol is implemented manually via reverse engineering, including:
+
+- VarInt encoding/decoding
+- Custom packet framing
+- Partial compression support
+- Core PLAY packet handling
+
+---
+
+## World and Chunks
+
+- In-memory chunk management
+- Async chunk generation and loading
+- Anvil import support
+- Custom storage format (`.mcc`)
+- Autosave and eviction
+
+Current runtime format:
+
+- Flat storage using `block_state_id`
+- Full height range (-64 to 319)
+
+A future refactor toward section-based palettes is planned.
+
+---
+
+## Gameplay
+
+Currently implemented:
+
+- Player inventory
+- Containers (chest, furnace, etc.)
+- Crafting (2x2 and 3x3)
+- Cooking systems
+- Health, hunger, regeneration, death
+- Item drops
+
+### Mining
+
+- Server-side validation (`START / ABORT / STOP`)
+- Block hardness-based breaking time
+- Rejection of invalid client actions
+
+---
+
+## Performance
+
+The server includes built-in instrumentation:
+
+```bash
+MC_PERF=1 ./mc_server
