@@ -26,6 +26,7 @@ void proto_fill_offline_uuid(const char *username, uint8_t out[16]);
 int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_remove_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_send_difficulty(mc_conn_t *c);
+int proto_play_send_system_message(mc_conn_t *c, const char *text);
 int32_t proto_play_item_to_state(const mc_world_ids_t *ids, int32_t item_id);
 int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slot);
 int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch);

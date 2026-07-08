@@ -85,7 +85,7 @@ static int send_handshake(mc_conn_t *c, const char *host, uint16_t port) {
     size_t pos = 0;
 
     size_t n = 0;
-    if (varint_write(buf + pos, sizeof(buf) - pos, MC_PROTO_VERSION_1_21_1, &n) != 0) return -1;
+    if (varint_write(buf + pos, sizeof(buf) - pos, MC_PROTO_VERSION, &n) != 0) return -1;
     pos += n;
 
     size_t host_len = strlen(host);

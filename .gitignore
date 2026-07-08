@@ -1,11 +1,14 @@
 # Build artifacts
 *.o
 *.d
+node_modules/
 /mc_server
 /mc_recorder
 /mc_anvil_dump
 /mc_gen_bench
 /test_*
+__pycache__/
+*.pyc
 
 # Runtime-local state
 world/
@@ -24,13 +27,16 @@ mc_vania_asset/
 
 # Local diagnostics, AI/LLM notes and accidental shell-output fragments
 .codex
+.local/
 .ofwoodcore_notes/
 erreur reseau/
 PLAN*.md
 REPORT*.md
-docs/
+docs/*
+!docs/testing-minecraft-bot.md
 llm/
 reports/
+test-results/
 changed,*
 not staged for commit:
 tatus
@@ -39,6 +45,7 @@ tatus
 assets/*
 !assets/
 !assets/README.txt
+!assets/pp.png
 !assets/registry_packets_26_1_1.bin
 !assets/tags_packet_26_1_1.bin
 !assets/chunk_0_0_26_1_1.bin

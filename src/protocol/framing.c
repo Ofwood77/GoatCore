@@ -12,6 +12,14 @@ int mc_crypto_read(mc_conn_t *c, uint8_t *data, size_t len);
 int mc_crypto_write(mc_conn_t *c, const uint8_t *data, size_t len, mc_buf_t *out);
 #endif
 
+static bool debug_net_latency_enabled(void) {
+    const char *env = getenv("MC_DEBUG_NET_LATENCY");
+    return env && *env && strcmp(env, "0") != 0;
+}
+
+static int64_t frame_now_ms(void) {
+    return mc_now_us() / 1000;
+}
 
 static int decompress_payload(const uint8_t *src, size_t src_len, uint8_t *dst, size_t dst_len) {
     z_stream strm;
@@ -149,7 +157,10 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
         return -1;
     }
 
+    size_t out_before = 0;
+    size_t out_after = 0;
     pthread_mutex_lock(&c->out_lock);
+    out_before = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     if (buf_write(&c->out, len_buf, len_bytes) != 0) {
         pthread_mutex_unlock(&c->out_lock);
         free(body);
@@ -157,7 +168,13 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
     }
 
     int rc = mc_crypto_write(c, body, body_len, &c->out);
+    out_after = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     pthread_mutex_unlock(&c->out_lock);
+    if (debug_net_latency_enabled()) {
+        log_info("net latency: t=%lld queue_out fd=%d player=%s state=%d packet=0x%02X payload=%zu framed=%zu out_before=%zu out_after=%zu rc=%d",
+                 (long long)frame_now_ms(), c->fd, c->username[0] ? c->username : "(unknown)",
+                 atomic_load(&c->state), packet_id, payload_len, len_bytes + body_len, out_before, out_after, rc);
+    }
     free(body);
     return rc;
 }

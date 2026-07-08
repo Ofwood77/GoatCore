@@ -7,7 +7,17 @@ import time
 import zlib
 
 
-MC_PROTO_VERSION_1_21_1 = 767
+MC_PROTO_VERSION = 775
+MC_GAME_VERSION = "26.1.1"
+
+PLAY_CLIENTBOUND_DISCONNECT = 0x20
+PLAY_CLIENTBOUND_KEEP_ALIVE = 0x2C
+PLAY_CLIENTBOUND_LOGIN = 0x31
+PLAY_CLIENTBOUND_PING = 0x3D
+PLAY_CLIENTBOUND_PLAYER_POSITION = 0x48
+PLAY_SERVERBOUND_ACCEPT_TELEPORTATION = 0x00
+PLAY_SERVERBOUND_KEEP_ALIVE = 0x1C
+PLAY_SERVERBOUND_PONG = 0x2D
 
 
 def encode_varint(value: int) -> bytes:
@@ -122,7 +132,7 @@ def read_frame(sock: socket.socket, compression_threshold: int) -> tuple[int, by
 
 def send_handshake(sock: socket.socket, host: str, port: int, next_state: int) -> None:
     payload = (
-        encode_varint(MC_PROTO_VERSION_1_21_1)
+        encode_varint(MC_PROTO_VERSION)
         + encode_string(host)
         + struct.pack(">H", port)
         + encode_varint(next_state)
@@ -212,18 +222,20 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     continue  # registry data
 
             if state == "PLAY":
-                if pid == 0x1D:
+                if pid == PLAY_CLIENTBOUND_DISCONNECT:
                     reason = read_string_payload(payload)
                     raise RuntimeError(f"play disconnect: {reason}")
-                if pid == 0x2B:
+                if pid == PLAY_CLIENTBOUND_LOGIN:
                     got_join_game = True
-                if pid == 0x26 and len(payload) == 8:
-                    send_packet(sock, 0x18, payload, compression_threshold=compression_threshold)  # KeepAlive response
-                if pid == 0x40:
-                    if len(payload) < (8 * 3 + 4 * 2 + 1):
+                if pid == PLAY_CLIENTBOUND_KEEP_ALIVE and len(payload) == 8:
+                    send_packet(sock, PLAY_SERVERBOUND_KEEP_ALIVE, payload, compression_threshold=compression_threshold)
+                if pid == PLAY_CLIENTBOUND_PING and len(payload) == 4:
+                    send_packet(sock, PLAY_SERVERBOUND_PONG, payload, compression_threshold=compression_threshold)
+                if pid == PLAY_CLIENTBOUND_PLAYER_POSITION:
+                    if len(payload) < 1:
                         raise ValueError("sync pos payload too short")
-                    teleport_id, _ = decode_varint_from_bytes(payload, 8 * 3 + 4 * 2 + 1)
-                    send_packet(sock, 0x00, encode_varint(teleport_id), compression_threshold=compression_threshold)
+                    teleport_id, _ = decode_varint_from_bytes(payload, 0)
+                    send_packet(sock, PLAY_SERVERBOUND_ACCEPT_TELEPORTATION, encode_varint(teleport_id), compression_threshold=compression_threshold)
                     got_sync_pos = True
 
                 if got_join_game and got_sync_pos:
@@ -236,7 +248,7 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Minimal protocol ping for mc_server (1.21.1).")
+    parser = argparse.ArgumentParser(description=f"Minimal protocol ping for mc_server ({MC_GAME_VERSION}).")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_status = sub.add_parser("status", help="Handshake STATUS + request + ping/pong")

@@ -1,0 +1,5 @@
+{
+  "name": "qa",
+  "description": "Connexion, chat, mouvement paquet, gamemode creative/survival, degats, inventaire et chest optionnel via commandes !qa.",
+  "steps": ["connect", "spawn", "chat", "qa_state", "move_packet", "creative", "survival", "damage", "heal", "give", "chest_if_destructive", "quit"]
+}

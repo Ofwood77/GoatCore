@@ -1,0 +1,17 @@
+{
+  "name": "goatcore-minecraft-e2e-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mineflayer E2E QA bot for GoatCore Minecraft server testing.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node qa-bot.js"
+  },
+  "dependencies": {
+    "mineflayer": "4.37.1",
+    "mineflayer-pathfinder": "2.4.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
