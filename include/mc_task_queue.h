@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <pthread.h>
 #include "mc_net.h"
 
@@ -31,5 +32,6 @@ int mc_task_queue_init(mc_task_queue_t *q);
 void mc_task_queue_destroy(mc_task_queue_t *q);
 void mc_task_queue_push(mc_task_queue_t *q, mc_task_t *task);
 mc_task_t *mc_task_queue_drain(mc_task_queue_t *q);
+bool mc_task_queue_wait_until(mc_task_queue_t *q, int64_t deadline_us);
 
 #endif /* MC_TASK_QUEUE_H */

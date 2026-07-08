@@ -38,6 +38,8 @@
 #define PKT_PLAY_ENTITY_METADATA MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_DATA
 #define PKT_PLAY_ENTITY_DESTROY MC_PKT_PLAY_CLIENTBOUND_REMOVE_ENTITIES
 #define PKT_PLAY_ENTITY_TELEPORT MC_PKT_PLAY_CLIENTBOUND_TELEPORT_ENTITY
+#define PKT_PLAY_ENTITY_VELOCITY MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_MOTION
+#define PKT_PLAY_TAKE_ITEM_ENTITY MC_PKT_PLAY_CLIENTBOUND_TAKE_ITEM_ENTITY
 #define WORLD_EVICT_PERIOD_TICKS 20
 #define WORLD_EVICT_BUDGET 32
 #define ITEM_ENTITY_TTL_MS 30000
@@ -110,6 +112,27 @@ static const char *state_name(mc_proto_state_t state) {
         case MC_STATE_CONFIGURATION: return "CONFIG";
         default: return "UNKNOWN";
     }
+}
+
+static bool debug_env_enabled(const char *name) {
+    const char *env = name ? getenv(name) : NULL;
+    return env && *env && strcmp(env, "0") != 0;
+}
+
+static bool debug_items_enabled(void) {
+    return debug_env_enabled("MC_DEBUG_ITEMS");
+}
+
+static bool debug_pickup_enabled(void) {
+    return debug_env_enabled("MC_DEBUG_PICKUP");
+}
+
+static bool debug_net_latency_enabled(void) {
+    return debug_env_enabled("MC_DEBUG_NET_LATENCY");
+}
+
+static bool debug_broadcast_enabled(void) {
+    return debug_env_enabled("MC_DEBUG_BROADCAST");
 }
 
 static const char *serverbound_packet_name(mc_proto_state_t state, int32_t id) {
@@ -708,12 +731,63 @@ static int send_item_entity_teleport(mc_conn_t *c, const mc_item_entity_t *item)
     return conn_write_packet(c, PKT_PLAY_ENTITY_TELEPORT, buf, pos, -1);
 }
 
+static bool item_entity_has_motion(const mc_item_entity_t *item) {
+    if (!item) return false;
+    return fabs(item->vx) > 0.0001 || fabs(item->vy) > 0.0001 || fabs(item->vz) > 0.0001;
+}
+
+static int16_t entity_velocity_short(double velocity) {
+    double scaled = velocity * 8000.0;
+    if (scaled > 32767.0) return 32767;
+    if (scaled < -32768.0) return -32768;
+    return (int16_t)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
+
+static int send_item_entity_velocity(mc_conn_t *c, const mc_item_entity_t *item) {
+    if (!c || !item) return -1;
+    uint8_t buf[32];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, item->entity_id) != 0) return -1;
+    if (w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vx)) != 0 ||
+        w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vy)) != 0 ||
+        w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vz)) != 0) {
+        return -1;
+    }
+    return conn_write_packet(c, PKT_PLAY_ENTITY_VELOCITY, buf, pos, -1);
+}
+
 static int broadcast_item_entity_teleport(mc_server_t *s, const mc_item_entity_t *item) {
     if (!s || !item) return -1;
     int rc = 0;
     for (mc_conn_t *c = s->conns; c; c = c->next) {
         if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
         if (send_item_entity_teleport(c, item) != 0) {
+            conn_close(c);
+            rc = -1;
+        }
+    }
+    return rc;
+}
+
+static int send_take_item_entity(mc_conn_t *c, int32_t item_entity_id, int32_t collector_entity_id, int32_t count) {
+    if (!c) return -1;
+    uint8_t buf[32];
+    size_t pos = 0;
+    if (count < 1) count = 1;
+    if (w_varint(buf, sizeof(buf), &pos, item_entity_id) != 0 ||
+        w_varint(buf, sizeof(buf), &pos, collector_entity_id) != 0 ||
+        w_varint(buf, sizeof(buf), &pos, count) != 0) {
+        return -1;
+    }
+    return conn_write_packet(c, PKT_PLAY_TAKE_ITEM_ENTITY, buf, pos, -1);
+}
+
+static int broadcast_take_item_entity(mc_server_t *s, int32_t item_entity_id, int32_t collector_entity_id, int32_t count) {
+    if (!s) return -1;
+    int rc = 0;
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
+        if (send_take_item_entity(c, item_entity_id, collector_entity_id, count) != 0) {
             conn_close(c);
             rc = -1;
         }
@@ -732,6 +806,13 @@ static int send_item_entity_destroy(mc_conn_t *c, int32_t entity_id) {
 static void destroy_item_entity_at(mc_server_t *s, size_t idx) {
     if (!s || idx >= s->item_entities_len) return;
     int32_t entity_id = s->item_entities[idx].entity_id;
+    int32_t item_id = s->item_entities[idx].slot.present ? s->item_entities[idx].slot.item_id : -1;
+    int32_t count = s->item_entities[idx].slot.present ? s->item_entities[idx].slot.count : 0;
+    if (debug_items_enabled()) {
+        const char *item_name = item_id >= 0 ? mc_minecraft_item_name(item_id) : NULL;
+        log_info("items debug: t=%lld destroy eid=%d item=%s(%d) count=%d",
+                 (long long)now_ms(), entity_id, item_name ? item_name : "(empty)", item_id, count);
+    }
     for (mc_conn_t *c = s->conns; c; c = c->next) {
         if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
         if (send_item_entity_destroy(c, entity_id) != 0) conn_close(c);
@@ -902,6 +983,13 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
     while (idx < s->item_entities_len) {
         mc_item_entity_t *item = &s->item_entities[idx];
         if (item->expires_at_ms <= now) {
+            if (debug_items_enabled()) {
+                const char *item_name = item->slot.present ? mc_minecraft_item_name(item->slot.item_id) : NULL;
+                log_info("items debug: t=%lld expire eid=%d item=%s(%d) count=%d",
+                         (long long)now_ms(), item->entity_id, item_name ? item_name : "(empty)",
+                         item->slot.present ? item->slot.item_id : -1,
+                         item->slot.present ? item->slot.count : 0);
+            }
             destroy_item_entity_at(s, idx);
             continue;
         }
@@ -977,12 +1065,32 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
                 double dist_sq = dx * dx + dy * dy + dz * dz;
                 if (dist_sq > ITEM_ENTITY_PICKUP_RADIUS_SQ) continue;
 
+                int32_t item_id = item->slot.present ? item->slot.item_id : -1;
+                int32_t before_count = item->slot.present ? item->slot.count : 0;
+                if (debug_pickup_enabled()) {
+                    const char *item_name = item_id >= 0 ? mc_minecraft_item_name(item_id) : NULL;
+                    log_info("pickup debug: t=%lld attempt player=%s collector_eid=%d item_eid=%d item=%s(%d) count=%d dist_sq=%.3f delay=%d",
+                             (long long)now_ms(), c->username[0] ? c->username : "(unknown)", c->entity_id, item->entity_id,
+                             item_name ? item_name : "(empty)", item_id, before_count, dist_sq, item->pickup_delay_ticks);
+                }
                 int pickup_rc = proto_play_try_pickup_ground_slot(c, &item->slot);
                 if (pickup_rc < 0) {
                     conn_close(c);
                     continue;
                 }
                 if (pickup_rc == 0) continue;
+                int32_t after_count = item->slot.present ? item->slot.count : 0;
+                int32_t picked_count = before_count - after_count;
+                if (picked_count <= 0) picked_count = pickup_rc;
+                if (debug_pickup_enabled()) {
+                    const char *item_name = item_id >= 0 ? mc_minecraft_item_name(item_id) : NULL;
+                    log_info("pickup debug: t=%lld success player=%s collector_eid=%d item_eid=%d item=%s(%d) picked=%d remaining=%d",
+                             (long long)now_ms(), c->username[0] ? c->username : "(unknown)", c->entity_id, item->entity_id,
+                             item_name ? item_name : "(empty)", item_id, picked_count, after_count);
+                }
+                if (broadcast_take_item_entity(s, item->entity_id, c->entity_id, picked_count) != 0) {
+                    /* Individual failing viewers were closed; keep the authoritative pickup. */
+                }
                 if (!item->slot.present || item->slot.count <= 0) {
                     destroy_item_entity_at(s, idx);
                     destroyed = true;
@@ -1044,6 +1152,16 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
         task->payload = frame.payload.data;
         task->payload_len = frame.payload.len;
         task->enqueue_ms = now_ms();
+        if (debug_net_latency_enabled()) {
+            const char *packet_name = serverbound_packet_name(c->state, frame.packet_id);
+            pthread_mutex_lock(&c->out_lock);
+            size_t out_pending = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
+            pthread_mutex_unlock(&c->out_lock);
+            log_info("net latency: t=%lld recv_queue fd=%d player=%s state=%s id=0x%02X%s%s len=%zu out_pending=%zu",
+                     (long long)task->enqueue_ms, c->fd, c->username[0] ? c->username : "(unknown)",
+                     state_name(c->state), frame.packet_id, packet_name ? " " : "", packet_name ? packet_name : "",
+                     frame.payload.len, out_pending);
+        }
         conn_acquire(c);
         mc_task_queue_push(&s->task_queue, task);
         frame.payload.data = NULL;
@@ -1055,7 +1173,11 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
 }
 
 static int handle_client_write(mc_conn_t *c) {
+    int64_t start_ms = debug_net_latency_enabled() ? now_ms() : 0;
+    size_t before_pending = 0;
+    size_t flushed = 0;
     pthread_mutex_lock(&c->out_lock);
+    before_pending = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     while (c->out.rpos < c->out.len) {
         int flags = 0;
 #ifdef MSG_NOSIGNAL
@@ -1068,8 +1190,15 @@ static int handle_client_write(mc_conn_t *c) {
             return -1;
         }
         c->out.rpos += (size_t)n;
+        flushed += (size_t)n;
     }
     buf_compact(&c->out);
+    size_t remaining = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
+    if (debug_net_latency_enabled() && (before_pending > 0 || flushed > 0)) {
+        log_info("net latency: t=%lld flush fd=%d player=%s before=%zu flushed=%zu remaining=%zu",
+                 (long long)start_ms, c->fd, c->username[0] ? c->username : "(unknown)",
+                 before_pending, flushed, remaining);
+    }
     if (c->closing && c->out.len == 0) {
         pthread_mutex_unlock(&c->out_lock);
         return -1;
@@ -1078,7 +1207,7 @@ static int handle_client_write(mc_conn_t *c) {
     return 0;
 }
 
-static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
+static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
     (void)s;
     if (!task) return 0;
     mc_conn_t *c = task->conn;
@@ -1094,6 +1223,16 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
     frame.payload.rpos = 0;
 
     int rc = 0;
+    int64_t process_start_ms = now_ms();
+    if (debug_net_latency_enabled()) {
+        const char *packet_name = serverbound_packet_name(c->state, frame.packet_id);
+        int64_t wait_ms = task->enqueue_ms > 0 ? process_start_ms - task->enqueue_ms : 0;
+        if (wait_ms < 0) wait_ms = 0;
+        log_info("net latency: t=%lld process_task fd=%d player=%s state=%s id=0x%02X%s%s len=%zu queue_wait=%lldms",
+                 (long long)process_start_ms, c->fd, c->username[0] ? c->username : "(unknown)",
+                 state_name(c->state), frame.packet_id, packet_name ? " " : "", packet_name ? packet_name : "",
+                 frame.payload.len, (long long)wait_ms);
+    }
     if (c->state == MC_STATE_HANDSHAKING) {
         if (frame.packet_id != MC_PKT_HANDSHAKING_CLIENT_INTENTION) {
             log_error("unexpected packet in HANDSHAKING: id=0x%02X", frame.packet_id);
@@ -1105,7 +1244,7 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
             rc = -1;
         }
     } else if (c->state == MC_STATE_STATUS) {
-        if (proto_handle_status(c, &frame, "C server stub", 0, 100) != 0) {
+        if (proto_handle_status(c, &frame, "GoatCore 26.1.1", 0, 100) != 0) {
             log_error("handler error (state=STATUS id=0x%02X)", frame.packet_id);
             conn_close(c);
             rc = -1;
@@ -1123,7 +1262,7 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
             rc = -1;
         }
     } else if (c->state == MC_STATE_PLAY) {
-        int64_t packet_now_ms = task->enqueue_ms > 0 ? task->enqueue_ms : now_ms;
+        int64_t packet_now_ms = task->enqueue_ms > 0 ? task->enqueue_ms : now_ms_value;
         if (proto_play_handle(c, &frame, packet_now_ms) != 0) {
             log_error("handler error (state=PLAY id=0x%02X)", frame.packet_id);
             conn_close(c);
@@ -1136,6 +1275,149 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms) {
     }
 
     return rc;
+}
+
+static size_t server_broadcast_pending_updates(mc_server_t *s, mc_conn_snapshot_t *snapshot, const char *phase) {
+    if (!s || !s->world || !snapshot) return 0;
+
+    const mc_block_update_t *updates = NULL;
+    size_t updates_len = 0;
+    updates = mc_world_updates(s->world, &updates_len);
+    if (!updates || updates_len == 0) return 0;
+
+    size_t sends = 0;
+    for (size_t ci = 0; ci < snapshot->len; ci++) {
+        mc_conn_t *c = snapshot->items[ci];
+        mc_proto_state_t state = (mc_proto_state_t)atomic_load(&c->state);
+        bool closing = atomic_load(&c->closing);
+        if (state != MC_STATE_PLAY || !c->play_ready || closing) continue;
+
+        for (size_t i = 0; i < updates_len; i++) {
+            const mc_block_update_t *u = &updates[i];
+            if (debug_broadcast_enabled()) {
+                log_info("broadcast debug: t=%lld phase=%s block_update player=%s pos=(%d,%d,%d) state=%d",
+                         (long long)now_ms(), phase ? phase : "tick",
+                         c->username[0] ? c->username : "(unknown)", u->x, u->y, u->z, u->state_id);
+            }
+            sends++;
+            if (send_block_update(c, u->x, u->y, u->z, u->state_id) != 0) {
+                conn_close(c);
+                break;
+            }
+        }
+    }
+
+    mc_world_clear_updates(s->world);
+    return sends;
+}
+
+static size_t server_sync_remote_players_snapshot(mc_conn_snapshot_t *snapshot, const char *phase) {
+    if (!snapshot) return 0;
+
+    size_t attempts = 0;
+    for (size_t vi = 0; vi < snapshot->len; vi++) {
+        mc_conn_t *viewer = snapshot->items[vi];
+        if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY || !viewer->play_ready) continue;
+        for (size_t si = 0; si < snapshot->len; si++) {
+            mc_conn_t *subject = snapshot->items[si];
+            if (subject == viewer || atomic_load(&subject->closing) || atomic_load(&subject->state) != MC_STATE_PLAY ||
+                !subject->play_ready || !subject->has_pos) {
+                continue;
+            }
+            attempts++;
+            if (debug_broadcast_enabled()) {
+                log_info("broadcast debug: t=%lld phase=%s remote_sync viewer=%s subject=%s subject_eid=%d",
+                         (long long)now_ms(), phase ? phase : "tick",
+                         viewer->username[0] ? viewer->username : "(viewer)",
+                         subject->username[0] ? subject->username : "(subject)", subject->entity_id);
+            }
+            if (proto_play_sync_remote_player(viewer, subject) != 0) {
+                conn_close(viewer);
+                break;
+            }
+        }
+    }
+    return attempts;
+}
+
+static size_t server_flush_writes(mc_server_t *s, const char *phase) {
+    if (!s) return 0;
+    size_t flushed_conns = 0;
+    pthread_mutex_lock(&s->conns_lock);
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        pthread_mutex_lock(&c->out_lock);
+        bool had_pending = c->out.len > c->out.rpos;
+        pthread_mutex_unlock(&c->out_lock);
+        if (had_pending) flushed_conns++;
+        if (debug_net_latency_enabled() && had_pending) {
+            log_info("net latency: t=%lld flush_request phase=%s fd=%d player=%s",
+                     (long long)now_ms(), phase ? phase : "tick", c->fd,
+                     c->username[0] ? c->username : "(unknown)");
+        }
+        if (handle_client_write(c) != 0) {
+            conn_close(c);
+        }
+    }
+    pthread_mutex_unlock(&s->conns_lock);
+    return flushed_conns;
+}
+
+static size_t server_process_queued_tasks(mc_server_t *s, int64_t now, const char *phase) {
+    if (!s) return 0;
+
+    size_t task_count = 0;
+    mc_task_t *task = mc_task_queue_drain(&s->task_queue);
+    while (task) {
+        mc_task_t *next = task->next;
+        task_count++;
+        if (debug_net_latency_enabled()) {
+            int64_t wait_ms = task->enqueue_ms > 0 ? now - task->enqueue_ms : 0;
+            if (wait_ms < 0) wait_ms = 0;
+            log_info("net latency: t=%lld task_drain phase=%s id=0x%02X wait=%lldms",
+                     (long long)now, phase ? phase : "tick", task->packet_id, (long long)wait_ms);
+        }
+        if (task->type == MC_TASK_PACKET) {
+            (void)process_task(s, task, now);
+        }
+        if (task->payload) free(task->payload);
+        if (task->conn) conn_release(task->conn);
+        free(task);
+        task = next;
+    }
+    return task_count;
+}
+
+static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_tick_us) {
+    if (!s) return;
+
+    int64_t start_ms = now_ms();
+    size_t task_count = server_process_queued_tasks(s, now, "fast");
+    if (task_count == 0) return;
+
+    mc_conn_snapshot_t conn_snapshot = {0};
+    size_t update_sends = 0;
+    size_t remote_syncs = 0;
+    if (server_snapshot_conns(s, &conn_snapshot) == 0) {
+        update_sends = server_broadcast_pending_updates(s, &conn_snapshot, "fast");
+        /* Movement smoothing is deliberately kept on the fixed 20 TPS tick.
+         * The fast path remains for gameplay actions/block updates and socket
+         * flushes, but per-packet movement broadcasts create irregular bursts
+         * that look jittery on remote clients. */
+        if (debug_broadcast_enabled()) {
+            log_info("broadcast debug: t=%lld phase=fast remote_sync_deferred reason=stable_movement_tick",
+                     (long long)now_ms());
+        }
+        conn_snapshot_clear(&conn_snapshot);
+    } else {
+        log_error("fast pass: failed to snapshot connections");
+    }
+
+    size_t flushed_conns = server_flush_writes(s, "fast");
+    if (debug_net_latency_enabled() || debug_broadcast_enabled()) {
+        log_info("net latency: t=%lld fast_pass tasks=%zu update_sends=%zu remote_syncs=%zu flushed_conns=%zu duration=%lldms next_tick_in=%lldms",
+                 (long long)now_ms(), task_count, update_sends, remote_syncs, flushed_conns,
+                 (long long)(now_ms() - start_ms), (long long)((next_tick_us / 1000) - now_ms()));
+    }
 }
 
 static bool server_container_is_open_unlocked(void *ctx, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
@@ -1202,12 +1484,17 @@ static void *tick_thread_main(void *arg) {
 
         int64_t now_us_value = mc_now_us();
         if (now_us_value < next_tick_us) {
-            struct timespec ts;
             sleep_planned_us = next_tick_us - now_us_value;
-            ts.tv_sec = sleep_planned_us / 1000000;
-            ts.tv_nsec = (sleep_planned_us % 1000000) * 1000;
-            nanosleep(&ts, NULL);
+            bool woke_for_task = mc_task_queue_wait_until(&s->task_queue, next_tick_us);
             now_us_value = mc_now_us();
+            if (woke_for_task && now_us_value < next_tick_us && atomic_load(&s->running)) {
+                if (debug_net_latency_enabled()) {
+                    log_info("net latency: t=%lld wake_fast remaining_to_tick=%lldms",
+                             (long long)(now_us_value / 1000), (long long)((next_tick_us - now_us_value) / 1000));
+                }
+                server_fast_packet_pass(s, now_us_value / 1000, next_tick_us);
+                continue;
+            }
         }
         if (now_us_value > next_tick_us) tick_late_us = now_us_value - next_tick_us;
 
@@ -1305,6 +1592,11 @@ static void *tick_thread_main(void *arg) {
                 for (size_t i = 0; i < updates_len; i++) {
                     const mc_block_update_t *u = &updates[i];
                     block_update_sends++;
+                    if (debug_broadcast_enabled()) {
+                        log_info("broadcast debug: t=%lld phase=tick block_update player=%s pos=(%d,%d,%d) state=%d",
+                                 (long long)now_ms(), c->username[0] ? c->username : "(unknown)",
+                                 u->x, u->y, u->z, u->state_id);
+                    }
                     if (send_block_update(c, u->x, u->y, u->z, u->state_id) != 0) {
                         conn_close(c);
                         break;
@@ -1329,22 +1621,7 @@ static void *tick_thread_main(void *arg) {
         pthread_mutex_unlock(&s->conns_lock);
 
         span_start_us = perf ? mc_now_us() : 0;
-        for (size_t vi = 0; vi < conn_snapshot.len; vi++) {
-            mc_conn_t *viewer = conn_snapshot.items[vi];
-            if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY || !viewer->play_ready) continue;
-            for (size_t si = 0; si < conn_snapshot.len; si++) {
-                mc_conn_t *subject = conn_snapshot.items[si];
-                if (subject == viewer || atomic_load(&subject->closing) || atomic_load(&subject->state) != MC_STATE_PLAY ||
-                    !subject->play_ready || !subject->has_pos) {
-                    continue;
-                }
-                remote_sync_attempts++;
-                if (proto_play_sync_remote_player(viewer, subject) != 0) {
-                    conn_close(viewer);
-                    break;
-                }
-            }
-        }
+        remote_sync_attempts = server_sync_remote_players_snapshot(&conn_snapshot, "tick");
         if (perf) remote_sync_us = mc_now_us() - span_start_us;
 
         pthread_mutex_lock(&s->conns_lock);
@@ -1691,36 +1968,28 @@ int net_server_broadcast_difficulty(mc_server_t *server) {
     return rc;
 }
 
-int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
-    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
-}
+int net_server_broadcast_system_message(mc_server_t *server, const char *text) {
+    if (!server || !text) return -1;
 
-int net_server_spawn_item_drop_locked(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
-    return net_server_spawn_item_drop_locked_with_pickup_delay(server, x, y, z, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
-}
+    int rc = 0;
+    mc_conn_snapshot_t snapshot;
+    if (server_snapshot_conns(server, &snapshot) != 0) return -1;
 
-int net_server_spawn_item_drop_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
-                                                 int32_t pickup_delay_ticks) {
-    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, pickup_delay_ticks);
-}
-
-int net_server_spawn_item_drop_with_motion(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
-                                           const mc_slot_t *slot, int32_t pickup_delay_ticks) {
-    if (!server || !slot || !slot->present || slot->count <= 0) return -1;
-    pthread_mutex_lock(&server->conns_lock);
-    int rc = net_server_spawn_item_drop_locked_with_pickup_delay(server, x, y, z, slot, pickup_delay_ticks);
-    if (rc == 0 && server->item_entities_len > 0) {
-        mc_item_entity_t *item = &server->item_entities[server->item_entities_len - 1];
-        item->vx = vx;
-        item->vy = vy;
-        item->vz = vz;
+    for (size_t i = 0; i < snapshot.len; i++) {
+        mc_conn_t *c = snapshot.items[i];
+        if (!c || c->closing || c->state != MC_STATE_PLAY || !c->play_init_sent) continue;
+        if (proto_play_send_system_message(c, text) != 0) {
+            conn_close(c);
+            rc = -1;
+        }
     }
-    pthread_mutex_unlock(&server->conns_lock);
+
+    conn_snapshot_clear(&snapshot);
     return rc;
 }
 
-int net_server_spawn_item_drop_locked_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
-                                                        int32_t pickup_delay_ticks) {
+static int spawn_item_drop_locked_full(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
+                                       const mc_slot_t *slot, int32_t pickup_delay_ticks) {
     if (!server || !slot || !slot->present || slot->count <= 0) return -1;
     if (server->item_entities_len == server->item_entities_cap) {
         size_t new_cap = server->item_entities_cap ? server->item_entities_cap * 2 : 16;
@@ -1739,9 +2008,9 @@ int net_server_spawn_item_drop_locked_with_pickup_delay(mc_server_t *server, dou
     entity.x = x;
     entity.y = y;
     entity.z = z;
-    entity.vx = 0.0;
-    entity.vy = 0.0;
-    entity.vz = 0.0;
+    entity.vx = vx;
+    entity.vy = vy;
+    entity.vz = vz;
     entity.expires_at_ms = now_ms() + ITEM_ENTITY_TTL_MS;
     entity.pickup_delay_ticks = pickup_delay_ticks > 0 ? pickup_delay_ticks : 0;
     if (mc_slot_copy(&entity.slot, slot) != 0) {
@@ -1750,13 +2019,52 @@ int net_server_spawn_item_drop_locked_with_pickup_delay(mc_server_t *server, dou
 
     server->item_entities[server->item_entities_len++] = entity;
     mc_item_entity_t *stored = &server->item_entities[server->item_entities_len - 1];
+    if (debug_items_enabled()) {
+        const char *item_name = mc_minecraft_item_name(stored->slot.item_id);
+        log_info("items debug: t=%lld spawn eid=%d item=%s(%d) count=%d pos=(%.3f,%.3f,%.3f) vel=(%.3f,%.3f,%.3f) pickup_delay=%d",
+                 (long long)now_ms(), stored->entity_id, item_name ? item_name : "(unknown)", stored->slot.item_id, stored->slot.count,
+                 stored->x, stored->y, stored->z, stored->vx, stored->vy, stored->vz, stored->pickup_delay_ticks);
+    }
     for (mc_conn_t *c = server->conns; c; c = c->next) {
         if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready) continue;
-        if (send_item_entity_spawn(c, stored) != 0 || send_item_entity_metadata(c, stored) != 0) {
+        if (send_item_entity_spawn(c, stored) != 0 ||
+            send_item_entity_metadata(c, stored) != 0 ||
+            (item_entity_has_motion(stored) && send_item_entity_velocity(c, stored) != 0)) {
             conn_close(c);
+        } else if (debug_broadcast_enabled() || debug_items_enabled()) {
+            log_info("broadcast debug: t=%lld item_spawn player=%s eid=%d item=%d count=%d",
+                     (long long)now_ms(), c->username[0] ? c->username : "(unknown)",
+                     stored->entity_id, stored->slot.item_id, stored->slot.count);
         }
     }
     return 0;
+}
+
+int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
+    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
+}
+
+int net_server_spawn_item_drop_locked(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
+    return spawn_item_drop_locked_full(server, x, y, z, 0.0, 0.0, 0.0, slot, ITEM_ENTITY_DEFAULT_PICKUP_DELAY_TICKS);
+}
+
+int net_server_spawn_item_drop_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
+                                                 int32_t pickup_delay_ticks) {
+    return net_server_spawn_item_drop_with_motion(server, x, y, z, 0.0, 0.0, 0.0, slot, pickup_delay_ticks);
+}
+
+int net_server_spawn_item_drop_with_motion(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
+                                           const mc_slot_t *slot, int32_t pickup_delay_ticks) {
+    if (!server || !slot || !slot->present || slot->count <= 0) return -1;
+    pthread_mutex_lock(&server->conns_lock);
+    int rc = spawn_item_drop_locked_full(server, x, y, z, vx, vy, vz, slot, pickup_delay_ticks);
+    pthread_mutex_unlock(&server->conns_lock);
+    return rc;
+}
+
+int net_server_spawn_item_drop_locked_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,
+                                                        int32_t pickup_delay_ticks) {
+    return spawn_item_drop_locked_full(server, x, y, z, 0.0, 0.0, 0.0, slot, pickup_delay_ticks);
 }
 
 int net_server_sync_item_entities_to_conn(mc_server_t *server, mc_conn_t *conn) {
@@ -1768,7 +2076,9 @@ int net_server_sync_item_entities_to_conn(mc_server_t *server, mc_conn_t *conn) 
     }
     for (size_t i = 0; i < server->item_entities_len; i++) {
         mc_item_entity_t *item = &server->item_entities[i];
-        if (send_item_entity_spawn(conn, item) != 0 || send_item_entity_metadata(conn, item) != 0) {
+        if (send_item_entity_spawn(conn, item) != 0 ||
+            send_item_entity_metadata(conn, item) != 0 ||
+            (item_entity_has_motion(item) && send_item_entity_velocity(conn, item) != 0)) {
             conn_close(conn);
             pthread_mutex_unlock(&server->conns_lock);
             return -1;

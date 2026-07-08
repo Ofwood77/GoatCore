@@ -12,6 +12,7 @@
 #include "mc_world.h"
 
 #define MC_BUF_CAP 8192
+#define MC_REMOTE_EQUIPMENT_SLOT_COUNT 6
 
 /* Simple growable byte buffer used for framed protocol IO. */
 typedef struct {
@@ -42,6 +43,10 @@ typedef struct {
     float yaw;
     float pitch;
     float head_yaw;
+    bool has_last_living_flags;
+    uint8_t living_flags;
+    bool has_last_equipment;
+    uint64_t equipment_hashes[MC_REMOTE_EQUIPMENT_SLOT_COUNT];
 } mc_remote_player_t;
 
 struct mc_conn {

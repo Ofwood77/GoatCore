@@ -1,0 +1,5 @@
+{
+  "name": "movement",
+  "description": "Mouvements courts, saut, sneak, sprint et pathfinder proche si disponible.",
+  "steps": ["connect", "spawn", "move_forward", "move_back", "strafe_left", "strafe_right", "jump", "sneak", "sprint", "pathfinder_close", "quit"]
+}

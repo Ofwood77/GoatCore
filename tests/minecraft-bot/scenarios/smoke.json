@@ -1,0 +1,6 @@
+{
+  "name": "smoke",
+  "description": "Connexion, spawn, chat, attente courte, deconnexion propre.",
+  "steps": ["connect", "spawn", "chat", "wait", "quit"],
+  "waitMs": 3000
+}

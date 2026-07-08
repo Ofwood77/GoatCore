@@ -1,0 +1,6 @@
+{
+  "name": "blocks",
+  "description": "Placement/cassage dans une zone de test dediee. Necessite RUN_DESTRUCTIVE_TESTS=1.",
+  "destructive": true,
+  "steps": ["connect", "spawn", "place_block", "break_block", "cleanup", "quit"]
+}

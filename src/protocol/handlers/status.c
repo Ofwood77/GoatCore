@@ -10,7 +10,7 @@ int proto_handle_status(mc_conn_t *c, const mc_frame_t *frame, const char *motd_
 
     if (frame->packet_id == MC_PKT_STATUS_SERVERBOUND_STATUS_REQUEST) {
         /* Status Request */
-        const char *motd_text = motd_json ? motd_json : "C server stub";
+        const char *motd_text = motd_json ? motd_json : "GoatCore 26.1.1";
         char motd[512];
         int wrote = snprintf(
             motd,

@@ -65,6 +65,7 @@
 #define PKT_PLAY_TILE_ENTITY_DATA MC_PKT_PLAY_CLIENTBOUND_BLOCK_ENTITY_DATA
 #define PKT_PLAY_SET_SLOT MC_PKT_PLAY_CLIENTBOUND_CONTAINER_SET_SLOT
 #define PKT_PLAY_CONTAINER_SET_DATA MC_PKT_PLAY_CLIENTBOUND_CONTAINER_SET_DATA
+#define PKT_PLAY_CHAT_MESSAGE MC_PKT_PLAY_SERVERBOUND_CHAT
 #define PKT_PLAY_CHAT_COMMAND MC_PKT_PLAY_SERVERBOUND_CHAT_COMMAND
 #define PKT_PLAY_SIGNED_CHAT_COMMAND MC_PKT_PLAY_SERVERBOUND_CHAT_COMMAND_SIGNED
 #define PKT_PLAY_CLIENT_COMMAND_SB MC_PKT_PLAY_SERVERBOUND_CLIENT_COMMAND
@@ -87,6 +88,7 @@
 #define PKT_PLAY_CLIENTBOUND_PING MC_PKT_PLAY_CLIENTBOUND_PING
 #define PKT_PLAY_CHANGE_DIFFICULTY MC_PKT_PLAY_CLIENTBOUND_CHANGE_DIFFICULTY
 #define PKT_PLAY_SYSTEM_CHAT MC_PKT_PLAY_CLIENTBOUND_SYSTEM_CHAT
+#define PKT_PLAY_SET_EQUIPMENT MC_PKT_PLAY_CLIENTBOUND_SET_EQUIPMENT
 
 #define CHUNK_XZ 16
 
@@ -124,6 +126,7 @@
 #define PLAYER_STARVATION_DAMAGE_INTERVAL_MS 4000
 #define PLAYER_STARVATION_DAMAGE_AMOUNT 1.0f
 #define PLAYER_MANUAL_DROP_PICKUP_DELAY_TICKS 40
+#define PLAYER_BLOCK_DROP_PICKUP_DELAY_TICKS 0
 #define PLAYER_FOOD_USE_DURATION_TICKS 32
 #define PLAYER_DROP_FORWARD_OFFSET 0.35
 #define PLAYER_DROP_VERTICAL_OFFSET 1.2
@@ -154,6 +157,18 @@
 #define ENTITY_METADATA_TYPE_BYTE 0
 #define LIVING_ENTITY_FLAG_USING_ITEM 0x01
 #define LIVING_ENTITY_FLAG_USING_OFFHAND 0x02
+
+#define PLAYER_EQUIPMENT_MAINHAND 0
+#define PLAYER_EQUIPMENT_OFFHAND 1
+#define PLAYER_EQUIPMENT_FEET 2
+#define PLAYER_EQUIPMENT_LEGS 3
+#define PLAYER_EQUIPMENT_CHEST 4
+#define PLAYER_EQUIPMENT_HEAD 5
+#define PLAYER_SLOT_HEAD 5
+#define PLAYER_SLOT_CHEST 6
+#define PLAYER_SLOT_LEGS 7
+#define PLAYER_SLOT_FEET 8
+#define PLAYER_SLOT_OFFHAND 45
 
 #define PLAYER_INFO_ACTION_ADD 0x01
 #define PLAYER_INFO_ACTION_UPDATE_GAMEMODE 0x04
@@ -209,11 +224,15 @@ static int send_block_event_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t z
 static int send_sent_chunks_post_updates(mc_conn_t *c);
 static int maybe_send_chunk_refresh_ping(mc_conn_t *c);
 static int send_set_health_packet(mc_conn_t *c);
+static int mark_player_ready(mc_conn_t *c, const char *reason);
 static int send_window_items(mc_conn_t *c);
 static int sync_inventory_full(mc_conn_t *c);
 static int respawn_player(mc_conn_t *c);
 static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms);
 static int make_text_component(const char *text, uint8_t **out, size_t *out_len);
+static int pack_simple_bitstorage_u32(const uint32_t *values, size_t value_count, int bits,
+                                      uint64_t **out_words, int32_t *out_word_count);
+static int32_t floor_i32_from_f64(double v);
 static void reset_fall_tracking(mc_conn_t *c);
 static int try_consume_selected_food(mc_conn_t *c);
 static int drop_selected_mainhand_items(mc_conn_t *c, int32_t requested_count);
@@ -662,6 +681,19 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     pending_chunks_clear(c);
 }
 
+static int mark_player_ready(mc_conn_t *c, const char *reason) {
+    if (!c || c->play_ready) return 0;
+    c->play_ready = true;
+    log_info("player ready%s%s: %s fd=%d entity_id=%d",
+             reason && reason[0] ? " " : "",
+             reason && reason[0] ? reason : "",
+             c->username[0] ? c->username : "(unknown)", c->fd, c->entity_id);
+    if (c->server && net_server_sync_item_entities_to_conn(c->server, c) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int send_game_mode_event(mc_conn_t *c, int32_t gamemode) {
     uint8_t buf[8];
     size_t pos = 0;
@@ -678,7 +710,7 @@ static int send_entity_event(mc_conn_t *c, uint8_t status) {
     return conn_write_packet(c, PKT_PLAY_ENTITY_EVENT, buf, pos, -1);
 }
 
-static int send_system_message(mc_conn_t *c, const char *text) {
+int proto_play_send_system_message(mc_conn_t *c, const char *text) {
     if (!c) return -1;
     uint8_t *msg = NULL;
     size_t msg_len = 0;
@@ -1049,6 +1081,76 @@ static bool debug_containers_enabled(void) {
         init = 1;
     }
     return enabled;
+}
+
+static bool debug_items_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_ITEMS");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static bool debug_pickup_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_PICKUP");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static bool debug_equipment_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_EQUIPMENT");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static bool debug_movement_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_MOVEMENT");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static bool debug_remote_smooth_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_REMOTE_SMOOTH");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static bool debug_broadcast_enabled(void) {
+    static int init = 0;
+    static bool enabled = false;
+    if (!init) {
+        const char *env = getenv("MC_DEBUG_BROADCAST");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        init = 1;
+    }
+    return enabled;
+}
+
+static int64_t debug_now_ms(void) {
+    return mc_now_us() / 1000;
 }
 
 static bool debug_container_pos_match(int32_t x, int32_t y, int32_t z) {
@@ -1584,6 +1686,10 @@ static int send_block_update_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t 
         rc = -1;
     } else {
         rc = conn_write_packet(c, PKT_PLAY_BLOCK_UPDATE, payload.data, payload.len, -1);
+        if (rc == 0 && debug_broadcast_enabled()) {
+            log_info("broadcast debug: t=%lld direct_block_update player=%s pos=(%d,%d,%d) state=%d",
+                     (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)", x, y, z, state_id);
+        }
     }
     buf_free(&payload);
     return rc;
@@ -1803,7 +1909,16 @@ int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot) {
     if (c->closing || c->state != MC_STATE_PLAY || !c->player || !c->play_ready || c->dead) return 0;
     if (c->active_window.open) return 0;
 
+    int32_t item_id = ground_slot->present ? ground_slot->item_id : -1;
+    int32_t before_count = ground_slot->present ? ground_slot->count : 0;
     int absorbed = mc_inventory_try_absorb_slot(&c->player->inventory, ground_slot);
+    if (debug_pickup_enabled()) {
+        const char *item_name = item_id >= 0 ? mc_minecraft_item_name(item_id) : NULL;
+        int32_t after_count = ground_slot->present ? ground_slot->count : 0;
+        log_info("pickup debug: t=%lld inventory player=%s item=%s(%d) before=%d absorbed=%d after=%d",
+                 (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)", item_name ? item_name : "(empty)",
+                 item_id, before_count, absorbed, after_count);
+    }
     if (absorbed <= 0) return absorbed;
     if (sync_inventory_full(c) != 0) return -1;
     if (save_player_data(c) != 0) return -1;
@@ -2224,6 +2339,16 @@ static bool block_state_has_block_entity(int32_t state_id) {
 }
 
 static const char *block_entity_type_name_for_state(int32_t state_id) {
+    if (is_ender_chest_state(state_id)) return "minecraft:ender_chest";
+    if (is_trapped_chest_state(state_id)) return "minecraft:trapped_chest";
+    if (is_chest_state(state_id)) return "minecraft:chest";
+    if (is_barrel_state(state_id)) return "minecraft:barrel";
+    if (is_furnace_state(state_id)) return "minecraft:furnace";
+    if (is_smoker_state(state_id)) return "minecraft:smoker";
+    if (is_blast_furnace_state(state_id)) return "minecraft:blast_furnace";
+    if (is_dropper_state(state_id)) return "minecraft:dropper";
+    if (is_shulker_box_state(state_id)) return "minecraft:shulker_box";
+
     if (!block_state_has_block_entity(state_id)) return NULL;
 
     if ((size_t)state_id < GLOBAL_BLOCK_STATES_COUNT) {
@@ -2243,15 +2368,6 @@ static const char *block_entity_type_name_for_state(int32_t state_id) {
     memcpy(name_buf, key, base_len);
     name_buf[base_len] = '\0';
     if (mc_minecraft_block_entity_type_id(name_buf) >= 0) return name_buf;
-    if (is_ender_chest_state(state_id)) return "minecraft:ender_chest";
-    if (is_trapped_chest_state(state_id)) return "minecraft:trapped_chest";
-    if (is_chest_state(state_id)) return "minecraft:chest";
-    if (is_barrel_state(state_id)) return "minecraft:barrel";
-    if (is_furnace_state(state_id)) return "minecraft:furnace";
-    if (is_smoker_state(state_id)) return "minecraft:smoker";
-    if (is_blast_furnace_state(state_id)) return "minecraft:blast_furnace";
-    if (is_dropper_state(state_id)) return "minecraft:dropper";
-    if (is_shulker_box_state(state_id)) return "minecraft:shulker_box";
     return NULL;
 }
 
@@ -2311,6 +2427,18 @@ static int spawn_drop_slot(mc_conn_t *c, double x, double y, double z, const mc_
     if (!c || !slot || !slot->present || slot->count <= 0) return 0;
     if (!c->server) return -1;
     return net_server_spawn_item_drop(c->server, x, y, z, slot);
+}
+
+static int spawn_block_drop_slot(mc_conn_t *c, double x, double y, double z, const mc_slot_t *slot) {
+    if (!c || !slot || !slot->present || slot->count <= 0) return 0;
+    if (!c->server) return -1;
+    if (debug_items_enabled()) {
+        const char *item_name = mc_minecraft_item_name(slot->item_id);
+        log_info("items debug: t=%lld block_break_drop item=%s(%d) count=%d pos=(%.3f,%.3f,%.3f) pickup_delay=%d",
+                 (long long)debug_now_ms(), item_name ? item_name : "(unknown)", slot->item_id, slot->count, x, y, z,
+                 PLAYER_BLOCK_DROP_PICKUP_DELAY_TICKS);
+    }
+    return net_server_spawn_item_drop_with_motion(c->server, x, y, z, 0.0, 0.0, 0.0, slot, PLAYER_BLOCK_DROP_PICKUP_DELAY_TICKS);
 }
 
 static int spawn_drop_slot_locked(mc_conn_t *c, double x, double y, double z, const mc_slot_t *slot) {
@@ -2641,7 +2769,7 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
     if (chest_item_id >= 0) {
         mc_slot_t block_drop = {0};
         if (mc_slot_set_simple(&block_drop, chest_item_id, 1) == 0) {
-            if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
+            if (spawn_block_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
                 mc_slot_clear(&block_drop);
                 if (have_container) mc_container_instance_clear(&container);
                 return -1;
@@ -2655,7 +2783,7 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
         if (slot_count > MC_CONTAINER_SLOT_COUNT) slot_count = MC_CONTAINER_SLOT_COUNT;
         for (int i = 0; i < slot_count; i++) {
             if (!container.slots[i].present || container.slots[i].count <= 0) continue;
-            if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &container.slots[i]) != 0) {
+            if (spawn_block_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &container.slots[i]) != 0) {
                 mc_container_instance_clear(&container);
                 return -1;
             }
@@ -2694,6 +2822,12 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     if (!mc_mining_state_is_air(state_id)) {
         mc_block_drop_t drop = {-1, 0};
         bool have_drop = mc_block_drop_resolve_default(state_id, allow_default_drop, x, y, z, now_ms, &drop);
+        if (debug_items_enabled() || debug_broadcast_enabled()) {
+            log_info("items debug: t=%lld block_break_validated player=%s pos=(%d,%d,%d) old_state=%d drop_item=%d drop_count=%d harvest=%d",
+                     (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)",
+                     x, y, z, state_id, have_drop ? drop.item_id : -1, have_drop ? drop.count : 0,
+                     allow_default_drop ? 1 : 0);
+        }
         /* Mutate world state before sending the direct block update so any
          * later resend/reload path reads the same final state. Drops are
          * resolved separately: a block may break successfully yet yield no
@@ -2706,7 +2840,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
         if (have_drop) {
             mc_slot_t block_drop = {0};
             if (mc_slot_set_simple(&block_drop, drop.item_id, drop.count) == 0) {
-                if (spawn_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
+                if (spawn_block_drop_slot(c, x + 0.5, y + 0.5, z + 0.5, &block_drop) != 0) {
                     mc_slot_clear(&block_drop);
                     return -1;
                 }
@@ -2940,6 +3074,164 @@ static int send_player_teleport(mc_conn_t *viewer, mc_conn_t *subject) {
     return conn_write_packet(viewer, PKT_PLAY_ENTITY_TELEPORT, buf, pos, -1);
 }
 
+static const char *equipment_slot_name(int equipment_slot) {
+    switch (equipment_slot) {
+        case PLAYER_EQUIPMENT_MAINHAND: return "mainhand";
+        case PLAYER_EQUIPMENT_OFFHAND: return "offhand";
+        case PLAYER_EQUIPMENT_FEET: return "feet";
+        case PLAYER_EQUIPMENT_LEGS: return "legs";
+        case PLAYER_EQUIPMENT_CHEST: return "chest";
+        case PLAYER_EQUIPMENT_HEAD: return "head";
+        default: return "unknown";
+    }
+}
+
+static const mc_slot_t *player_equipment_slot(const mc_conn_t *subject, int equipment_slot) {
+    const mc_inventory_t *inv = conn_inventory_const(subject);
+    if (!inv) return NULL;
+
+    int slot_index = -1;
+    switch (equipment_slot) {
+        case PLAYER_EQUIPMENT_MAINHAND:
+            if (inv->selected_hotbar_slot >= 0 && inv->selected_hotbar_slot < MC_PLAYER_HOTBAR_SIZE) {
+                slot_index = MC_PLAYER_HOTBAR_BASE + inv->selected_hotbar_slot;
+            }
+            break;
+        case PLAYER_EQUIPMENT_OFFHAND:
+            slot_index = PLAYER_SLOT_OFFHAND;
+            break;
+        case PLAYER_EQUIPMENT_FEET:
+            slot_index = PLAYER_SLOT_FEET;
+            break;
+        case PLAYER_EQUIPMENT_LEGS:
+            slot_index = PLAYER_SLOT_LEGS;
+            break;
+        case PLAYER_EQUIPMENT_CHEST:
+            slot_index = PLAYER_SLOT_CHEST;
+            break;
+        case PLAYER_EQUIPMENT_HEAD:
+            slot_index = PLAYER_SLOT_HEAD;
+            break;
+        default:
+            return NULL;
+    }
+
+    if (slot_index < 0 || slot_index >= MC_PLAYER_SLOT_COUNT) return NULL;
+    return &inv->slots[slot_index];
+}
+
+static uint64_t equipment_slot_hash(const mc_slot_t *slot) {
+    if (!slot || !slot->present || slot->count <= 0) return 0;
+
+    uint64_t h = 1469598103934665603ULL;
+    h = fnv1a64_bytes((const uint8_t *)&slot->item_id, sizeof(slot->item_id), h);
+    h = fnv1a64_bytes((const uint8_t *)&slot->count, sizeof(slot->count), h);
+    h = fnv1a64_bytes((const uint8_t *)&slot->damage, sizeof(slot->damage), h);
+    h = fnv1a64_bytes((const uint8_t *)&slot->added_component_count, sizeof(slot->added_component_count), h);
+    h = fnv1a64_bytes((const uint8_t *)&slot->removed_component_count, sizeof(slot->removed_component_count), h);
+    h = fnv1a64_bytes((const uint8_t *)&slot->components_len, sizeof(slot->components_len), h);
+    if (slot->components && slot->components_len > 0) {
+        h = fnv1a64_bytes(slot->components, slot->components_len, h);
+    }
+    return h ? h : 1;
+}
+
+static uint8_t player_living_flags(const mc_conn_t *subject) {
+    uint8_t flags = 0;
+    if (!subject) return flags;
+    if (subject->is_using_item) {
+        flags |= LIVING_ENTITY_FLAG_USING_ITEM;
+        if (subject->using_hand != 0) flags |= LIVING_ENTITY_FLAG_USING_OFFHAND;
+    }
+    return flags;
+}
+
+static int send_player_living_metadata(mc_conn_t *viewer, mc_conn_t *subject, mc_remote_player_t *entry, bool force) {
+    if (!viewer || !subject || !entry) return -1;
+    uint8_t flags = player_living_flags(subject);
+    if (!force && entry->has_last_living_flags && entry->living_flags == flags) return 0;
+
+    uint8_t buf[16];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0) return -1;
+    if (w_ubyte(buf, sizeof(buf), &pos, PLAYER_METADATA_LIVING_FLAGS_INDEX) != 0) return -1;
+    if (w_varint(buf, sizeof(buf), &pos, ENTITY_METADATA_TYPE_BYTE) != 0) return -1;
+    if (w_byte(buf, sizeof(buf), &pos, (int8_t)flags) != 0) return -1;
+    if (w_ubyte(buf, sizeof(buf), &pos, 0xFF) != 0) return -1;
+    if (conn_write_packet(viewer, PKT_PLAY_ENTITY_METADATA, buf, pos, -1) != 0) return -1;
+
+    entry->has_last_living_flags = true;
+    entry->living_flags = flags;
+    if (debug_equipment_enabled() || debug_broadcast_enabled()) {
+        log_info("equipment debug: t=%lld living_metadata viewer=%s subject=%s eid=%d flags=0x%02x force=%d",
+                 (long long)debug_now_ms(), viewer->username[0] ? viewer->username : "(viewer)",
+                 subject->username[0] ? subject->username : "(subject)", subject->entity_id, flags, force ? 1 : 0);
+    }
+    return 0;
+}
+
+static int send_player_equipment(mc_conn_t *viewer, mc_conn_t *subject, mc_remote_player_t *entry, bool force) {
+    if (!viewer || !subject || !entry) return -1;
+
+    int changed_slots[MC_REMOTE_EQUIPMENT_SLOT_COUNT];
+    uint64_t next_hashes[MC_REMOTE_EQUIPMENT_SLOT_COUNT];
+    int changed_count = 0;
+    for (int slot = 0; slot < MC_REMOTE_EQUIPMENT_SLOT_COUNT; slot++) {
+        const mc_slot_t *item = player_equipment_slot(subject, slot);
+        uint64_t hash = equipment_slot_hash(item);
+        next_hashes[slot] = hash;
+        if (force || !entry->has_last_equipment || entry->equipment_hashes[slot] != hash) {
+            changed_slots[changed_count++] = slot;
+        }
+    }
+
+    if (changed_count == 0) return 0;
+
+    mc_buf_t payload;
+    if (buf_init(&payload, 256) != 0) return -1;
+    int rc = 0;
+    mc_slot_t empty_slot;
+    memset(&empty_slot, 0, sizeof(empty_slot));
+
+    if (buf_w_varint(&payload, subject->entity_id) != 0) {
+        rc = -1;
+    }
+    for (int i = 0; rc == 0 && i < changed_count; i++) {
+        int equipment_slot = changed_slots[i];
+        const mc_slot_t *item = player_equipment_slot(subject, equipment_slot);
+        uint8_t encoded_slot = (uint8_t)equipment_slot;
+        if (i + 1 < changed_count) encoded_slot |= 0x80;
+        if (buf_w_u8(&payload, encoded_slot) != 0 || write_slot_item(&payload, item ? item : &empty_slot) != 0) {
+            rc = -1;
+        }
+    }
+    if (rc == 0) {
+        rc = conn_write_packet(viewer, PKT_PLAY_SET_EQUIPMENT, payload.data, payload.len, -1);
+    }
+    buf_free(&payload);
+    if (rc != 0) return -1;
+
+    for (int i = 0; i < MC_REMOTE_EQUIPMENT_SLOT_COUNT; i++) {
+        entry->equipment_hashes[i] = next_hashes[i];
+    }
+    entry->has_last_equipment = true;
+
+    if (debug_equipment_enabled() || debug_broadcast_enabled()) {
+        for (int i = 0; i < changed_count; i++) {
+            int equipment_slot = changed_slots[i];
+            const mc_slot_t *item = player_equipment_slot(subject, equipment_slot);
+            int32_t item_id = (item && item->present) ? item->item_id : -1;
+            const char *item_name = item_id >= 0 ? mc_minecraft_item_name(item_id) : NULL;
+            int32_t count = (item && item->present) ? item->count : 0;
+            log_info("equipment debug: t=%lld broadcast viewer=%s subject=%s eid=%d slot=%s item=%s(%d) count=%d force=%d",
+                     (long long)debug_now_ms(), viewer->username[0] ? viewer->username : "(viewer)",
+                     subject->username[0] ? subject->username : "(subject)", subject->entity_id,
+                     equipment_slot_name(equipment_slot), item_name ? item_name : "(empty)", item_id, count, force ? 1 : 0);
+        }
+    }
+    return 0;
+}
+
 static int hide_remote_player_entity(mc_conn_t *viewer, mc_conn_t *subject) {
     if (!viewer || !subject || viewer == subject) return 0;
     mc_remote_player_t *entry = remote_player_get(viewer, subject->entity_id);
@@ -2957,10 +3249,16 @@ static int hide_remote_player_entity(mc_conn_t *viewer, mc_conn_t *subject) {
 
     entry->spawned = false;
     entry->has_last_pos = false;
+    entry->has_last_living_flags = false;
+    entry->has_last_equipment = false;
     return 0;
 }
 
-static int send_player_move_update(mc_conn_t *viewer, mc_conn_t *subject, const mc_remote_player_t *entry) {
+static double remote_relative_units_to_blocks(int16_t v) {
+    return (double)v / 4096.0;
+}
+
+static int send_player_move_update(mc_conn_t *viewer, mc_conn_t *subject, mc_remote_player_t *entry) {
     if (!viewer || !subject || !entry || !entry->has_last_pos) return -1;
     double dx = subject->x - entry->x;
     double dy = subject->y - entry->y;
@@ -2968,33 +3266,76 @@ static int send_player_move_update(mc_conn_t *viewer, mc_conn_t *subject, const 
     int16_t mx = (int16_t)((dx >= 0.0) ? (dx * 4096.0 + 0.5) : (dx * 4096.0 - 0.5));
     int16_t my = (int16_t)((dy >= 0.0) ? (dy * 4096.0 + 0.5) : (dy * 4096.0 - 0.5));
     int16_t mz = (int16_t)((dz >= 0.0) ? (dz * 4096.0 + 0.5) : (dz * 4096.0 - 0.5));
-    bool pos_changed = abs_d(dx) > 0.0001 || abs_d(dy) > 0.0001 || abs_d(dz) > 0.0001;
+    bool pos_changed = mx != 0 || my != 0 || mz != 0;
     bool look_changed = angle_byte(subject->yaw) != angle_byte(entry->yaw) || angle_byte(subject->pitch) != angle_byte(entry->pitch);
     bool need_teleport =
         (!entry->spawned) || abs_d(dx * 4096.0) > 32767.0 || abs_d(dy * 4096.0) > 32767.0 || abs_d(dz * 4096.0) > 32767.0;
-    if (need_teleport) return send_player_teleport(viewer, subject);
+    if (need_teleport) {
+        if (debug_movement_enabled() || debug_broadcast_enabled() || debug_remote_smooth_enabled()) {
+            log_info("movement debug: t=%lld remote_sync viewer=%s subject=%s eid=%d packet=teleport reason=%s pos=(%.3f,%.3f,%.3f) delta=(%.3f,%.3f,%.3f) yaw=%u pitch=%u head=%u on_ground=%d",
+                     (long long)debug_now_ms(), viewer->username[0] ? viewer->username : "(viewer)",
+                     subject->username[0] ? subject->username : "(subject)", subject->entity_id,
+                     entry->spawned ? "delta_overflow" : "initial",
+                     subject->x, subject->y, subject->z, dx, dy, dz,
+                     (unsigned)angle_byte(subject->yaw), (unsigned)angle_byte(subject->pitch),
+                     (unsigned)angle_byte(subject->yaw), subject->on_ground ? 1 : 0);
+        }
+        if (send_player_teleport(viewer, subject) != 0) return -1;
+        entry->x = subject->x;
+        entry->y = subject->y;
+        entry->z = subject->z;
+        entry->yaw = subject->yaw;
+        entry->pitch = subject->pitch;
+        return 0;
+    }
     if (!pos_changed && !look_changed) return 0;
 
     uint8_t buf[32];
     size_t pos = 0;
     if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0) return -1;
     int packet_id = PKT_PLAY_ENTITY_LOOK;
+    const char *packet_kind = "rotation";
     if (pos_changed) {
         if (w_u16_be(buf, sizeof(buf), &pos, (uint16_t)mx) != 0 || w_u16_be(buf, sizeof(buf), &pos, (uint16_t)my) != 0 ||
             w_u16_be(buf, sizeof(buf), &pos, (uint16_t)mz) != 0) {
             return -1;
         }
         packet_id = look_changed ? PKT_PLAY_ENTITY_MOVE_LOOK : PKT_PLAY_REL_ENTITY_MOVE;
+        packet_kind = look_changed ? "rel_move_rot" : "rel_move";
     }
     if (look_changed) {
         if (w_byte(buf, sizeof(buf), &pos, (int8_t)angle_byte(subject->yaw)) != 0 ||
             w_byte(buf, sizeof(buf), &pos, (int8_t)angle_byte(subject->pitch)) != 0) {
             return -1;
         }
-        if (!pos_changed) packet_id = PKT_PLAY_ENTITY_LOOK;
+        if (!pos_changed) {
+            packet_id = PKT_PLAY_ENTITY_LOOK;
+            packet_kind = "rotation";
+        }
     }
-    if (w_bool(buf, sizeof(buf), &pos, true) != 0) return -1;
-    return conn_write_packet(viewer, packet_id, buf, pos, -1);
+    if (w_bool(buf, sizeof(buf), &pos, subject->on_ground) != 0) return -1;
+    if (conn_write_packet(viewer, packet_id, buf, pos, -1) != 0) return -1;
+
+    if (pos_changed) {
+        entry->x += remote_relative_units_to_blocks(mx);
+        entry->y += remote_relative_units_to_blocks(my);
+        entry->z += remote_relative_units_to_blocks(mz);
+    }
+    if (look_changed) {
+        entry->yaw = subject->yaw;
+        entry->pitch = subject->pitch;
+    }
+
+    if (debug_movement_enabled() || debug_broadcast_enabled() || debug_remote_smooth_enabled()) {
+        log_info("movement debug: t=%lld remote_sync viewer=%s subject=%s eid=%d packet=%s id=0x%02X delta=(%.4f,%.4f,%.4f) rel=(%d,%d,%d) sent_pos=(%.4f,%.4f,%.4f) yaw=%u pitch=%u head=%u on_ground=%d",
+                 (long long)debug_now_ms(), viewer->username[0] ? viewer->username : "(viewer)",
+                 subject->username[0] ? subject->username : "(subject)", subject->entity_id,
+                 packet_kind, packet_id, dx, dy, dz, (int)mx, (int)my, (int)mz,
+                 entry->x, entry->y, entry->z, (unsigned)angle_byte(subject->yaw),
+                 (unsigned)angle_byte(subject->pitch), (unsigned)angle_byte(subject->yaw),
+                 subject->on_ground ? 1 : 0);
+    }
+    return 0;
 }
 
 int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
@@ -3020,7 +3361,18 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
             send_player_teleport(viewer, subject) != 0) {
             return -1;
         }
+        if (send_player_living_metadata(viewer, subject, entry, true) != 0 ||
+            send_player_equipment(viewer, subject, entry, true) != 0) {
+            return -1;
+        }
         entry->spawned = true;
+        entry->has_last_pos = true;
+        entry->x = subject->x;
+        entry->y = subject->y;
+        entry->z = subject->z;
+        entry->yaw = subject->yaw;
+        entry->pitch = subject->pitch;
+        entry->head_yaw = subject->yaw;
         if (debug_players_enabled()) {
             log_info("players debug: spawn viewer=%s subject=%s eid=%d uuid=%02x%02x%02x%02x type=%d", viewer->username,
                      subject->username, subject->entity_id, subject->uuid[0], subject->uuid[1], subject->uuid[2], subject->uuid[3],
@@ -3030,16 +3382,20 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
         if (send_player_move_update(viewer, subject, entry) != 0) return -1;
         if (angle_byte(subject->yaw) != angle_byte(entry->head_yaw)) {
             if (send_player_head_rotation(viewer, subject) != 0) return -1;
+            entry->head_yaw = subject->yaw;
+            if (debug_movement_enabled() || debug_broadcast_enabled() || debug_remote_smooth_enabled()) {
+                log_info("movement debug: t=%lld remote_sync viewer=%s subject=%s eid=%d packet=head_rotation head=%u",
+                         (long long)debug_now_ms(), viewer->username[0] ? viewer->username : "(viewer)",
+                         subject->username[0] ? subject->username : "(subject)", subject->entity_id,
+                         (unsigned)angle_byte(subject->yaw));
+            }
+        }
+        if (send_player_living_metadata(viewer, subject, entry, false) != 0 ||
+            send_player_equipment(viewer, subject, entry, false) != 0) {
+            return -1;
         }
     }
 
-    entry->has_last_pos = true;
-    entry->x = subject->x;
-    entry->y = subject->y;
-    entry->z = subject->z;
-    entry->yaw = subject->yaw;
-    entry->pitch = subject->pitch;
-    entry->head_yaw = subject->yaw;
     memcpy(entry->uuid, subject->uuid, 16);
     return 0;
 }
@@ -3176,12 +3532,12 @@ static int send_mining_probe_info(mc_conn_t *c) {
 
     if (!c) return -1;
     world = get_world(c);
-    if (!world) return send_system_message(c, "MineInfo: monde indisponible");
+    if (!world) return proto_play_send_system_message(c, "MineInfo: monde indisponible");
 
     trace_rc = trace_target_block_from_view(c, world, max_distance, &x, &y, &z, &state_id);
-    if (trace_rc < 0) return send_system_message(c, "MineInfo: echec du raycast serveur");
-    if (trace_rc == 1) return send_system_message(c, "MineInfo: aucun bloc vise dans la portee");
-    if (trace_rc == 2) return send_system_message(c, "MineInfo: chunk cible pas encore pret");
+    if (trace_rc < 0) return proto_play_send_system_message(c, "MineInfo: echec du raycast serveur");
+    if (trace_rc == 1) return proto_play_send_system_message(c, "MineInfo: aucun bloc vise dans la portee");
+    if (trace_rc == 2) return proto_play_send_system_message(c, "MineInfo: chunk cible pas encore pret");
 
     held = selected_mainhand_slot(c);
     held_item_id = mc_mining_slot_item_id(held);
@@ -3230,9 +3586,9 @@ static int send_mining_probe_info(mc_conn_t *c) {
              tool_entry ? mining_tool_material_name((mc_mining_tool_material_t)tool_entry->material) : "none",
              (double)info.speed_x100 / 100.0);
 
-    if (send_system_message(c, line1) != 0) return -1;
-    if (send_system_message(c, line2) != 0) return -1;
-    return send_system_message(c, line3);
+    if (proto_play_send_system_message(c, line1) != 0) return -1;
+    if (proto_play_send_system_message(c, line2) != 0) return -1;
+    return proto_play_send_system_message(c, line3);
 }
 
 static int send_local_player_use_item_metadata(mc_conn_t *c, bool active, int32_t hand) {
@@ -4096,19 +4452,19 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
         if (!sub || strcmp(sub, "get") == 0 || strcmp(sub, "show") == 0) {
             char msg[96];
             snprintf(msg, sizeof(msg), "Current difficulty: %s", mc_difficulty_name(difficulty));
-            return send_system_message(c, msg);
+            return proto_play_send_system_message(c, msg);
         }
 
         const char *value = sub;
         if (strcmp(sub, "set") == 0) {
             value = strtok_r(NULL, " ", &save);
             if (!value) {
-                return send_system_message(c, "Usage: /difficulty set <peaceful|easy|normal|hard>");
+                return proto_play_send_system_message(c, "Usage: /difficulty set <peaceful|easy|normal|hard>");
             }
         }
 
         if (!parse_difficulty_text(value, &difficulty)) {
-            return send_system_message(c, "Usage: /difficulty <peaceful|easy|normal|hard>");
+            return proto_play_send_system_message(c, "Usage: /difficulty <peaceful|easy|normal|hard>");
         }
 
         net_server_set_difficulty(c->server, difficulty);
@@ -4117,7 +4473,7 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
 
         char msg[96];
         snprintf(msg, sizeof(msg), "Difficulty set to %s", mc_difficulty_name(difficulty));
-        return send_system_message(c, msg);
+        return proto_play_send_system_message(c, msg);
     }
 
     if (strcmp(cmd_lower, "mineinfo") == 0 || strcmp(cmd_lower, "lootinfo") == 0) {
@@ -4190,6 +4546,143 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             return player_set_health_debug(c, c->health + amount, "Killed by debug command");
         }
         return 0;
+    }
+
+    if (strcmp(cmd_lower, "qa") == 0) {
+        char *sub = strtok_r(NULL, " ", &save);
+        if (!sub || !c->player) {
+            return proto_play_send_system_message(c, "QA: usage !qa state|give|chest|survival|creative|damage|heal");
+        }
+        for (size_t i = 0; sub[i]; i++) sub[i] = (char)tolower((unsigned char)sub[i]);
+
+        if (strcmp(sub, "state") == 0 || strcmp(sub, "inventory") == 0 || strcmp(sub, "inv") == 0) {
+            const mc_inventory_t *inv = conn_inventory_const(c);
+            int stacks = 0;
+            int total = 0;
+            int selected_idx = inv ? mc_inventory_selected_slot_index(inv) : -1;
+            const mc_slot_t *selected = inv ? mc_inventory_selected_slot_const(inv) : NULL;
+            for (int i = 0; inv && i < MC_PLAYER_SLOT_COUNT; i++) {
+                if (!inv->slots[i].present) continue;
+                stacks++;
+                total += inv->slots[i].count;
+            }
+            const char *gm_name = "unknown";
+            switch (c->gamemode) {
+                case GAMEMODE_SURVIVAL: gm_name = "survival"; break;
+                case GAMEMODE_CREATIVE: gm_name = "creative"; break;
+                case GAMEMODE_ADVENTURE: gm_name = "adventure"; break;
+                case GAMEMODE_SPECTATOR: gm_name = "spectator"; break;
+            }
+            const char *selected_name = (selected && selected->present) ? mc_minecraft_item_name(selected->item_id) : "empty";
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "QA state pos=%.2f %.2f %.2f gm=%s health=%.1f food=%d ready=%d stacks=%d items=%d hotbar=%d item=%s x%d",
+                     c->x, c->y, c->z, gm_name, c->health, c->food, c->play_ready ? 1 : 0,
+                     stacks, total, selected_idx, selected_name ? selected_name : "unknown",
+                     (selected && selected->present) ? selected->count : 0);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "give") == 0) {
+            char *item = strtok_r(NULL, " ", &save);
+            char *count_s = strtok_r(NULL, " ", &save);
+            int32_t count = 1;
+            if (!item) return proto_play_send_system_message(c, "QA give: usage !qa give <item> [count]");
+            if (count_s && (!parse_i32(count_s, &count) || count <= 0)) count = 1;
+            if (count > 64) count = 64;
+
+            char item_name[160];
+            if (strlen(item) >= sizeof(item_name) - 12) return proto_play_send_system_message(c, "QA give: item trop long");
+            if (strchr(item, ':')) snprintf(item_name, sizeof(item_name), "%s", item);
+            else snprintf(item_name, sizeof(item_name), "minecraft:%s", item);
+            for (size_t i = 0; item_name[i]; i++) item_name[i] = (char)tolower((unsigned char)item_name[i]);
+
+            int32_t item_id = mc_minecraft_item_id(item_name);
+            if (item_id < 0) return proto_play_send_system_message(c, "QA give: item inconnu");
+
+            mc_inventory_t *inv = conn_inventory(c);
+            mc_slot_t stack;
+            mc_slot_init(&stack);
+            if (!inv || mc_slot_set_simple(&stack, item_id, count) != 0) {
+                mc_slot_clear(&stack);
+                return -1;
+            }
+            int absorbed = mc_inventory_try_absorb_slot(inv, &stack);
+            inv->state_id++;
+            if (sync_inventory_full(c) != 0) {
+                mc_slot_clear(&stack);
+                return -1;
+            }
+            (void)save_player_data(c);
+            char msg[256];
+            snprintf(msg, sizeof(msg), "QA give item=%s requested=%d absorbed=%d leftover=%d",
+                     item_name, count, absorbed, stack.present ? stack.count : 0);
+            mc_slot_clear(&stack);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "survival") == 0 || strcmp(sub, "creative") == 0) {
+            int gm = strcmp(sub, "creative") == 0 ? GAMEMODE_CREATIVE : GAMEMODE_SURVIVAL;
+            c->gamemode = gm;
+            c->player->gamemode = gm;
+            if (send_game_mode_event(c, gm) != 0) return -1;
+            if (send_player_abilities(c) != 0) return -1;
+            (void)save_player_data(c);
+            return proto_play_send_system_message(c, gm == GAMEMODE_CREATIVE ? "QA gamemode creative" : "QA gamemode survival");
+        }
+
+        if (strcmp(sub, "damage") == 0 || strcmp(sub, "dmg") == 0) {
+            char *amount_s = strtok_r(NULL, " ", &save);
+            float amount = 2.0f;
+            if (amount_s && (!parse_f32_text(amount_s, &amount) || amount < 0.0f)) amount = 2.0f;
+            if (player_set_health_debug(c, c->health - amount, "Killed by QA damage") != 0) return -1;
+            char msg[96];
+            snprintf(msg, sizeof(msg), "QA damage amount=%.1f health=%.1f", amount, c->health);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "heal") == 0) {
+            char *amount_s = strtok_r(NULL, " ", &save);
+            float amount = PLAYER_MAX_HEALTH;
+            if (amount_s && (!parse_f32_text(amount_s, &amount) || amount < 0.0f)) amount = PLAYER_MAX_HEALTH;
+            if (player_set_health_debug(c, c->health + amount, "Killed by QA heal") != 0) return -1;
+            char msg[96];
+            snprintf(msg, sizeof(msg), "QA heal amount=%.1f health=%.1f", amount, c->health);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "chest") == 0) {
+            mc_world_t *world = get_world(c);
+            if (!world) return proto_play_send_system_message(c, "QA chest: monde indisponible");
+            int32_t chest_state = mc_block_state_id("minecraft:chest[facing=north,type=single,waterlogged=false]", -1);
+            if (chest_state < 0) return proto_play_send_system_message(c, "QA chest: etat chest introuvable");
+
+            int32_t x = floor_i32_from_f64(c->x) + 2;
+            int32_t y = floor_i32_from_f64(c->y);
+            int32_t z = floor_i32_from_f64(c->z);
+            mc_container_instance_t container;
+            mc_block_entity_t entity;
+            mc_container_instance_init(&container, MC_CONTAINER_KIND_CHEST, x, y, z);
+            int32_t stone_id = mc_minecraft_item_id("minecraft:stone");
+            if (stone_id >= 0) (void)mc_slot_set_simple(&container.slots[0], stone_id, 8);
+            if (mc_world_set_block(world, x, y, z, chest_state) != 0 ||
+                block_entity_from_container_instance(&entity, MC_BLOCK_ENTITY_CHEST, &container) != 0 ||
+                mc_world_put_block_entity(world, x, y, z, &entity) != 0) {
+                mc_container_instance_clear(&container);
+                return -1;
+            }
+            mc_container_instance_clear(&container);
+            if (send_block_update_packet(c, x, y, z, chest_state) != 0) return -1;
+            int nbt_rc = send_block_entity_data_packet(c, chest_state, x, y, z);
+            (void)mc_world_flush_block(world, x, y, z);
+            int refresh_rc = resend_authoritative_chunk_at(c, world, x, z);
+            char msg[128];
+            snprintf(msg, sizeof(msg), "QA chest pos=%d %d %d placed=1 nbt=%d refreshed=%d slot0=stonex8",
+                     x, y, z, nbt_rc == 0 ? 1 : 0, refresh_rc == 0 ? 1 : 0);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        return proto_play_send_system_message(c, "QA: commande inconnue");
     }
 
     if (strcmp(cmd_lower, "kill") == 0) {
@@ -4313,9 +4806,9 @@ static int build_motion_blocking_heightmaps(mc_world_t *world, const mc_chunk_t 
         }
     }
 
-    int64_t *longs = NULL;
+    uint64_t *longs = NULL;
     int32_t long_count = 0;
-    if (mc_packed_pack_compact_u32(vals, 256, 9, &longs, &long_count) != 0 || long_count != 36) {
+    if (pack_simple_bitstorage_u32(vals, 256, 9, &longs, &long_count) != 0 || long_count != 37) {
         free(longs);
         return -1;
     }
@@ -4340,7 +4833,7 @@ static int build_motion_blocking_heightmaps(mc_world_t *world, const mc_chunk_t 
         return -1;
     }
     for (int32_t i = 0; i < long_count; i++) {
-        if (buf_w_i64_be(&b, longs[i]) != 0) {
+        if (buf_w_i64_be(&b, (int64_t)longs[i]) != 0) {
             buf_free(&b);
             free(longs);
             return -1;
@@ -5513,6 +6006,7 @@ int proto_play_send_initial(mc_conn_t *c) {
 
     c->play_init_sent = true;
     c->play_ready = false;
+    log_info("player entered play: %s fd=%d entity_id=%d", c->username[0] ? c->username : "(unknown)", c->fd, c->entity_id);
     return 0;
 }
 
@@ -5537,6 +6031,14 @@ static int handle_player_movement_update(mc_conn_t *c, bool has_pos, double x, d
     }
     c->has_pos = true;
     c->on_ground = on_ground;
+    if (c->play_init_sent && mark_player_ready(c, "via movement") != 0) return -1;
+
+    if (debug_movement_enabled()) {
+        log_info("movement debug: t=%lld input player=%s has_pos=%d pos=(%.3f,%.3f,%.3f) prev=(%.3f,%.3f,%.3f) has_rot=%d yaw=%.2f pitch=%.2f on_ground=%d prev_on_ground=%d",
+                 (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)", has_pos ? 1 : 0,
+                 c->x, c->y, c->z, prev_x, prev_y, prev_z, has_rot ? 1 : 0,
+                 c->yaw, c->pitch, c->on_ground ? 1 : 0, prev_on_ground ? 1 : 0);
+    }
 
     if (player_can_use_hunger_system(c) && has_pos && prev_has_pos) {
         double dx = x - prev_x;
@@ -5592,13 +6094,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         int32_t teleport_id = 0;
         size_t n = 0;
         if (varint_read(frame->payload.data, frame->payload.len, &teleport_id, &n) != 0) return -1;
-        if (teleport_id == c->teleport_id) {
-            bool became_ready = !c->play_ready;
-            c->play_ready = true;
-            if (became_ready && c->server && net_server_sync_item_entities_to_conn(c->server, c) != 0) {
-                return -1;
-            }
-        }
+        if (teleport_id == c->teleport_id && mark_player_ready(c, NULL) != 0) return -1;
         return 0;
     }
 
@@ -5679,6 +6175,14 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 log_info("place debug: held slot=%d item_id=%d item=%s state_id=%d", inv->selected_hotbar_slot,
                          (slot && slot->present) ? slot->item_id : -1, item_name ? item_name : "(empty)", sid);
             }
+            if (debug_equipment_enabled()) {
+                const mc_slot_t *slot = mc_inventory_selected_slot_const(inv);
+                const char *item_name = (slot && slot->present) ? mc_minecraft_item_name(slot->item_id) : NULL;
+                log_info("equipment debug: t=%lld selected player=%s hotbar=%d item=%s(%d) count=%d",
+                         (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)", inv->selected_hotbar_slot,
+                         item_name ? item_name : "(empty)", (slot && slot->present) ? slot->item_id : -1,
+                         (slot && slot->present) ? slot->count : 0);
+            }
             (void)save_player_data(c);
         }
         return 0;
@@ -5721,6 +6225,33 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (r_string_alloc(&r, &cmd) != 0) return -1;
         int rc = handle_command(c, cmd);
         free(cmd);
+        return rc;
+    }
+
+    if (frame->packet_id == PKT_PLAY_CHAT_MESSAGE) {
+        mc_reader_t r = {frame->payload.data, frame->payload.len, 0};
+        char *message = NULL;
+        if (r_string_alloc(&r, &message) != 0) return -1;
+        if (message[0] == '!' &&
+            tolower((unsigned char)message[1]) == 'q' &&
+            tolower((unsigned char)message[2]) == 'a' &&
+            (message[3] == '\0' || isspace((unsigned char)message[3]))) {
+            char *cmd = (char *)malloc(strlen(message));
+            if (!cmd) {
+                free(message);
+                return -1;
+            }
+            strcpy(cmd, message + 1);
+            int rc = handle_command(c, cmd);
+            free(cmd);
+            free(message);
+            return rc;
+        }
+        log_info("[chat] %s: %s", c->username[0] ? c->username : "(unknown)", message);
+        char line[320];
+        snprintf(line, sizeof(line), "<%s> %s", c->username[0] ? c->username : "unknown", message);
+        int rc = c->server ? net_server_broadcast_system_message(c->server, line) : proto_play_send_system_message(c, line);
+        free(message);
         return rc;
     }
 

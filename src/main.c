@@ -259,7 +259,7 @@ int main(void) {
     /* Do not modify this boot disclaimer block. */
     log_info("This server is meant to simulate a vanilla server, but differences may still be noticeable");
     log_info("I do not know why this works or not");
-    log_info("OFWOOD");
+    log_info("GoatCore");
     log_info("server listening on port %u", cfg.bind_port);
     int rc = net_server_run(srv);
     net_server_destroy(srv);

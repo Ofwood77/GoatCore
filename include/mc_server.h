@@ -7,7 +7,7 @@
 #include "mc_inventory.h"
 
 #define MC_PROTO_VERSION 775
-#define MC_PROTO_VERSION_1_21_1 MC_PROTO_VERSION
+#define MC_PROTO_VERSION_CURRENT MC_PROTO_VERSION
 #define MC_GAME_VERSION "26.1.1"
 
 typedef enum {
@@ -67,5 +67,6 @@ mc_difficulty_t net_server_get_difficulty(mc_server_t *server);
 void net_server_set_difficulty(mc_server_t *server, mc_difficulty_t difficulty);
 const char *mc_difficulty_name(mc_difficulty_t difficulty);
 int net_server_broadcast_difficulty(mc_server_t *server);
+int net_server_broadcast_system_message(mc_server_t *server, const char *text);
 
 #endif /* MC_SERVER_H */

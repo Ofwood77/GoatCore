@@ -1,0 +1,5 @@
+{
+  "name": "full",
+  "description": "Smoke, movement, inventory, puis blocks seulement si RUN_DESTRUCTIVE_TESTS=1.",
+  "steps": ["smoke", "movement", "inventory", "blocks_if_destructive"]
+}
