@@ -38,6 +38,12 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     return NULL;
 }
 
+mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {
+    (void)server;
+    (void)entity_id;
+    return NULL;
+}
+
 void net_server_release_conn(mc_conn_t *conn) {
     (void)conn;
 }

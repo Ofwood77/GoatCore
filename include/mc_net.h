@@ -12,6 +12,11 @@
 #include "mc_world.h"
 
 #define MC_BUF_CAP 8192
+/* Current chunks (24 sections + light) fit well below 2 MiB. */
+#define MC_MAX_FRAME (2u * 1024u * 1024u - 1u)
+#define MC_MAX_INPUT_BUFFER (MC_MAX_FRAME + 5u)
+#define MC_MAX_OUTPUT_BUFFER (32u * 1024u * 1024u)
+#define MC_MAX_CONNECTIONS 1024u
 #define MC_REMOTE_EQUIPMENT_SLOT_COUNT 6
 
 /* Simple growable byte buffer used for framed protocol IO. */
@@ -20,6 +25,7 @@ typedef struct {
     size_t len;
     size_t cap;
     size_t rpos;
+    size_t limit; /* zero: general buffer, bounded by MC_MAX_OUTPUT_BUFFER */
 } mc_buf_t;
 
 /* Pending chunk-stream request remembered per connection. */
@@ -56,6 +62,8 @@ struct mc_conn {
     pthread_mutex_t out_lock;
     atomic_int state;
     atomic_bool closing;
+    atomic_bool abort_io;
+    bool command_authorized;
     const mc_server_config_t *cfg;
     mc_server_t *server;
     atomic_int refcount;

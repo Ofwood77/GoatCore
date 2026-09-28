@@ -1,6 +1,7 @@
 #include "mc_net.h"
 #include "mc_protocol.h"
 #include "mc_util.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
@@ -30,8 +31,70 @@ static int decompress_payload(const uint8_t *src, size_t src_len, uint8_t *dst, 
     strm.avail_out = (uInt)dst_len;
     if (inflateInit(&strm) != Z_OK) return -1;
     int ret = inflate(&strm, Z_FINISH);
+    bool valid = ret == Z_STREAM_END && strm.total_out == dst_len && strm.avail_in == 0;
     inflateEnd(&strm);
-    if (ret != Z_STREAM_END) return -1;
+    if (!valid) return -1;
+    return 0;
+}
+
+static int write_varint_to_tmp(uint8_t *buf, size_t cap, int32_t value, size_t *out_len) {
+    if (!buf || !out_len) return -1;
+    if (varint_write(buf, cap, value, out_len) != 0) return -1;
+    return 0;
+}
+
+static int build_uncompressed_packet(uint8_t **out, size_t *out_len,
+                                     const uint8_t *packet, size_t packet_len) {
+    uint8_t data_len_buf[MC_VARINT_MAX_BYTES];
+    size_t data_len_bytes = 0;
+    if (!out || !out_len || !packet) return -1;
+    if (write_varint_to_tmp(data_len_buf, sizeof(data_len_buf), 0, &data_len_bytes) != 0) return -1;
+    if (packet_len > SIZE_MAX - data_len_bytes) return -1;
+
+    *out_len = data_len_bytes + packet_len;
+    *out = (uint8_t *)malloc(*out_len);
+    if (!*out) return -1;
+    memcpy(*out, data_len_buf, data_len_bytes);
+    memcpy(*out + data_len_bytes, packet, packet_len);
+    return 0;
+}
+
+static int build_compressed_packet(uint8_t **out, size_t *out_len,
+                                   const uint8_t *packet, size_t packet_len) {
+    uint8_t data_len_buf[MC_VARINT_MAX_BYTES];
+    size_t data_len_bytes = 0;
+    uLongf comp_bound;
+    uint8_t *comp = NULL;
+    int zrc;
+
+    if (!out || !out_len || !packet) return -1;
+    if (packet_len > (size_t)INT32_MAX) return -1;
+    if (write_varint_to_tmp(data_len_buf, sizeof(data_len_buf), (int32_t)packet_len, &data_len_bytes) != 0) return -1;
+
+    comp_bound = compressBound((uLong)packet_len);
+    if ((uLongf)(size_t)comp_bound != comp_bound) return -1;
+    comp = (uint8_t *)malloc((size_t)comp_bound);
+    if (!comp) return -1;
+
+    zrc = compress2(comp, &comp_bound, packet, (uLong)packet_len, Z_DEFAULT_COMPRESSION);
+    if (zrc != Z_OK || (uLongf)(size_t)comp_bound != comp_bound) {
+        free(comp);
+        return -1;
+    }
+    if ((size_t)comp_bound > SIZE_MAX - data_len_bytes) {
+        free(comp);
+        return -1;
+    }
+
+    *out_len = data_len_bytes + (size_t)comp_bound;
+    *out = (uint8_t *)malloc(*out_len);
+    if (!*out) {
+        free(comp);
+        return -1;
+    }
+    memcpy(*out, data_len_buf, data_len_bytes);
+    memcpy(*out + data_len_bytes, comp, (size_t)comp_bound);
+    free(comp);
     return 0;
 }
 
@@ -45,9 +108,9 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
     int32_t packet_len = 0;
     size_t len_bytes = 0;
     if (varint_read(c->in.data + c->in.rpos, c->in.len - c->in.rpos, &packet_len, &len_bytes) != 0) {
-        return 1;
+        return c->in.len - c->in.rpos >= MC_VARINT_MAX_BYTES ? -1 : 1;
     }
-    if (packet_len <= 0) return -1;
+    if (packet_len > (int32_t)MC_MAX_FRAME || packet_len <= 0) return -1;
     if (c->in.len - c->in.rpos < len_bytes + (size_t)packet_len) return 1;
 
     size_t frame_start = c->in.rpos + len_bytes;
@@ -65,7 +128,10 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
         if (varint_read(frame_data, frame_len, &data_len, &data_len_bytes) != 0) return -1;
         payload_src = frame_data + data_len_bytes;
         payload_src_len = frame_len - data_len_bytes;
+        if (data_len < 0 || data_len > (int32_t)MC_MAX_FRAME) return -1;
+        if (data_len == 0 && payload_src_len >= (size_t)compression_threshold) return -1;
         if (data_len != 0) {
+            if (data_len < compression_threshold) return -1;
             payload = (uint8_t *)malloc((size_t)data_len);
             if (!payload) return -1;
             if (decompress_payload(payload_src, payload_src_len, payload, (size_t)data_len) != 0) {
@@ -91,7 +157,7 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
     }
 
     out_frame->packet_id = packet_id;
-    out_frame->payload.data = (uint8_t *)malloc(payload_src_len - id_bytes);
+    out_frame->payload.data = (uint8_t *)malloc(payload_src_len - id_bytes + 1);
     if (!out_frame->payload.data) {
         free(payload);
         return -1;
@@ -111,43 +177,39 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
     uint8_t header[16];
     size_t id_bytes = 0;
     if (varint_write(header, sizeof(header), packet_id, &id_bytes) != 0) return -1;
+    if (!c || (!payload && payload_len > 0)) return -1;
 
     size_t uncompressed_len = id_bytes + payload_len;
+    if (uncompressed_len < id_bytes || uncompressed_len > MC_MAX_FRAME) return -1;
 
+    uint8_t *packet = NULL;
     uint8_t *body = NULL;
     size_t body_len = 0;
 
+    packet = (uint8_t *)malloc(uncompressed_len ? uncompressed_len : 1u);
+    if (!packet) return -1;
+    memcpy(packet, header, id_bytes);
+    if (payload_len > 0) memcpy(packet + id_bytes, payload, payload_len);
+
     if (compression_threshold >= 0) {
-        if ((int)uncompressed_len >= compression_threshold) {
-            uLongf comp_bound = compressBound((uLong)uncompressed_len);
-            uint8_t *comp = (uint8_t *)malloc(comp_bound);
-            if (!comp) return -1;
-            if (compress2(comp, &comp_bound, header, (uLong)id_bytes, Z_DEFAULT_COMPRESSION) != Z_OK) {
-                free(comp);
+        if (uncompressed_len >= (size_t)compression_threshold) {
+            if (build_compressed_packet(&body, &body_len, packet, uncompressed_len) != 0) {
+                free(packet);
                 return -1;
             }
-            if (compress2(comp + comp_bound, &comp_bound, payload, (uLong)payload_len, Z_DEFAULT_COMPRESSION) != Z_OK) {
-                /* fall back: no compression in this stub path */
-            }
-            free(comp);
-            /* For now, don't compress in output path to keep stub simple */
+        } else if (build_uncompressed_packet(&body, &body_len, packet, uncompressed_len) != 0) {
+            free(packet);
+            return -1;
         }
-        /* data_len VarInt = 0 (no compression) */
-        uint8_t data_len_buf[8];
-        size_t data_len_bytes = 0;
-        if (varint_write(data_len_buf, sizeof(data_len_buf), 0, &data_len_bytes) != 0) return -1;
-        body_len = data_len_bytes + uncompressed_len;
-        body = (uint8_t *)malloc(body_len);
-        if (!body) return -1;
-        memcpy(body, data_len_buf, data_len_bytes);
-        memcpy(body + data_len_bytes, header, id_bytes);
-        memcpy(body + data_len_bytes + id_bytes, payload, payload_len);
     } else {
         body_len = uncompressed_len;
-        body = (uint8_t *)malloc(body_len);
-        if (!body) return -1;
-        memcpy(body, header, id_bytes);
-        memcpy(body + id_bytes, payload, payload_len);
+        body = packet;
+        packet = NULL;
+    }
+    free(packet);
+    if (body_len > MC_MAX_FRAME) {
+        free(body);
+        return -1;
     }
 
     uint8_t len_buf[8];
@@ -160,6 +222,16 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
     size_t out_before = 0;
     size_t out_after = 0;
     pthread_mutex_lock(&c->out_lock);
+    buf_compact(&c->out);
+    if (c->abort_io || c->out.len > MC_MAX_OUTPUT_BUFFER ||
+        len_bytes + body_len > MC_MAX_OUTPUT_BUFFER - c->out.len ||
+        buf_reserve(&c->out, len_bytes + body_len) != 0) {
+        c->abort_io = true;
+        c->closing = true;
+        pthread_mutex_unlock(&c->out_lock);
+        free(body);
+        return -1;
+    }
     out_before = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     if (buf_write(&c->out, len_buf, len_bytes) != 0) {
         pthread_mutex_unlock(&c->out_lock);

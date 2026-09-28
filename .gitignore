@@ -49,3 +49,5 @@ assets/*
 !assets/registry_packets_26_1_1.bin
 !assets/tags_packet_26_1_1.bin
 !assets/chunk_0_0_26_1_1.bin
+.aider*
+*Zone.Identifier

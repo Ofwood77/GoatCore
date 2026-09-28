@@ -32,6 +32,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #define PKT_PLAY_DISCONNECT MC_PKT_PLAY_CLIENTBOUND_DISCONNECT
 #define PKT_PLAY_COMMANDS MC_PKT_PLAY_CLIENTBOUND_COMMANDS
 #define PKT_PLAY_CLOSE_WINDOW MC_PKT_PLAY_CLIENTBOUND_CONTAINER_CLOSE
@@ -57,8 +61,10 @@
 #define PKT_PLAY_ENTITY_LOOK MC_PKT_PLAY_CLIENTBOUND_MOVE_ENTITY_ROT
 #define PKT_PLAY_PLAYER_REMOVE MC_PKT_PLAY_CLIENTBOUND_PLAYER_INFO_REMOVE
 #define PKT_PLAY_PLAYER_INFO MC_PKT_PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE
+#define PKT_PLAY_CHUNK_BATCH_FINISHED MC_PKT_PLAY_CLIENTBOUND_CHUNK_BATCH_FINISHED
+#define PKT_PLAY_CHUNK_BATCH_START MC_PKT_PLAY_CLIENTBOUND_CHUNK_BATCH_START
 #define PKT_PLAY_KEEPALIVE_SB MC_PKT_PLAY_SERVERBOUND_KEEP_ALIVE
-#define PKT_PLAY_CONFIRM_TELEPORT MC_PKT_PLAY_SERVERBOUND_ACCEPT_TELEPORTATION
+#define PKT_PLAY_CONFIRM_TELEPORT 0x00
 #define PKT_PLAY_BLOCK_CHANGED_ACK MC_PKT_PLAY_CLIENTBOUND_BLOCK_CHANGED_ACK
 #define PKT_PLAY_BLOCK_UPDATE MC_PKT_PLAY_CLIENTBOUND_BLOCK_UPDATE
 #define PKT_PLAY_BLOCK_EVENT MC_PKT_PLAY_CLIENTBOUND_BLOCK_EVENT
@@ -69,6 +75,11 @@
 #define PKT_PLAY_CHAT_COMMAND MC_PKT_PLAY_SERVERBOUND_CHAT_COMMAND
 #define PKT_PLAY_SIGNED_CHAT_COMMAND MC_PKT_PLAY_SERVERBOUND_CHAT_COMMAND_SIGNED
 #define PKT_PLAY_CLIENT_COMMAND_SB MC_PKT_PLAY_SERVERBOUND_CLIENT_COMMAND
+/*
+ * Serverbound PLAY packet ids are pinned to data/26.1.1/reports/packets.json.
+ * assets/protocol.json is kept as an auxiliary asset, but its PLAY mapping can
+ * describe a different layout and must not drive the 26.1.1 runtime dispatch.
+ */
 #define PKT_PLAY_PLAYER_ACTION MC_PKT_PLAY_SERVERBOUND_PLAYER_ACTION
 #define PKT_PLAY_HELD_ITEM_SLOT_SB MC_PKT_PLAY_SERVERBOUND_SET_CARRIED_ITEM
 #define PKT_PLAY_WINDOW_CLICK MC_PKT_PLAY_SERVERBOUND_CONTAINER_CLICK
@@ -89,6 +100,8 @@
 #define PKT_PLAY_CHANGE_DIFFICULTY MC_PKT_PLAY_CLIENTBOUND_CHANGE_DIFFICULTY
 #define PKT_PLAY_SYSTEM_CHAT MC_PKT_PLAY_CLIENTBOUND_SYSTEM_CHAT
 #define PKT_PLAY_SET_EQUIPMENT MC_PKT_PLAY_CLIENTBOUND_SET_EQUIPMENT
+#define PKT_PLAY_INTERACT_SB MC_PKT_PLAY_SERVERBOUND_INTERACT
+#define PKT_PLAY_CHUNK_BATCH_RECEIVED_SB MC_PKT_PLAY_SERVERBOUND_CHUNK_BATCH_RECEIVED
 
 #define CHUNK_XZ 16
 
@@ -96,6 +109,7 @@
 #define CHUNK_SEND_SCAN_LIMIT 32
 
 #define ENTITY_STATUS_OP_LEVEL_4 28
+#define ENTITY_STATUS_HURT 2
 
 #define GAMEMODE_SURVIVAL 0
 #define GAMEMODE_CREATIVE 1
@@ -139,6 +153,10 @@
 #define PLAYER_VOID_DAMAGE_AMOUNT 4.0f
 #define PLAYER_VOID_DAMAGE_INTERVAL_MS 500
 #define PLAYER_FALL_SAFE_DISTANCE 3.0
+#define PLAYER_PVP_BASE_DAMAGE 4.0f
+#define PLAYER_PVP_MAX_DISTANCE 4.5
+#define PLAYER_PVP_MAX_DISTANCE_SQ (PLAYER_PVP_MAX_DISTANCE * PLAYER_PVP_MAX_DISTANCE)
+#define PLAYER_SHIELD_BLOCK_DOT 0.0
 #define PLAYER_RESPAWN_COPY_METADATA 0
 #define PLAYER_CLIENT_COMMAND_PERFORM_RESPAWN 0
 #define PLAYER_ACTION_START_DESTROY_BLOCK 0
@@ -203,6 +221,7 @@ static int buf_w_varint(mc_buf_t *b, int32_t v);
 static void close_active_window(mc_conn_t *c, bool notify_client);
 static void sent_chunks_clear(mc_conn_t *c);
 static void pending_chunks_clear(mc_conn_t *c);
+static void reset_remote_player_tracking(mc_conn_t *c);
 static int container_block_entity_type(int32_t state_id);
 static const char *block_entity_type_name_for_state(int32_t state_id);
 static bool is_chest_state(int32_t state_id);
@@ -218,8 +237,13 @@ static int sync_active_container_window(mc_conn_t *c);
 static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, const mc_chunk_t *chunk);
 static int paletted_word_count_for_network(int entry_count, int bits);
 static int encode_paletted_container_network(mc_buf_t *out, const uint32_t *values, int entry_count, int palette_bits);
-static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face);
+static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face,
+                                          float hit_x, float hit_y, float hit_z);
+static int32_t recompute_connected_block_state(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t state_id);
+static int recompute_connected_block_at(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
+static int send_recomputed_connected_neighbors(mc_conn_t *c, mc_world_t *world, int32_t x, int32_t y, int32_t z);
 static int send_block_entity_data_packet(mc_conn_t *c, int32_t state_id, int32_t x, int32_t y, int32_t z);
+static int send_block_update_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t z, int32_t state_id);
 static int send_block_event_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t z, uint8_t action, uint8_t param, int32_t block_id);
 static int send_sent_chunks_post_updates(mc_conn_t *c);
 static int maybe_send_chunk_refresh_ping(mc_conn_t *c);
@@ -229,12 +253,14 @@ static int send_window_items(mc_conn_t *c);
 static int sync_inventory_full(mc_conn_t *c);
 static int respawn_player(mc_conn_t *c);
 static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms);
+static int handle_interact_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms);
 static int make_text_component(const char *text, uint8_t **out, size_t *out_len);
 static int pack_simple_bitstorage_u32(const uint32_t *values, size_t value_count, int bits,
                                       uint64_t **out_words, int32_t *out_word_count);
 static int32_t floor_i32_from_f64(double v);
 static void reset_fall_tracking(mc_conn_t *c);
 static int try_consume_selected_food(mc_conn_t *c);
+static int try_start_shield_use(mc_conn_t *c, int32_t hand);
 static int drop_selected_mainhand_items(mc_conn_t *c, int32_t requested_count);
 static int drop_player_slot(mc_conn_t *c, mc_slot_t *slot, bool server_locked);
 static int player_sync_food_state(mc_conn_t *c, bool persist);
@@ -244,6 +270,8 @@ static int tick_item_use(mc_conn_t *c);
 static int update_player_crafting_result(mc_conn_t *c);
 static int return_player_crafting_grid(mc_conn_t *c);
 static int return_container_crafting_grid(mc_conn_t *c, mc_container_instance_t *container);
+static const mc_slot_t *selected_mainhand_slot(const mc_conn_t *c);
+static int selected_mainhand_slot_index(const mc_conn_t *c);
 
 static int w_varint(uint8_t *buf, size_t cap, size_t *pos, int32_t v) {
     size_t n = 0;
@@ -991,17 +1019,32 @@ static int send_commands(mc_conn_t *c) {
     return conn_write_packet(c, PKT_PLAY_COMMANDS, buf, pos, -1);
 }
 
-static int parse_gamemode(const char *mode) {
+int proto_play_parse_gamemode_for_test(const char *mode) {
     if (!mode) return -1;
     char tmp[32];
     size_t n = strlen(mode);
     if (n >= sizeof(tmp)) n = sizeof(tmp) - 1;
     for (size_t i = 0; i < n; i++) tmp[i] = (char)tolower((unsigned char)mode[i]);
     tmp[n] = '\0';
-    if (strcmp(tmp, "0") == 0 || strcmp(tmp, "s") == 0 || strcmp(tmp, "survival") == 0) return GAMEMODE_SURVIVAL;
-    if (strcmp(tmp, "1") == 0 || strcmp(tmp, "c") == 0 || strcmp(tmp, "creative") == 0) return GAMEMODE_CREATIVE;
-    if (strcmp(tmp, "2") == 0 || strcmp(tmp, "a") == 0 || strcmp(tmp, "adventure") == 0) return GAMEMODE_ADVENTURE;
-    if (strcmp(tmp, "3") == 0 || strcmp(tmp, "sp") == 0 || strcmp(tmp, "spectator") == 0) return GAMEMODE_SPECTATOR;
+    if (strcmp(tmp, "survival") == 0) return GAMEMODE_SURVIVAL;
+    if (strcmp(tmp, "creative") == 0) return GAMEMODE_CREATIVE;
+    if (strcmp(tmp, "adventure") == 0) return GAMEMODE_ADVENTURE;
+    if (strcmp(tmp, "spectator") == 0) return GAMEMODE_SPECTATOR;
+    return -1;
+}
+
+int32_t proto_play_serverbound_packet_id_for_test(const char *name) {
+    if (!name) return -1;
+    if (strcmp(name, "chat_command") == 0) return PKT_PLAY_CHAT_COMMAND;
+    if (strcmp(name, "chat_message") == 0) return PKT_PLAY_CHAT_MESSAGE;
+    if (strcmp(name, "interact") == 0) return PKT_PLAY_INTERACT_SB;
+    if (strcmp(name, "move_pos") == 0) return PKT_PLAY_SET_PLAYER_POSITION;
+    if (strcmp(name, "move_pos_rot") == 0) return PKT_PLAY_SET_PLAYER_POS_ROT;
+    if (strcmp(name, "move_rot") == 0) return PKT_PLAY_SET_PLAYER_ROT;
+    if (strcmp(name, "move_on_ground") == 0) return PKT_PLAY_SET_PLAYER_ON_GROUND;
+    if (strcmp(name, "player_action") == 0) return PKT_PLAY_PLAYER_ACTION;
+    if (strcmp(name, "use_item_on") == 0) return PKT_PLAY_USE_ITEM_ON;
+    if (strcmp(name, "use_item") == 0) return PKT_PLAY_USE_ITEM;
     return -1;
 }
 
@@ -1325,9 +1368,14 @@ int32_t proto_play_slot_to_state(const mc_world_ids_t *ids, const mc_slot_t *slo
 }
 
 int32_t proto_play_resolve_placement_state(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch) {
+    return proto_play_resolve_placement_state_ex(ids, slot, face, yaw, pitch, 0.5f, 0.5f, 0.5f);
+}
+
+int32_t proto_play_resolve_placement_state_ex(const mc_world_ids_t *ids, const mc_slot_t *slot, int32_t face, float yaw, float pitch,
+                                             float hit_x, float hit_y, float hit_z) {
     (void)ids;
     (void)pitch;
-    return mc_resolve_placement_state(slot, yaw, face);
+    return mc_resolve_placement_state(slot, yaw, face, hit_x, hit_y, hit_z);
 }
 
 static const char *axis_from_clicked_face(int32_t face) {
@@ -1373,8 +1421,262 @@ static int rewrite_state_property(const char *src, const char *prop, const char 
     return 0;
 }
 
-static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face) {
+static bool state_key_base_name(const char *key, char *base, size_t base_cap) {
+    if (!key || !base || base_cap == 0) return false;
+    const char *props = strchr(key, '[');
+    size_t n = props ? (size_t)(props - key) : strlen(key);
+    if (n == 0 || n >= base_cap) return false;
+    memcpy(base, key, n);
+    base[n] = '\0';
+    return true;
+}
+
+static bool str_has_suffix(const char *s, const char *suffix) {
+    size_t s_len = s ? strlen(s) : 0;
+    size_t suffix_len = suffix ? strlen(suffix) : 0;
+    return s_len >= suffix_len && suffix_len > 0 && memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+static bool state_base_is_fence(const char *base) {
+    return str_has_suffix(base, "_fence") && !str_has_suffix(base, "_fence_gate");
+}
+
+static bool state_base_is_fence_gate(const char *base) {
+    return str_has_suffix(base, "_fence_gate");
+}
+
+static bool state_base_is_wall(const char *base) {
+    return str_has_suffix(base, "_wall");
+}
+
+static bool state_base_is_pane(const char *base) {
+    return str_has_suffix(base, "_pane");
+}
+
+static bool state_base_is_iron_bars(const char *base) {
+    return base && strcmp(base, "minecraft:iron_bars") == 0;
+}
+
+static bool state_base_is_connected_pane_or_bars(const char *base) {
+    return state_base_is_pane(base) || state_base_is_iron_bars(base);
+}
+
+static bool state_is_fence_like(int32_t state_id) {
+    char base[128];
+    const char *key = mc_block_state_key(state_id);
+    return state_key_base_name(key, base, sizeof(base)) && state_base_is_fence(base);
+}
+
+static bool state_is_fence_gate_like(int32_t state_id) {
+    char base[128];
+    const char *key = mc_block_state_key(state_id);
+    return state_key_base_name(key, base, sizeof(base)) && state_base_is_fence_gate(base);
+}
+
+static bool state_is_wall_like(int32_t state_id) {
+    char base[128];
+    const char *key = mc_block_state_key(state_id);
+    return state_key_base_name(key, base, sizeof(base)) && state_base_is_wall(base);
+}
+
+static bool state_is_connected_pane_or_bars_like(int32_t state_id) {
+    char base[128];
+    const char *key = mc_block_state_key(state_id);
+    return state_key_base_name(key, base, sizeof(base)) && state_base_is_connected_pane_or_bars(base);
+}
+
+static bool connected_state_waterlogged(const char *key) {
+    return key && strstr(key, "waterlogged=true") != NULL;
+}
+
+static bool fence_connects_to(int32_t neighbor_state) {
+    return state_is_fence_like(neighbor_state) || state_is_fence_gate_like(neighbor_state);
+}
+
+static bool wall_connects_to(int32_t neighbor_state) {
+    return state_is_wall_like(neighbor_state) || state_is_fence_like(neighbor_state) || state_is_fence_gate_like(neighbor_state);
+}
+
+static bool pane_or_bars_connects_to(int32_t neighbor_state) {
+    return state_is_connected_pane_or_bars_like(neighbor_state);
+}
+
+static bool get_neighbor_connected(mc_world_t *world, int32_t x, int32_t y, int32_t z, int kind) {
+    int32_t neighbor = -1;
+    if (!world || mc_world_get_block(world, x, y, z, &neighbor) != 0) return false;
+    if (kind == 1) return wall_connects_to(neighbor);
+    if (kind == 2) return pane_or_bars_connects_to(neighbor);
+    return fence_connects_to(neighbor);
+}
+
+static int32_t recompute_connected_block_state(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t state_id) {
+    const char *key = mc_block_state_key(state_id);
+    char base[128];
+    char next_key[256];
+    bool is_wall = false;
+    bool is_fence = false;
+    bool is_pane_or_bars = false;
+    bool north, south, west, east;
+    const char *waterlogged;
+    int32_t next;
+
+    if (!world || !state_key_base_name(key, base, sizeof(base))) return state_id;
+    is_wall = state_base_is_wall(base);
+    is_fence = state_base_is_fence(base);
+    is_pane_or_bars = state_base_is_connected_pane_or_bars(base);
+    if (!is_wall && !is_fence && !is_pane_or_bars) return state_id;
+
+    int kind = is_wall ? 1 : (is_pane_or_bars ? 2 : 0);
+    north = get_neighbor_connected(world, x, y, z - 1, kind);
+    south = get_neighbor_connected(world, x, y, z + 1, kind);
+    west = get_neighbor_connected(world, x - 1, y, z, kind);
+    east = get_neighbor_connected(world, x + 1, y, z, kind);
+    waterlogged = connected_state_waterlogged(key) ? "true" : "false";
+
+    if (is_fence || is_pane_or_bars) {
+        int n = snprintf(next_key, sizeof(next_key), "%s[east=%s,north=%s,south=%s,waterlogged=%s,west=%s]",
+                         base, east ? "true" : "false", north ? "true" : "false",
+                         south ? "true" : "false", waterlogged, west ? "true" : "false");
+        if (n <= 0 || (size_t)n >= sizeof(next_key)) return state_id;
+    } else {
+        int n = snprintf(next_key, sizeof(next_key), "%s[east=%s,north=%s,south=%s,up=true,waterlogged=%s,west=%s]",
+                         base, east ? "low" : "none", north ? "low" : "none",
+                         south ? "low" : "none", waterlogged, west ? "low" : "none");
+        if (n <= 0 || (size_t)n >= sizeof(next_key)) return state_id;
+    }
+
+    next = mc_block_state_id(next_key, -1);
+    return next >= 0 ? next : state_id;
+}
+
+int32_t proto_play_recompute_connected_block_state_for_test(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t state_id) {
+    return recompute_connected_block_state(world, x, y, z, state_id);
+}
+
+static int recompute_connected_block_at(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t *out_state_id) {
+    int32_t current = -1;
+    int32_t next = -1;
+    if (!world) return -1;
+    if (mc_world_get_block(world, x, y, z, &current) != 0) return -1;
+    next = recompute_connected_block_state(world, x, y, z, current);
+    if (out_state_id) *out_state_id = next;
+    if (next == current) return 0;
+    if (mc_world_set_block(world, x, y, z, next) != 0) return -1;
+    if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+    return 1;
+}
+
+static int send_recomputed_connected_neighbors(mc_conn_t *c, mc_world_t *world, int32_t x, int32_t y, int32_t z) {
+    static const int32_t dirs[4][2] = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
+    if (!c || !world) return -1;
+    for (size_t i = 0; i < 4; i++) {
+        int32_t nx = x + dirs[i][0];
+        int32_t nz = z + dirs[i][1];
+        int32_t state_id = -1;
+        int rc = recompute_connected_block_at(world, nx, y, nz, &state_id);
+        if (rc < 0) return -1;
+        if (rc > 0 && send_block_update_packet(c, nx, y, nz, state_id) != 0) return -1;
+    }
+    return 0;
+}
+
+static bool state_base_is_slab(const char *base) {
+    return str_has_suffix(base, "_slab");
+}
+
+static bool state_base_is_stairs(const char *base) {
+    return str_has_suffix(base, "_stairs");
+}
+
+static bool state_base_is_trapdoor(const char *base) {
+    return str_has_suffix(base, "_trapdoor");
+}
+
+static bool state_base_is_door(const char *base) {
+    return str_has_suffix(base, "_door") && !state_base_is_trapdoor(base);
+}
+
+static const char *half_from_face_hit_y(int32_t clicked_face, float hit_y) {
+    if (clicked_face == 0) return "top";
+    if (clicked_face == 1) return "bottom";
+    return hit_y > 0.5f ? "top" : "bottom";
+}
+
+static int32_t state_id_from_key_or_fallback(const char *key, int32_t fallback) {
+    int32_t id = key ? mc_block_state_id(key, -1) : -1;
+    return id >= 0 ? id : fallback;
+}
+
+static int32_t slab_double_state_for_base(const char *base, int32_t fallback) {
+    char key[256];
+    if (!base) return fallback;
+    int n = snprintf(key, sizeof(key), "%s[type=double,waterlogged=false]", base);
+    if (n <= 0 || (size_t)n >= sizeof(key)) return fallback;
+    return state_id_from_key_or_fallback(key, fallback);
+}
+
+static bool slab_base_and_type(int32_t state_id, char *base, size_t base_cap, char *type, size_t type_cap) {
+    const char *key = mc_block_state_key(state_id);
+    const char *type_pos = NULL;
+    const char *type_end = NULL;
+    size_t n = 0;
+    if (!state_key_base_name(key, base, base_cap) || !state_base_is_slab(base)) return false;
+    type_pos = strstr(key, "type=");
+    if (!type_pos || !type || type_cap == 0) return false;
+    type_pos += strlen("type=");
+    type_end = type_pos;
+    while (*type_end && *type_end != ',' && *type_end != ']') type_end++;
+    n = (size_t)(type_end - type_pos);
+    if (n == 0 || n >= type_cap) return false;
+    memcpy(type, type_pos, n);
+    type[n] = '\0';
+    return true;
+}
+
+int32_t proto_play_try_merge_slab_state_for_test(int32_t clicked_state_id, int32_t requested_state_id) {
+    char clicked_base[128];
+    char clicked_type[16];
+    char requested_base[128];
+    char requested_type[16];
+    if (!slab_base_and_type(clicked_state_id, clicked_base, sizeof(clicked_base), clicked_type, sizeof(clicked_type)) ||
+        !slab_base_and_type(requested_state_id, requested_base, sizeof(requested_base), requested_type, sizeof(requested_type)) ||
+        strcmp(clicked_base, requested_base) != 0 || strcmp(clicked_type, "double") == 0) {
+        return -1;
+    }
+    return slab_double_state_for_base(clicked_base, -1);
+}
+
+static bool door_base_and_half(int32_t state_id, char *base, size_t base_cap, char *half, size_t half_cap) {
+    const char *key = mc_block_state_key(state_id);
+    const char *half_pos = NULL;
+    const char *half_end = NULL;
+    size_t n = 0;
+    if (!state_key_base_name(key, base, base_cap) || !state_base_is_door(base)) return false;
+    half_pos = strstr(key, "half=");
+    if (!half_pos || !half || half_cap == 0) return false;
+    half_pos += strlen("half=");
+    half_end = half_pos;
+    while (*half_end && *half_end != ',' && *half_end != ']') half_end++;
+    n = (size_t)(half_end - half_pos);
+    if (n == 0 || n >= half_cap) return false;
+    memcpy(half, half_pos, n);
+    half[n] = '\0';
+    return true;
+}
+
+static int32_t door_other_half_state(int32_t state_id, const char *wanted_half) {
+    const char *key = mc_block_state_key(state_id);
+    char rewritten[256];
+    if (!key || !wanted_half) return -1;
+    if (rewrite_state_property(key, "half=", wanted_half, rewritten, sizeof(rewritten)) != 0) return -1;
+    return mc_block_state_id(rewritten, -1);
+}
+
+static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face,
+                                          float hit_x, float hit_y, float hit_z) {
     if (!slot || !slot->present || slot->count <= 0) return -1;
+    (void)hit_x;
+    (void)hit_z;
 
     int32_t mapped_state_id = mc_item_default_place_state(slot->item_id);
     if (mapped_state_id < 0) return -1;
@@ -1382,7 +1684,36 @@ static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_ya
     const char *mapped_key = mc_block_state_key(mapped_state_id);
     if (!mapped_key) return mapped_state_id;
 
+    char base[128];
     char rewritten[256];
+    if (state_key_base_name(mapped_key, base, sizeof(base))) {
+        const char *facing = opposite_horizontal_facing_from_yaw(player_yaw);
+        const char *half = half_from_face_hit_y(clicked_face, hit_y);
+
+        if (state_base_is_slab(base)) {
+            int n = snprintf(rewritten, sizeof(rewritten), "%s[type=%s,waterlogged=false]", base, half);
+            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
+        }
+
+        if (state_base_is_stairs(base)) {
+            int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=%s,shape=straight,waterlogged=false]",
+                             base, facing ? facing : "north", half);
+            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
+        }
+
+        if (state_base_is_trapdoor(base)) {
+            int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=%s,open=false,powered=false,waterlogged=false]",
+                             base, facing ? facing : "north", half);
+            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
+        }
+
+        if (state_base_is_door(base)) {
+            int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=lower,hinge=left,open=false,powered=false]",
+                             base, facing ? facing : "north");
+            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
+        }
+    }
+
     if (strstr(mapped_key, "axis=") != NULL) {
         const char *axis = axis_from_clicked_face(clicked_face);
         if (axis && rewrite_state_property(mapped_key, "axis=", axis, rewritten, sizeof(rewritten)) == 0) {
@@ -1706,10 +2037,13 @@ static int send_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
 static int queue_block_changed_ack_packet(mc_conn_t *c, int32_t sequence) {
     if (!c) return -1;
     if (sequence < 0) return 0;
-    /* Vanilla acks block-change predictions on the tick, not inline with the
-     * mutating packet handler. Keeping only the max sequence preserves order
-     * while avoiding ACK/write races that can look like visual rollback. */
-    if (sequence > c->block_ack_sequence) c->block_ack_sequence = sequence;
+    /* A real client keeps predicting until the sequence is acknowledged. When
+     * packet handling is already on the authoritative tick thread, delaying
+     * ACKs to proto_play_tick() can make block break/place corrections feel
+     * sticky under load. Send the ACK after the handler has queued its visible
+     * correction/update. */
+    if (send_block_changed_ack_packet(c, sequence) != 0) return -1;
+    if (sequence >= c->block_ack_sequence) c->block_ack_sequence = -1;
     return 0;
 }
 
@@ -1907,6 +2241,7 @@ static int quick_move_container_crafting_result(mc_conn_t *c, mc_container_insta
 int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot) {
     if (!c || !ground_slot) return -1;
     if (c->closing || c->state != MC_STATE_PLAY || !c->player || !c->play_ready || c->dead) return 0;
+    if (c->gamemode == GAMEMODE_SPECTATOR) return 0;
     if (c->active_window.open) return 0;
 
     int32_t item_id = ground_slot->present ? ground_slot->item_id : -1;
@@ -1949,6 +2284,204 @@ static bool player_can_use_hunger_system(const mc_conn_t *c) {
 static bool player_can_take_damage(const mc_conn_t *c) {
     if (!c || !c->player || c->dead || c->closing || c->state != MC_STATE_PLAY) return false;
     return c->gamemode != GAMEMODE_CREATIVE && c->gamemode != GAMEMODE_SPECTATOR;
+}
+
+static const mc_slot_t *player_slot_const(const mc_conn_t *c, int slot_index) {
+    const mc_inventory_t *inv = conn_inventory_const(c);
+    if (!inv || slot_index < 0 || slot_index >= MC_PLAYER_SLOT_COUNT) return NULL;
+    return &inv->slots[slot_index];
+}
+
+static int32_t slot_item_id_or_air(const mc_slot_t *slot) {
+    return (slot && slot->present && slot->count > 0) ? slot->item_id : ITEM_AIR;
+}
+
+static bool item_name_is(const mc_slot_t *slot, const char *name) {
+    int32_t item_id = slot_item_id_or_air(slot);
+    const char *item_name = item_id > ITEM_AIR ? mc_minecraft_item_name(item_id) : NULL;
+    return item_name && name && strcmp(item_name, name) == 0;
+}
+
+static const mc_slot_t *player_hand_slot_const(const mc_conn_t *c, int32_t hand) {
+    if (hand == 0) return selected_mainhand_slot(c);
+    if (hand == 1) return player_slot_const(c, PLAYER_SLOT_OFFHAND);
+    return NULL;
+}
+
+static bool slot_is_shield(const mc_slot_t *slot) {
+    return item_name_is(slot, "minecraft:shield");
+}
+
+static float pvp_weapon_base_damage(const mc_conn_t *attacker) {
+    const mc_slot_t *held = selected_mainhand_slot(attacker);
+    int32_t item_id = slot_item_id_or_air(held);
+    const char *name = item_id > ITEM_AIR ? mc_minecraft_item_name(item_id) : NULL;
+    if (!name) return PLAYER_PVP_BASE_DAMAGE;
+
+    if (strcmp(name, "minecraft:wooden_sword") == 0 || strcmp(name, "minecraft:golden_sword") == 0) return 4.0f;
+    if (strcmp(name, "minecraft:stone_sword") == 0) return 5.0f;
+    if (strcmp(name, "minecraft:iron_sword") == 0) return 6.0f;
+    if (strcmp(name, "minecraft:diamond_sword") == 0) return 7.0f;
+    if (strcmp(name, "minecraft:netherite_sword") == 0) return 8.0f;
+
+    if (strcmp(name, "minecraft:wooden_axe") == 0 || strcmp(name, "minecraft:golden_axe") == 0) return 7.0f;
+    if (strcmp(name, "minecraft:stone_axe") == 0 || strcmp(name, "minecraft:iron_axe") == 0 ||
+        strcmp(name, "minecraft:diamond_axe") == 0) return 9.0f;
+    if (strcmp(name, "minecraft:netherite_axe") == 0) return 10.0f;
+    if (strcmp(name, "minecraft:netherite_spear") == 0) return 8.0f;
+    return PLAYER_PVP_BASE_DAMAGE;
+}
+
+static int armor_points_for_item_name(const char *name) {
+    if (!name) return 0;
+    if (strstr(name, "leather_helmet")) return 1;
+    if (strstr(name, "leather_chestplate")) return 3;
+    if (strstr(name, "leather_leggings")) return 2;
+    if (strstr(name, "leather_boots")) return 1;
+
+    if (strstr(name, "golden_helmet") || strstr(name, "chainmail_helmet") || strstr(name, "iron_helmet")) return 2;
+    if (strstr(name, "golden_chestplate") || strstr(name, "chainmail_chestplate")) return 5;
+    if (strstr(name, "iron_chestplate")) return 6;
+    if (strstr(name, "golden_leggings")) return 3;
+    if (strstr(name, "chainmail_leggings")) return 4;
+    if (strstr(name, "iron_leggings")) return 5;
+    if (strstr(name, "golden_boots") || strstr(name, "chainmail_boots") || strstr(name, "iron_boots")) return 2;
+
+    if (strstr(name, "diamond_helmet") || strstr(name, "netherite_helmet")) return 3;
+    if (strstr(name, "diamond_chestplate") || strstr(name, "netherite_chestplate")) return 8;
+    if (strstr(name, "diamond_leggings") || strstr(name, "netherite_leggings")) return 6;
+    if (strstr(name, "diamond_boots") || strstr(name, "netherite_boots")) return 3;
+    return 0;
+}
+
+static int player_armor_points(const mc_conn_t *target) {
+    static const int slots[] = {PLAYER_SLOT_HEAD, PLAYER_SLOT_CHEST, PLAYER_SLOT_LEGS, PLAYER_SLOT_FEET};
+    int total = 0;
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        const mc_slot_t *slot = player_slot_const(target, slots[i]);
+        int32_t item_id = slot_item_id_or_air(slot);
+        const char *name = item_id > ITEM_AIR ? mc_minecraft_item_name(item_id) : NULL;
+        total += armor_points_for_item_name(name);
+    }
+    if (total < 0) total = 0;
+    if (total > 20) total = 20;
+    return total;
+}
+
+static float apply_armor_reduction(float damage, const mc_conn_t *target) {
+    int armor = player_armor_points(target);
+    float multiplier = 1.0f - ((float)armor * 0.04f);
+    if (multiplier < 0.2f) multiplier = 0.2f;
+    if (multiplier > 1.0f) multiplier = 1.0f;
+    return damage * multiplier;
+}
+
+static bool player_is_blocking_with_shield(const mc_conn_t *target) {
+    if (!target || !target->is_using_item) return false;
+    return slot_is_shield(player_hand_slot_const(target, target->using_hand));
+}
+
+static bool pvp_attack_is_blocked_by_shield(const mc_conn_t *attacker, const mc_conn_t *target) {
+    if (!attacker || !target || !player_is_blocking_with_shield(target)) return false;
+    double vx = attacker->x - target->x;
+    double vz = attacker->z - target->z;
+    double len = sqrt(vx * vx + vz * vz);
+    if (!(len > 0.000001)) return true;
+    vx /= len;
+    vz /= len;
+
+    int rot = floor_i32_from_f32((target->yaw * 4.0f / 360.0f) + 0.5f) & 3;
+    double look_x = 0.0;
+    double look_z = 1.0;
+    switch (rot) {
+        case 0: look_x = 0.0; look_z = 1.0; break;
+        case 1: look_x = -1.0; look_z = 0.0; break;
+        case 2: look_x = 0.0; look_z = -1.0; break;
+        case 3: look_x = 1.0; look_z = 0.0; break;
+    }
+    double dot = look_x * vx + look_z * vz;
+    return dot >= PLAYER_SHIELD_BLOCK_DOT;
+}
+
+float proto_play_pvp_damage_for_test(const mc_conn_t *attacker, const mc_conn_t *target, float base_damage) {
+    if (!attacker || !target || !(base_damage > 0.0f)) return 0.0f;
+    if (pvp_attack_is_blocked_by_shield(attacker, target)) return 0.0f;
+    return apply_armor_reduction(base_damage, target);
+}
+
+int proto_play_apply_pvp_attack_for_test(mc_conn_t *attacker, mc_conn_t *target, bool pvp_enabled, int64_t now_ms) {
+    if (!attacker || !target || attacker == target) return 0;
+    if (!pvp_enabled) return 0;
+    if (!attacker->player || !target->player || attacker->dead || target->dead) return 0;
+    if (attacker->gamemode == GAMEMODE_CREATIVE || attacker->gamemode == GAMEMODE_SPECTATOR) return 0;
+    if (!player_can_take_damage(target)) return 0;
+    if (!attacker->has_pos || !target->has_pos) return 0;
+
+    double dx = attacker->x - target->x;
+    double dy = attacker->y - target->y;
+    double dz = attacker->z - target->z;
+    double dist_sq = dx * dx + dy * dy + dz * dz;
+    if (dist_sq > PLAYER_PVP_MAX_DISTANCE_SQ) return 0;
+
+    float base_damage = pvp_weapon_base_damage(attacker);
+    float final_damage = proto_play_pvp_damage_for_test(attacker, target, base_damage);
+    if (!(final_damage > 0.0f)) return 1;
+    if (apply_player_damage(target, final_damage, "Killed in PvP", false, now_ms) != 0) return -1;
+    (void)send_entity_event(target, ENTITY_STATUS_HURT);
+    return 1;
+}
+
+int proto_play_parse_interact_attack_for_test(const uint8_t *data, size_t len, int32_t *out_target, bool *out_is_attack) {
+    mc_reader_t r = {data, len, 0};
+    int32_t target = 0;
+    int32_t mouse = 0;
+    bool sneaking = false;
+    if (out_target) *out_target = -1;
+    if (out_is_attack) *out_is_attack = false;
+    if (!data && len > 0) return -1;
+
+    if (r_varint(&r, &target) != 0 || r_varint(&r, &mouse) != 0) return -1;
+    if (mouse == 2) {
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        int32_t hand = 0;
+        if (r_f32(&r, &x) != 0 || r_f32(&r, &y) != 0 || r_f32(&r, &z) != 0 || r_varint(&r, &hand) != 0) return -1;
+        (void)x;
+        (void)y;
+        (void)z;
+        (void)hand;
+    } else if (mouse == 0) {
+        int32_t hand = 0;
+        if (r_varint(&r, &hand) != 0) return -1;
+        (void)hand;
+    } else if (mouse != 1) {
+        return -1;
+    }
+    if (r_bool(&r, &sneaking) != 0) return -1;
+    (void)sneaking;
+    if (r.pos != r.len) return -1;
+    if (out_target) *out_target = target;
+    if (out_is_attack) *out_is_attack = (mouse == 1);
+    return 0;
+}
+
+static int handle_interact_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
+    int32_t target_entity_id = -1;
+    bool is_attack = false;
+    mc_conn_t *target = NULL;
+    bool pvp_enabled = c && c->cfg ? c->cfg->pvp_enabled : true;
+
+    if (!c || !frame) return -1;
+    if (proto_play_parse_interact_attack_for_test(frame->payload.data, frame->payload.len, &target_entity_id, &is_attack) != 0) {
+        return -1;
+    }
+    if (!is_attack) return 0;
+    if (!c->server) return 0;
+
+    target = net_server_find_conn_by_entity_id(c->server, target_entity_id);
+    if (!target) return 0;
+    int rc = proto_play_apply_pvp_attack_for_test(c, target, pvp_enabled, now_ms);
+    net_server_release_conn(target);
+    return rc < 0 ? -1 : 0;
 }
 
 static int player_sync_food_state(mc_conn_t *c, bool persist) {
@@ -2593,11 +3126,13 @@ static int handle_player_death(mc_conn_t *c, const char *death_message, bool ser
     c->dead = true;
     c->next_natural_regen_ms = 0;
     c->next_starvation_damage_ms = 0;
+    c->next_void_damage_ms = 0;
     cancel_item_use(c);
     reset_fall_tracking(c);
 
     close_active_window(c, true);
-    if (drop_player_inventory(c, server_locked) < 0) return -1;
+    bool keep_inventory = c->cfg && c->cfg->keep_inventory;
+    if (!keep_inventory && drop_player_inventory(c, server_locked) < 0) return -1;
     if (sync_inventory_full(c) != 0) return -1;
     if (send_set_health_packet(c) != 0) return -1;
     if (send_combat_kill_packet(c, death_message) != 0) return -1;
@@ -2631,6 +3166,76 @@ static int player_set_health_debug(mc_conn_t *c, float health, const char *death
     c->player->health = health;
     if (send_set_health_packet(c) != 0) return -1;
     return save_player_data(c);
+}
+
+static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spawn_y, double spawn_z, float spawn_yaw,
+                                       float spawn_pitch) {
+    if (!c || !c->player) return;
+    cancel_item_use(c);
+    c->dead = false;
+    c->health = PLAYER_MAX_HEALTH;
+    c->food = PLAYER_DEFAULT_FOOD_LEVEL;
+    c->food_saturation = PLAYER_DEFAULT_FOOD_SATURATION;
+    c->food_exhaustion = 0.0f;
+    c->player->health = PLAYER_MAX_HEALTH;
+    c->player->food_level = c->food;
+    c->player->food_saturation = c->food_saturation;
+    c->player->food_exhaustion = c->food_exhaustion;
+    c->player->pos_x = spawn_x;
+    c->player->pos_y = spawn_y;
+    c->player->pos_z = spawn_z;
+    c->player->yaw = spawn_yaw;
+    c->player->pitch = spawn_pitch;
+    c->x = spawn_x;
+    c->y = spawn_y;
+    c->z = spawn_z;
+    c->yaw = spawn_yaw;
+    c->pitch = spawn_pitch;
+    c->has_pos = true;
+    c->on_ground = false;
+    c->has_center_chunk = false;
+    c->chunk_refresh_ping_pending = false;
+    c->chunk_refresh_ping_id = 0;
+    c->next_void_damage_ms = 0;
+    c->next_natural_regen_ms = 0;
+    c->next_starvation_damage_ms = 0;
+    reset_fall_tracking(c);
+    reset_remote_player_tracking(c);
+    sent_chunks_clear(c);
+    pending_chunks_clear(c);
+}
+
+static int count_inventory_stacks(const mc_inventory_t *inv) {
+    if (!inv) return 0;
+    int stacks = 0;
+    for (int i = 0; i < MC_PLAYER_SLOT_COUNT; i++) {
+        if (inv->slots[i].present && inv->slots[i].count > 0) stacks++;
+    }
+    if (inv->cursor_slot.present && inv->cursor_slot.count > 0) stacks++;
+    return stacks;
+}
+
+bool proto_play_can_pickup_items_for_test(const mc_conn_t *c) {
+    return c && !c->dead && !c->closing && c->state == MC_STATE_PLAY && c->play_ready && c->has_pos &&
+           c->gamemode != GAMEMODE_SPECTATOR;
+}
+
+int proto_play_inventory_stack_count_for_test(const mc_conn_t *c) {
+    return c ? count_inventory_stacks(conn_inventory_const(c)) : 0;
+}
+
+int proto_play_apply_damage_for_test(mc_conn_t *c, float amount, bool server_locked, int64_t now_ms) {
+    return apply_player_damage(c, amount, "Killed by lifecycle test", server_locked, now_ms);
+}
+
+void proto_play_respawn_state_reset_for_test(mc_conn_t *c) {
+    double spawn_x = 0.0;
+    double spawn_y = 0.0;
+    double spawn_z = 0.0;
+    float spawn_yaw = 0.0f;
+    float spawn_pitch = 0.0f;
+    world_spawn_values(&spawn_x, &spawn_y, &spawn_z, &spawn_yaw, &spawn_pitch);
+    respawn_player_state_reset(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch);
 }
 
 static int player_heal(mc_conn_t *c, float amount) {
@@ -2816,6 +3421,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     if (brc < 0) return -1;
     if (brc == 0) {
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
+        if (send_recomputed_connected_neighbors(c, world, x, y, z) != 0) return -1;
         return queue_block_changed_ack_packet(c, seq);
     }
 
@@ -2836,6 +3442,24 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
         if (mc_world_flush_block(world, x, y, z) != 0) return -1;
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
+        {
+            char door_base[128];
+            char door_half[16];
+            if (door_base_and_half(state_id, door_base, sizeof(door_base), door_half, sizeof(door_half))) {
+                int32_t other_y = strcmp(door_half, "lower") == 0 ? y + 1 : y - 1;
+                int32_t other_state = -1;
+                char other_base[128];
+                char other_half[16];
+                if (mc_world_get_block(world, x, other_y, z, &other_state) == 0 &&
+                    door_base_and_half(other_state, other_base, sizeof(other_base), other_half, sizeof(other_half)) &&
+                    strcmp(door_base, other_base) == 0 && strcmp(door_half, other_half) != 0) {
+                    if (mc_world_set_block(world, x, other_y, z, ids->air) != 0) return -1;
+                    if (mc_world_flush_block(world, x, other_y, z) != 0) return -1;
+                    if (send_block_update_packet(c, x, other_y, z, ids->air) != 0) return -1;
+                }
+            }
+        }
+        if (send_recomputed_connected_neighbors(c, world, x, y, z) != 0) return -1;
 
         if (have_drop) {
             mc_slot_t block_drop = {0};
@@ -3697,6 +4321,37 @@ static int start_food_use_cycle(mc_conn_t *c, int32_t hand, int32_t slot_index, 
     return send_local_player_use_item_metadata(c, true, hand);
 }
 
+static int start_shield_use_cycle(mc_conn_t *c, int32_t hand, int32_t slot_index, int32_t item_id) {
+    if (!c) return -1;
+    clear_active_item_use(c);
+    c->is_using_item = true;
+    c->use_item_input_held = true;
+    c->using_hand = hand;
+    c->using_slot = slot_index;
+    c->using_item_id = item_id;
+    c->use_item_remaining_ticks = 0;
+    return send_local_player_use_item_metadata(c, true, hand);
+}
+
+static int try_start_shield_use(mc_conn_t *c, int32_t hand) {
+    const mc_slot_t *slot = NULL;
+    int32_t slot_index = -1;
+    if (!c || c->dead) return 0;
+    if (hand == 0) {
+        slot = selected_mainhand_slot(c);
+        slot_index = selected_mainhand_slot_index(c);
+    } else if (hand == 1) {
+        slot = player_slot_const(c, PLAYER_SLOT_OFFHAND);
+        slot_index = PLAYER_SLOT_OFFHAND;
+    } else {
+        return 0;
+    }
+    if (!slot_is_shield(slot)) return 0;
+    if (slot_index < 0 || slot_index >= MC_PLAYER_SLOT_COUNT) return 0;
+    if (start_shield_use_cycle(c, hand, slot_index, slot->item_id) != 0) return -1;
+    return 1;
+}
+
 static int maybe_restart_food_use_cycle(mc_conn_t *c) {
     const mc_slot_t *slot = NULL;
     const mc_item_food_entry_t *food = NULL;
@@ -3776,6 +4431,9 @@ static int tick_item_use(mc_conn_t *c) {
     const mc_item_food_entry_t *food = NULL;
 
     if (!c || !c->is_using_item) return 0;
+    if (slot_is_shield(player_hand_slot_const(c, c->using_hand))) {
+        return 0;
+    }
     if (!player_can_use_hunger_system(c) || c->dead) {
         cancel_item_use(c);
         return 0;
@@ -3958,7 +4616,7 @@ static int drop_selected_mainhand_items(mc_conn_t *c, int32_t requested_count) {
     int rc = 0;
 
     if (!c || !c->player || requested_count <= 0) return 0;
-    if (c->gamemode == GAMEMODE_SPECTATOR) return 0;
+    if (c->dead || c->gamemode == GAMEMODE_SPECTATOR) return 0;
     cancel_item_use(c);
 
     inv = conn_inventory(c);
@@ -3990,6 +4648,10 @@ static int drop_selected_mainhand_items(mc_conn_t *c, int32_t requested_count) {
     }
     mc_slot_clear(&dropped);
     return 1;
+}
+
+int proto_play_drop_selected_for_test(mc_conn_t *c, int32_t requested_count) {
+    return drop_selected_mainhand_items(c, requested_count);
 }
 
 static int try_consume_selected_food(mc_conn_t *c) {
@@ -4042,6 +4704,11 @@ static int handle_set_creative_slot(mc_conn_t *c, const mc_frame_t *frame) {
 
     mc_slot_t slot = {0};
     if (mc_slot_read_net(r.data, r.len, &r.pos, &slot) != 0) return -1;
+    if (c->gamemode != GAMEMODE_CREATIVE) {
+        mc_slot_clear(&slot);
+        if (sync_inventory_full(c) != 0) return -1;
+        return 0;
+    }
     if (slot_id < 0 || slot_id >= MC_PLAYER_SLOT_COUNT) {
         mc_slot_clear(&slot);
         return 0;
@@ -4066,6 +4733,25 @@ static int handle_set_creative_slot(mc_conn_t *c, const mc_frame_t *frame) {
         const char *item_name = (cur && cur->present) ? mc_minecraft_item_name(cur->item_id) : NULL;
         log_info("place debug: creative slot=%d item_id=%d item=%s count=%d", slot_id, cur->present ? cur->item_id : -1,
                  item_name ? item_name : "(empty)", cur->present ? cur->count : 0);
+    }
+    if (sync_inventory_slot(c, slot_id) != 0) return -1;
+    return save_player_data(c);
+}
+
+int proto_play_set_creative_slot_for_test(mc_conn_t *c, int16_t slot_id, const mc_slot_t *slot) {
+    if (!c || !c->player || !slot) return -1;
+    if (c->gamemode != GAMEMODE_CREATIVE) return 0;
+    if (slot_id < 0 || slot_id >= MC_PLAYER_SLOT_COUNT) return 0;
+
+    mc_inventory_t *inv = &c->player->inventory;
+    if (mc_slot_copy(&inv->slots[slot_id], slot) != 0) return -1;
+    inv->state_id++;
+    if (slot_id == PLAYER_CRAFTING_RESULT_SLOT ||
+        (slot_id >= PLAYER_CRAFTING_GRID_SLOT &&
+         slot_id < PLAYER_CRAFTING_GRID_SLOT + PLAYER_CRAFTING_GRID_WIDTH * PLAYER_CRAFTING_GRID_HEIGHT)) {
+        if (update_player_crafting_result(c) != 0) return -1;
+        if (sync_inventory_full(c) != 0) return -1;
+        return save_player_data(c);
     }
     if (sync_inventory_slot(c, slot_id) != 0) return -1;
     return save_player_data(c);
@@ -4332,6 +5018,64 @@ static int handle_window_click(mc_conn_t *c, const mc_frame_t *frame) {
 #undef RETURN_WINDOW_CLICK
 }
 
+static const char *qa_armor_item_for_slot(const char *tier, int slot_index) {
+    if (!tier) return NULL;
+    const char *piece = NULL;
+    switch (slot_index) {
+        case PLAYER_SLOT_HEAD: piece = "helmet"; break;
+        case PLAYER_SLOT_CHEST: piece = "chestplate"; break;
+        case PLAYER_SLOT_LEGS: piece = "leggings"; break;
+        case PLAYER_SLOT_FEET: piece = "boots"; break;
+        default: return NULL;
+    }
+    static char name[64];
+    if (strcmp(tier, "gold") == 0) tier = "golden";
+    if (snprintf(name, sizeof(name), "minecraft:%s_%s", tier, piece) >= (int)sizeof(name)) return NULL;
+    return name;
+}
+
+static int qa_set_armor(mc_conn_t *c, const char *tier) {
+    static const int slots[] = {PLAYER_SLOT_HEAD, PLAYER_SLOT_CHEST, PLAYER_SLOT_LEGS, PLAYER_SLOT_FEET};
+    mc_inventory_t *inv = conn_inventory(c);
+    if (!inv || !tier) return -1;
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        const char *name = qa_armor_item_for_slot(tier, slots[i]);
+        int32_t item_id = name ? mc_minecraft_item_id(name) : -1;
+        if (item_id < 0) return 1;
+        mc_slot_clear(&inv->slots[slots[i]]);
+        if (mc_slot_set_simple(&inv->slots[slots[i]], item_id, 1) != 0) return -1;
+    }
+    inv->state_id++;
+    if (sync_inventory_full(c) != 0) return -1;
+    if (save_player_data(c) != 0) return -1;
+    return 0;
+}
+
+static int qa_clear_armor(mc_conn_t *c) {
+    static const int slots[] = {PLAYER_SLOT_HEAD, PLAYER_SLOT_CHEST, PLAYER_SLOT_LEGS, PLAYER_SLOT_FEET};
+    mc_inventory_t *inv = conn_inventory(c);
+    if (!inv) return -1;
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        mc_slot_clear(&inv->slots[slots[i]]);
+    }
+    inv->state_id++;
+    if (sync_inventory_full(c) != 0) return -1;
+    if (save_player_data(c) != 0) return -1;
+    return 0;
+}
+
+/* Unknown commands are denied even to administrators until classified here. */
+static bool command_allowed(const mc_conn_t *c, const char *name) {
+    if (!strcmp(name, "mineinfo") || !strcmp(name, "lootinfo")) return true;
+    if (!c->command_authorized) return false;
+    if (!strcmp(name, "qa")) return c->cfg && c->cfg->qa_enabled;
+    static const char *admin[] = {"gamemode", "tp", "teleport", "setblock",
+        "difficulty", "difficulte", "food", "health", "vie", "kill"};
+    for (size_t i = 0; i < sizeof(admin)/sizeof(admin[0]); i++)
+        if (!strcmp(name, admin[i])) return true;
+    return false;
+}
+
 static int handle_command(mc_conn_t *c, char *cmdline) {
     if (!c || !cmdline) return 0;
     while (*cmdline && isspace((unsigned char)*cmdline)) cmdline++;
@@ -4346,14 +5090,21 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
     for (size_t i = 0; i < cmd_len; i++) cmd_lower[i] = (char)tolower((unsigned char)cmd[i]);
     cmd_lower[cmd_len] = '\0';
 
+    if (!command_allowed(c, cmd_lower))
+        return proto_play_send_system_message(c, "Command denied (authorization or QA mode required).");
+
     if (strcmp(cmd_lower, "gamemode") == 0) {
         char *mode = strtok_r(NULL, " ", &save);
-        int gm = parse_gamemode(mode);
+        int gm = proto_play_parse_gamemode_for_test(mode);
+        if (gm < 0) {
+            return proto_play_send_system_message(c, "Invalid gamemode. Use survival, creative, adventure, or spectator.");
+        }
         if (gm >= 0 && gm != c->gamemode) {
             c->gamemode = gm;
             if (c->player) c->player->gamemode = gm;
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
+            if (sync_inventory_full(c) != 0) return -1;
             (void)save_player_data(c);
         }
         return 0;
@@ -4551,9 +5302,38 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
     if (strcmp(cmd_lower, "qa") == 0) {
         char *sub = strtok_r(NULL, " ", &save);
         if (!sub || !c->player) {
-            return proto_play_send_system_message(c, "QA: usage !qa state|give|chest|survival|creative|damage|heal");
+            return proto_play_send_system_message(c, "QA: usage !qa state|pos|give|clear|armor|cleararmor|chest|survival|creative|kill|damage|heal");
         }
         for (size_t i = 0; sub[i]; i++) sub[i] = (char)tolower((unsigned char)sub[i]);
+
+        if (strcmp(sub, "pos") == 0 || strcmp(sub, "position") == 0) {
+            const char *gm_name = "unknown";
+            switch (c->gamemode) {
+                case GAMEMODE_SURVIVAL: gm_name = "survival"; break;
+                case GAMEMODE_CREATIVE: gm_name = "creative"; break;
+                case GAMEMODE_ADVENTURE: gm_name = "adventure"; break;
+                case GAMEMODE_SPECTATOR: gm_name = "spectator"; break;
+            }
+            char msg[192];
+            snprintf(msg, sizeof(msg), "QA pos x=%.3f y=%.3f z=%.3f yaw=%.2f pitch=%.2f gm=%s",
+                     c->x, c->y, c->z, c->yaw, c->pitch, gm_name);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "clear") == 0) {
+            mc_inventory_t *inv = conn_inventory(c);
+            if (!inv) return -1;
+            for (int i = 0; i < MC_PLAYER_SLOT_COUNT; i++) mc_slot_clear(&inv->slots[i]);
+            mc_slot_clear(&inv->cursor_slot);
+            inv->state_id++;
+            if (sync_inventory_full(c) != 0) return -1;
+            if (save_player_data(c) != 0) return -1;
+            return proto_play_send_system_message(c, "QA inventory cleared");
+        }
+
+        if (strcmp(sub, "kill") == 0) {
+            return player_set_health_debug(c, 0.0f, "Killed by QA command");
+        }
 
         if (strcmp(sub, "state") == 0 || strcmp(sub, "inventory") == 0 || strcmp(sub, "inv") == 0) {
             const mc_inventory_t *inv = conn_inventory_const(c);
@@ -4627,6 +5407,7 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             c->player->gamemode = gm;
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
+            if (sync_inventory_full(c) != 0) return -1;
             (void)save_player_data(c);
             return proto_play_send_system_message(c, gm == GAMEMODE_CREATIVE ? "QA gamemode creative" : "QA gamemode survival");
         }
@@ -4649,6 +5430,23 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             char msg[96];
             snprintf(msg, sizeof(msg), "QA heal amount=%.1f health=%.1f", amount, c->health);
             return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "armor") == 0) {
+            char *tier = strtok_r(NULL, " ", &save);
+            if (!tier) return proto_play_send_system_message(c, "QA armor: usage !qa armor <leather|gold|chainmail|iron|diamond|netherite>");
+            for (size_t i = 0; tier[i]; i++) tier[i] = (char)tolower((unsigned char)tier[i]);
+            int rc = qa_set_armor(c, tier);
+            if (rc > 0) return proto_play_send_system_message(c, "QA armor: tier inconnu");
+            if (rc < 0) return -1;
+            char msg[96];
+            snprintf(msg, sizeof(msg), "QA armor tier=%s", tier);
+            return proto_play_send_system_message(c, msg);
+        }
+
+        if (strcmp(sub, "cleararmor") == 0) {
+            if (qa_clear_armor(c) != 0) return -1;
+            return proto_play_send_system_message(c, "QA armor cleared");
         }
 
         if (strcmp(sub, "chest") == 0) {
@@ -5683,6 +6481,20 @@ static int maybe_send_chunk_refresh_ping(mc_conn_t *c) {
     return 0;
 }
 
+static int send_chunk_batch_start_packet(mc_conn_t *c) {
+    if (!c) return -1;
+    return conn_write_packet(c, PKT_PLAY_CHUNK_BATCH_START, NULL, 0, -1);
+}
+
+static int send_chunk_batch_finished_packet(mc_conn_t *c, int32_t batch_size) {
+    if (!c) return -1;
+    if (batch_size <= 0) return 0;
+    uint8_t buf[8];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, batch_size) != 0) return -1;
+    return conn_write_packet(c, PKT_PLAY_CHUNK_BATCH_FINISHED, buf, pos, -1);
+}
+
 static int32_t floor_i32_from_f64(double v) {
     int64_t i = (int64_t)v;
     if ((double)i > v) i--;
@@ -5782,10 +6594,12 @@ static int chunk_stream_tick(mc_conn_t *c) {
             continue;
         }
 
+        if (sent == 0 && send_chunk_batch_start_packet(c) != 0) return -1;
         if (send_chunk_ready(c, world, req.cx, req.cz, chunk) != 0) return -1;
         if (sent_chunks_insert(c, chunk_key(req.cx, req.cz)) != 0) return -1;
         sent++;
     }
+    if (sent > 0 && send_chunk_batch_finished_packet(c, sent) != 0) return -1;
 
     if (perf) {
         int64_t elapsed_us = mc_now_us() - perf_start_us;
@@ -5873,30 +6687,7 @@ static int respawn_player(mc_conn_t *c) {
     if (send_respawn_packet(c) != 0) return -1;
     if (send_waiting_for_level_chunks_event(c) != 0) return -1;
 
-    cancel_item_use(c);
-    c->dead = false;
-    c->health = PLAYER_MAX_HEALTH;
-    c->food = PLAYER_DEFAULT_FOOD_LEVEL;
-    c->food_saturation = PLAYER_DEFAULT_FOOD_SATURATION;
-    c->food_exhaustion = 0.0f;
-    c->player->health = PLAYER_MAX_HEALTH;
-    c->player->food_level = c->food;
-    c->player->food_saturation = c->food_saturation;
-    c->player->food_exhaustion = c->food_exhaustion;
-    c->player->pos_x = spawn_x;
-    c->player->pos_y = spawn_y;
-    c->player->pos_z = spawn_z;
-    c->player->yaw = spawn_yaw;
-    c->player->pitch = spawn_pitch;
-    c->has_center_chunk = false;
-    c->chunk_refresh_ping_pending = false;
-    c->chunk_refresh_ping_id = 0;
-    c->next_natural_regen_ms = 0;
-    c->next_starvation_damage_ms = 0;
-    reset_fall_tracking(c);
-    reset_remote_player_tracking(c);
-    sent_chunks_clear(c);
-    pending_chunks_clear(c);
+    respawn_player_state_reset(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch);
 
     if (send_default_spawn_packet(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch) != 0) return -1;
     if (send_sync_position(c, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch) != 0) return -1;
@@ -6122,6 +6913,14 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         return 0;
     }
 
+    if (frame->packet_id == PKT_PLAY_CHUNK_BATCH_RECEIVED_SB) {
+        mc_reader_t r = {frame->payload.data, frame->payload.len, 0};
+        float chunks_per_tick = 0.0f;
+        if (r_f32(&r, &chunks_per_tick) != 0) return -1;
+        (void)chunks_per_tick;
+        return 0;
+    }
+
     if (frame->packet_id == PKT_PLAY_CLIENT_COMMAND_SB) {
         mc_reader_t r = {frame->payload.data, frame->payload.len, 0};
         int32_t action_id = -1;
@@ -6134,6 +6933,10 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 
     if (c->dead) {
         return 0;
+    }
+
+    if (frame->packet_id == PKT_PLAY_INTERACT_SB) {
+        return handle_interact_packet(c, frame, now_ms);
     }
 
     if (frame->packet_id == PKT_PLAY_USE_ITEM) {
@@ -6149,6 +6952,11 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (r_varint(&r, &sequence) != 0) return -1;
         if (r_f32(&r, &y_rot) != 0) return -1;
         if (r_f32(&r, &x_rot) != 0) return -1;
+        {
+            int shield_rc = try_start_shield_use(c, hand);
+            if (shield_rc < 0) return -1;
+            if (shield_rc > 0) return 0;
+        }
         if (hand != 0) return 0;
 
         {
@@ -6463,7 +7271,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (world && ids) {
             int held_idx = selected_mainhand_slot_index(c);
             int32_t mapped_state_id = (held && held->present) ? mc_item_default_place_state(held->item_id) : -1;
-            int32_t requested_state_id = mc_resolve_placement_state(held, c->yaw, face);
+            int32_t requested_state_id = mc_resolve_placement_state(held, c->yaw, face, cx, cy, cz);
             if (requested_state_id == 0 && held && held->present && held->item_id != ITEM_AIR) {
                 requested_state_id = -1;
             }
@@ -6483,10 +7291,41 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                          normalized_state_id >= 0 && mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(none)");
             }
             if (normalized_state_id >= 0) {
+                int32_t clicked_state_id = -1;
+                if (mc_world_get_block(world, x, y, z, &clicked_state_id) != 0) {
+                    clicked_state_id = -1;
+                }
+                if (clicked_state_id >= 0) {
+                    char clicked_base[128];
+                    char clicked_type[16];
+                    char requested_base[128];
+                    char requested_type[16];
+                    if (slab_base_and_type(clicked_state_id, clicked_base, sizeof(clicked_base), clicked_type, sizeof(clicked_type)) &&
+                        slab_base_and_type(normalized_state_id, requested_base, sizeof(requested_base), requested_type,
+                                           sizeof(requested_type)) &&
+                        strcmp(clicked_base, requested_base) == 0 && strcmp(clicked_type, "double") != 0) {
+                        int32_t double_state = slab_double_state_for_base(clicked_base, normalized_state_id);
+                        if (double_state >= 0 && !placed_block_intersects_player(c, ids, x, y, z, double_state) &&
+                            mc_world_set_block(world, x, y, z, double_state) == 0) {
+                            placed_block = true;
+                            authoritative_state_id = double_state;
+                            network_state_id = double_state;
+                            if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+                            if (send_block_update_packet(c, x, y, z, network_state_id) != 0) return -1;
+                            if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
+                            if (c->gamemode != GAMEMODE_CREATIVE && held_idx >= 0 && held && held->present) {
+                                if (consume_selected_item(c) != 0) return -1;
+                            }
+                        }
+                    }
+                }
+                if (placed_block) {
+                    /* Double-slab placement targets the clicked block, not the adjacent placement cell. */
+                } else
                 if (mc_world_get_block(world, px, py, pz, &target_state_id) != 0) {
                     target_state_id = -1;
                 }
-                if (target_state_id >= 0 && !block_state_is_replaceable(ids, target_state_id)) {
+                if (!placed_block && target_state_id >= 0 && !block_state_is_replaceable(ids, target_state_id)) {
                     if (send_block_update_packet(c, px, py, pz, target_state_id) != 0) return -1;
                     if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (held_idx >= 0) {
@@ -6495,7 +7334,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     if (send_held_item_slot(c) != 0) return -1;
                     return 0;
                 }
-                if (placed_block_intersects_player(c, ids, px, py, pz, normalized_state_id)) {
+                if (!placed_block && placed_block_intersects_player(c, ids, px, py, pz, normalized_state_id)) {
                     int32_t authoritative_target = target_state_id >= 0 ? target_state_id : ids->air;
                     if (debug_place_enabled()) {
                         log_info("place debug: deny player collision player=(%.3f,%.3f,%.3f) block=(%d,%d,%d) state=%d key=%s",
@@ -6510,14 +7349,48 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     if (send_held_item_slot(c) != 0) return -1;
                     return 0;
                 }
-                if (mc_world_set_block(world, px, py, pz, normalized_state_id) == 0) {
+                if (!placed_block) {
+                    char door_base[128];
+                    char door_half[16];
+                    if (door_base_and_half(normalized_state_id, door_base, sizeof(door_base), door_half, sizeof(door_half)) &&
+                        strcmp(door_half, "lower") == 0) {
+                        int32_t upper_state = door_other_half_state(normalized_state_id, "upper");
+                        int32_t upper_target = -1;
+                        if (upper_state < 0 || mc_world_get_block(world, px, py + 1, pz, &upper_target) != 0 ||
+                            !block_state_is_replaceable(ids, upper_target) ||
+                            placed_block_intersects_player(c, ids, px, py + 1, pz, upper_state)) {
+                            if (send_block_update_packet(c, px, py, pz, target_state_id >= 0 ? target_state_id : ids->air) != 0) return -1;
+                            if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
+                            if (held_idx >= 0 && sync_inventory_slot(c, (int16_t)held_idx) != 0) return -1;
+                            if (send_held_item_slot(c) != 0) return -1;
+                            return 0;
+                        }
+                        if (mc_world_set_block(world, px, py, pz, normalized_state_id) == 0 &&
+                            mc_world_set_block(world, px, py + 1, pz, upper_state) == 0) {
+                            placed_block = true;
+                            authoritative_state_id = normalized_state_id;
+                            network_state_id = normalized_state_id;
+                            if (mc_world_flush_block(world, px, py, pz) != 0) return -1;
+                            if (mc_world_flush_block(world, px, py + 1, pz) != 0) return -1;
+                            if (send_block_update_packet(c, px, py, pz, normalized_state_id) != 0) return -1;
+                            if (send_block_update_packet(c, px, py + 1, pz, upper_state) != 0) return -1;
+                            if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
+                            if (c->gamemode != GAMEMODE_CREATIVE && held_idx >= 0 && held && held->present) {
+                                if (consume_selected_item(c) != 0) return -1;
+                            }
+                        }
+                    }
+                }
+                if (!placed_block && mc_world_set_block(world, px, py, pz, normalized_state_id) == 0) {
                     placed_block = true;
                     authoritative_state_id = normalized_state_id;
+                    if (recompute_connected_block_at(world, px, py, pz, &authoritative_state_id) < 0) return -1;
                     if (mc_world_get_block(world, px, py, pz, &authoritative_state_id) != 0) {
                         authoritative_state_id = normalized_state_id;
                     }
                     network_state_id = authoritative_state_id;
                     if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
+                    if (send_recomputed_connected_neighbors(c, world, px, py, pz) != 0) return -1;
                     if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (c->server) {
                         (void)net_server_resolve_item_entities_for_block(c->server, px, py, pz, authoritative_state_id);

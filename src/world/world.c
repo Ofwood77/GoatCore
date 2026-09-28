@@ -83,6 +83,7 @@ typedef struct {
 typedef struct mc_chunk_done {
     int64_t key;
     mc_chunk_t *chunk;
+    mc_block_entity_store_t block_entities;
     bool generated;
     struct mc_chunk_done *next;
 } mc_chunk_done_t;
@@ -713,11 +714,11 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     chunk->loaded = true;
 }
 
-static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
+static int save_chunk_to_store_with_entities(const mc_world_t *w, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store) {
     if (!w || !chunk) return -1;
     if (!w->world_path || !*w->world_path) return -1;
 
-    int rc = mc_chunk_store_write(w->world_path, chunk, &w->block_entities);
+    int rc = mc_chunk_store_write(w->world_path, chunk, be_store ? be_store : &w->block_entities);
     if (rc != 0) {
         int e = errno;
         log_error("chunk store save failed chunk=(%d,%d) world=%s (errno=%d %s)", chunk->cx, chunk->cz,
@@ -747,6 +748,26 @@ static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
         }
     }
     return rc;
+}
+
+static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
+    return save_chunk_to_store_with_entities(w, chunk, &w->block_entities);
+}
+
+static int merge_loaded_block_entities(mc_world_t *w, mc_block_entity_store_t *loaded) {
+    if (!w || !loaded) return -1;
+    for (size_t i = 0; i < loaded->cap; i++) {
+        if (!loaded->states || loaded->states[i] != 1) continue;
+        /* Transfer ownership of slot component buffers from the worker-local
+         * store into the tick-owned store. Workers must not mutate
+         * w->block_entities directly while furnace ticking/container saves may
+         * iterate it on the authoritative tick thread. */
+        if (!mc_be_store_put(&w->block_entities, loaded->positions[i], loaded->entities[i])) return -1;
+        memset(&loaded->entities[i], 0, sizeof(loaded->entities[i]));
+        loaded->states[i] = 0;
+        if (loaded->len > 0) loaded->len--;
+    }
+    return 0;
 }
 
 static void apply_pending_mods(mc_world_t *w, mc_chunk_t *chunk, mc_pending_mods_t *pending) {
@@ -795,8 +816,10 @@ static void *worker_main(void *arg) {
          * queue so the main tick can integrate it deterministically. */
         bool generated = false;
         bool normalized_on_load = false;
+        mc_block_entity_store_t loaded_block_entities;
+        mc_be_store_init(&loaded_block_entities);
 
-        int store_rc = mc_chunk_store_read(w->world_path, job.cx, job.cz, chunk, &w->block_entities);
+        int store_rc = mc_chunk_store_read(w->world_path, job.cx, job.cz, chunk, &loaded_block_entities);
         if (store_rc == 0) {
             bool normalized = normalize_chunk_container_states(chunk);
             if (w->debug_containers && w->debug_container_pos_set) {
@@ -844,7 +867,7 @@ static void *worker_main(void *arg) {
             normalized_on_load = true;
         }
         if (normalized_on_load && w->world_path && *w->world_path) {
-            if (save_chunk_to_store(w, chunk) == 0) {
+            if (save_chunk_to_store_with_entities(w, chunk, &loaded_block_entities) == 0) {
                 chunk->dirty = false;
                 if (w->debug_containers) {
                     log_info("containers debug: chunk=(%d,%d) normalized_save=1", job.cx, job.cz);
@@ -857,10 +880,12 @@ static void *worker_main(void *arg) {
         if (!d) {
             mc_chunk_destroy(chunk);
             free(chunk);
+            mc_be_store_destroy(&loaded_block_entities);
             continue;
         }
         d->key = chunk_key(job.cx, job.cz);
         d->chunk = chunk;
+        d->block_entities = loaded_block_entities;
         d->generated = generated;
         done_queue_push(w, d);
     }
@@ -994,14 +1019,20 @@ void mc_world_destroy(mc_world_t *w) {
                 w->chunks.len--;
                 w->chunks.tombs++;
             } else if (e->pending) {
+                if (merge_loaded_block_entities(w, &done->block_entities) != 0) {
+                    log_error("failed to merge block entities for chunk key=%" PRId64, done->key);
+                }
                 apply_pending_mods(w, done->chunk, e->pending);
                 pending_mods_free(e->pending);
                 e->pending = NULL;
+            } else if (merge_loaded_block_entities(w, &done->block_entities) != 0) {
+                log_error("failed to merge block entities for chunk key=%" PRId64, done->key);
             }
         } else {
             mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
+        mc_be_store_destroy(&done->block_entities);
         free(done);
         done = next;
     }
@@ -1216,17 +1247,24 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
                 w->chunks.tombs++;
             } else if (e->pending) {
                 if (stats) stats->done_integrated++;
+                if (merge_loaded_block_entities(w, &done->block_entities) != 0) {
+                    log_error("failed to merge block entities for chunk key=%" PRId64, done->key);
+                }
                 apply_pending_mods(w, done->chunk, e->pending);
                 pending_mods_free(e->pending);
                 e->pending = NULL;
             } else {
                 if (stats) stats->done_integrated++;
+                if (merge_loaded_block_entities(w, &done->block_entities) != 0) {
+                    log_error("failed to merge block entities for chunk key=%" PRId64, done->key);
+                }
             }
         } else {
             if (stats) stats->done_discarded++;
             mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
+        mc_be_store_destroy(&done->block_entities);
         free(done);
         done = next;
     }

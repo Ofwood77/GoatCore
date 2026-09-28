@@ -6,6 +6,7 @@
 int mc_task_queue_init(mc_task_queue_t *q) {
     if (!q) return -1;
     memset(q, 0, sizeof(*q));
+    q->max_len = MC_TASK_QUEUE_DEFAULT_MAX;
     if (pthread_mutex_init(&q->lock, NULL) != 0) return -1;
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
@@ -32,18 +33,24 @@ void mc_task_queue_destroy(mc_task_queue_t *q) {
     pthread_cond_destroy(&q->cv);
 }
 
-void mc_task_queue_push(mc_task_queue_t *q, mc_task_t *task) {
-    if (!q || !task) return;
+bool mc_task_queue_push(mc_task_queue_t *q, mc_task_t *task) {
+    if (!q || !task) return false;
     task->next = NULL;
     pthread_mutex_lock(&q->lock);
+    if (q->max_len > 0 && q->len >= q->max_len) {
+        pthread_mutex_unlock(&q->lock);
+        return false;
+    }
     if (q->tail) {
         q->tail->next = task;
     } else {
         q->head = task;
     }
     q->tail = task;
+    q->len++;
     pthread_cond_signal(&q->cv);
     pthread_mutex_unlock(&q->lock);
+    return true;
 }
 
 mc_task_t *mc_task_queue_drain(mc_task_queue_t *q) {
@@ -52,6 +59,7 @@ mc_task_t *mc_task_queue_drain(mc_task_queue_t *q) {
     mc_task_t *list = q->head;
     q->head = NULL;
     q->tail = NULL;
+    q->len = 0;
     pthread_mutex_unlock(&q->lock);
     return list;
 }

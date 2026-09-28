@@ -1,14 +1,15 @@
 #include "mc_protocol.h"
 
 int varint_read(const uint8_t *buf, size_t buf_len, int32_t *out, size_t *bytes_read) {
-    int32_t result = 0;
+    uint32_t result = 0;
     int shift = 0;
     size_t i = 0;
     while (i < buf_len && i < MC_VARINT_MAX_BYTES) {
         uint8_t byte = buf[i++];
-        result |= (int32_t)(byte & 0x7F) << shift;
+        if (i == 5 && (byte & 0xF0)) return -1;
+        result |= (uint32_t)(byte & 0x7F) << shift;
         if ((byte & 0x80) == 0) {
-            *out = result;
+            *out = (int32_t)result;
             *bytes_read = i;
             return 0;
         }

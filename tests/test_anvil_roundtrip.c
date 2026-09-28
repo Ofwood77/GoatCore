@@ -51,6 +51,12 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     return NULL;
 }
 
+mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {
+    (void)server;
+    (void)entity_id;
+    return NULL;
+}
+
 void net_server_release_conn(mc_conn_t *conn) {
     (void)conn;
 }
@@ -946,6 +952,18 @@ int main(void) {
     char *dir = mkdtemp(tmpl);
     if (!dir) return fail("mkdtemp");
 
+    if (proto_play_parse_gamemode_for_test("survival") != 0 ||
+        proto_play_parse_gamemode_for_test("creative") != 1 ||
+        proto_play_parse_gamemode_for_test("adventure") != 2 ||
+        proto_play_parse_gamemode_for_test("spectator") != 3) {
+        return fail("gamemode modern names");
+    }
+    if (proto_play_parse_gamemode_for_test("1") >= 0 ||
+        proto_play_parse_gamemode_for_test("c") >= 0 ||
+        proto_play_parse_gamemode_for_test("sp") >= 0) {
+        return fail("gamemode legacy aliases rejected");
+    }
+
     if (test_slot_roundtrip() != 0) return 1;
     if (test_player_store_roundtrip(dir) != 0) return 1;
     if (test_container_store_roundtrip(dir) != 0) return 1;
@@ -1052,9 +1070,153 @@ int main(void) {
     }
     mc_slot_clear(&placement_slot);
 
+    int32_t item_oak_slab = require_item_id("minecraft:oak_slab");
+    if (item_oak_slab < 0 || mc_slot_set_simple(&placement_slot, item_oak_slab, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup oak_slab placement slot");
+    }
+    int32_t slab_bottom = mc_block_state_id("minecraft:oak_slab[type=bottom,waterlogged=false]", -1);
+    int32_t slab_top = mc_block_state_id("minecraft:oak_slab[type=top,waterlogged=false]", -1);
+    int32_t slab_double = mc_block_state_id("minecraft:oak_slab[type=double,waterlogged=false]", -1);
+    if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 0.0f, 0.0f, 0.5f, 0.25f, 0.5f) != slab_bottom ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 0, 0.0f, 0.0f, 0.5f, 0.75f, 0.5f) != slab_top ||
+        proto_play_try_merge_slab_state_for_test(slab_bottom, slab_top) != slab_double) {
+        mc_world_destroy(w);
+        return fail("placement oak_slab bottom top double");
+    }
+    mc_slot_clear(&placement_slot);
+
+    int32_t item_oak_stairs = require_item_id("minecraft:oak_stairs");
+    if (item_oak_stairs < 0 || mc_slot_set_simple(&placement_slot, item_oak_stairs, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup oak_stairs placement slot");
+    }
+    if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 0.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]", -1) ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 90.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", -1) ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 180.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]", -1) ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 2, 270.0f, 0.0f, 0.5f, 0.75f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=west,half=top,shape=straight,waterlogged=false]", -1)) {
+        mc_world_destroy(w);
+        return fail("placement oak_stairs facing and half");
+    }
+    mc_slot_clear(&placement_slot);
+
+    int32_t item_oak_trapdoor = require_item_id("minecraft:oak_trapdoor");
+    if (item_oak_trapdoor < 0 || mc_slot_set_simple(&placement_slot, item_oak_trapdoor, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup oak_trapdoor placement slot");
+    }
+    if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 2, 90.0f, 0.0f, 0.5f, 0.75f, 0.5f) !=
+        mc_block_state_id("minecraft:oak_trapdoor[facing=east,half=top,open=false,powered=false,waterlogged=false]", -1)) {
+        mc_world_destroy(w);
+        return fail("placement oak_trapdoor facing and half");
+    }
+    mc_slot_clear(&placement_slot);
+
+    int32_t item_oak_door = require_item_id("minecraft:oak_door");
+    if (item_oak_door < 0 || mc_slot_set_simple(&placement_slot, item_oak_door, 1) != 0) {
+        mc_world_destroy(w);
+        return fail("setup oak_door placement slot");
+    }
+    int32_t door_lower = mc_block_state_id("minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]", -1);
+    int32_t door_upper = mc_block_state_id("minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]", -1);
+    if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 90.0f, 0.0f, 0.5f, 0.5f, 0.5f) != door_lower ||
+        door_upper < 0) {
+        mc_world_destroy(w);
+        return fail("placement oak_door lower upper states");
+    }
+    mc_slot_clear(&placement_slot);
+
     if (wait_chunk_loaded(w, 0, 0) != 0) {
         mc_world_destroy(w);
         return fail("initial chunk load");
+    }
+
+    int32_t id_oak_fence_single =
+        mc_block_state_id("minecraft:oak_fence[east=false,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_oak_fence_east =
+        mc_block_state_id("minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_oak_fence_west =
+        mc_block_state_id("minecraft:oak_fence[east=false,north=false,south=false,waterlogged=false,west=true]", -1);
+    int32_t id_wall_single =
+        mc_block_state_id("minecraft:cobblestone_wall[east=none,north=none,south=none,up=true,waterlogged=false,west=none]", -1);
+    int32_t id_wall_south =
+        mc_block_state_id("minecraft:cobblestone_wall[east=none,north=none,south=low,up=true,waterlogged=false,west=none]", -1);
+    int32_t id_wall_north =
+        mc_block_state_id("minecraft:cobblestone_wall[east=none,north=low,south=none,up=true,waterlogged=false,west=none]", -1);
+    int32_t id_glass_pane_single =
+        mc_block_state_id("minecraft:glass_pane[east=false,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_glass_pane_east =
+        mc_block_state_id("minecraft:glass_pane[east=true,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_glass_pane_west =
+        mc_block_state_id("minecraft:glass_pane[east=false,north=false,south=false,waterlogged=false,west=true]", -1);
+    int32_t id_iron_bars_single =
+        mc_block_state_id("minecraft:iron_bars[east=false,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_iron_bars_east =
+        mc_block_state_id("minecraft:iron_bars[east=true,north=false,south=false,waterlogged=false,west=false]", -1);
+    int32_t id_iron_bars_west =
+        mc_block_state_id("minecraft:iron_bars[east=false,north=false,south=false,waterlogged=false,west=true]", -1);
+    if (id_oak_fence_single < 0 || id_oak_fence_east < 0 || id_oak_fence_west < 0 ||
+        id_wall_single < 0 || id_wall_south < 0 || id_wall_north < 0 ||
+        id_glass_pane_single < 0 || id_glass_pane_east < 0 || id_glass_pane_west < 0 ||
+        id_iron_bars_single < 0 || id_iron_bars_east < 0 || id_iron_bars_west < 0) {
+        mc_world_destroy(w);
+        return fail("connected block state ids");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 82, 0, id_oak_fence_single) != id_oak_fence_single) {
+        mc_world_destroy(w);
+        return fail("isolated fence stays disconnected");
+    }
+    if (mc_world_set_block(w, 0, 82, 0, id_oak_fence_single) != 0 ||
+        mc_world_set_block(w, 1, 82, 0, id_oak_fence_single) != 0) {
+        mc_world_destroy(w);
+        return fail("setup connected fences");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 82, 0, id_oak_fence_single) != id_oak_fence_east ||
+        proto_play_recompute_connected_block_state_for_test(w, 1, 82, 0, id_oak_fence_single) != id_oak_fence_west) {
+        mc_world_destroy(w);
+        return fail("adjacent fences connect");
+    }
+    if (mc_world_set_block(w, 1, 82, 0, id_air) != 0) {
+        mc_world_destroy(w);
+        return fail("remove fence neighbor");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 82, 0, id_oak_fence_east) != id_oak_fence_single) {
+        mc_world_destroy(w);
+        return fail("fence disconnects after neighbor break");
+    }
+    if (mc_world_set_block(w, 0, 83, 0, id_wall_single) != 0 ||
+        mc_world_set_block(w, 0, 83, 1, id_wall_single) != 0) {
+        mc_world_destroy(w);
+        return fail("setup connected walls");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 83, 0, id_wall_single) != id_wall_south ||
+        proto_play_recompute_connected_block_state_for_test(w, 0, 83, 1, id_wall_single) != id_wall_north) {
+        mc_world_destroy(w);
+        return fail("adjacent walls connect");
+    }
+    if (mc_world_set_block(w, 0, 84, 0, id_glass_pane_single) != 0 ||
+        mc_world_set_block(w, 1, 84, 0, id_glass_pane_single) != 0) {
+        mc_world_destroy(w);
+        return fail("setup connected glass panes");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 84, 0, id_glass_pane_single) != id_glass_pane_east ||
+        proto_play_recompute_connected_block_state_for_test(w, 1, 84, 0, id_glass_pane_single) != id_glass_pane_west) {
+        mc_world_destroy(w);
+        return fail("adjacent glass panes connect");
+    }
+    if (mc_world_set_block(w, 0, 85, 0, id_iron_bars_single) != 0 ||
+        mc_world_set_block(w, 1, 85, 0, id_iron_bars_single) != 0) {
+        mc_world_destroy(w);
+        return fail("setup connected iron bars");
+    }
+    if (proto_play_recompute_connected_block_state_for_test(w, 0, 85, 0, id_iron_bars_single) != id_iron_bars_east ||
+        proto_play_recompute_connected_block_state_for_test(w, 1, 85, 0, id_iron_bars_single) != id_iron_bars_west) {
+        mc_world_destroy(w);
+        return fail("adjacent iron bars connect");
     }
 
     /* Runtime-realistic path: break terrain block, wait save, evict, reload, verify from custom snapshot and RAM. */
