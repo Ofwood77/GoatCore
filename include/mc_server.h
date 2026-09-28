@@ -32,6 +32,8 @@ typedef struct {
     int compression_threshold; /* -1 disables compression */
     bool online_mode;
     bool debug_packets;
+    bool admin_commands; /* explicit development authorization for all connections */
+    bool qa_enabled;
     const char *registry_blob_path;
     const char *tags_blob_path;
     const char *chunk_blob_path;
@@ -41,6 +43,8 @@ typedef struct {
     int view_distance;
     int simulation_distance;
     mc_difficulty_t difficulty;
+    bool pvp_enabled;
+    bool keep_inventory;
 } mc_server_config_t;
 
 typedef struct mc_conn mc_conn_t;
@@ -66,6 +70,7 @@ int net_server_get_open_container_snapshot(mc_server_t *server, mc_container_kin
 mc_difficulty_t net_server_get_difficulty(mc_server_t *server);
 void net_server_set_difficulty(mc_server_t *server, mc_difficulty_t difficulty);
 const char *mc_difficulty_name(mc_difficulty_t difficulty);
+mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id);
 int net_server_broadcast_difficulty(mc_server_t *server);
 int net_server_broadcast_system_message(mc_server_t *server, const char *text);
 

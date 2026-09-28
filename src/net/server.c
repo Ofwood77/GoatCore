@@ -80,6 +80,7 @@ struct mc_server {
     mc_server_config_t cfg;
     atomic_bool running;
     mc_conn_t *conns;
+    size_t active_connections; /* epoll thread owns accept/remove */
     int32_t next_entity_id;
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
@@ -145,6 +146,7 @@ static bool should_log_recv_packet(mc_proto_state_t state, int32_t id) {
         if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_POS) return false;
         if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_POS_ROT) return false;
         if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_ROT) return false;
+        if (id == MC_PKT_PLAY_SERVERBOUND_MOVE_PLAYER_STATUS_ONLY) return false;
         if (id == MC_PKT_PLAY_SERVERBOUND_PLAYER_INPUT) return false;
     }
     return true;
@@ -169,12 +171,14 @@ static void del_epoll(int epfd, int fd) {
 }
 
 static mc_conn_t *conn_create(mc_server_t *s, int fd) {
+    if (s->active_connections >= (size_t)s->cfg.max_connections) return NULL;
     mc_conn_t *c = (mc_conn_t *)calloc(1, sizeof(mc_conn_t));
     if (!c) return NULL;
     c->fd = fd;
     c->state = MC_STATE_HANDSHAKING;
     c->cfg = &s->cfg;
     c->server = s;
+    c->command_authorized = s->cfg.admin_commands;
     c->entity_id = s->next_entity_id++;
     c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
@@ -190,6 +194,9 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd) {
         return NULL;
     }
     pthread_mutex_lock(&s->conns_lock);
+    c->in.limit = MC_MAX_INPUT_BUFFER;
+    c->out.limit = MC_MAX_OUTPUT_BUFFER;
+    s->active_connections++;
     c->next = s->conns;
     s->conns = c;
     pthread_mutex_unlock(&s->conns_lock);
@@ -216,6 +223,7 @@ static void conn_remove(mc_server_t *s, mc_conn_t *c) {
     while (*pp) {
         if (*pp == c) {
             *pp = c->next;
+            s->active_connections--;
             break;
         }
         pp = &(*pp)->next;
@@ -306,13 +314,16 @@ static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
         }
         pthread_mutex_unlock(&s->conns_lock);
     }
+    pthread_mutex_lock(&c->out_lock);
+    c->abort_io = true;
+    c->closing = true;
     del_epoll(s->epoll_fd, c->fd);
     conn_remove(s, c);
     if (c->fd >= 0) {
         close(c->fd);
         c->fd = -1;
     }
-    c->closing = true;
+    pthread_mutex_unlock(&c->out_lock);
     conn_release(c);
 }
 
@@ -428,6 +439,7 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     mc_server_t *s = (mc_server_t *)calloc(1, sizeof(mc_server_t));
     if (!s) return -1;
     s->cfg = *cfg;
+    if (cfg->max_connections <= 0 || (unsigned)cfg->max_connections > MC_MAX_CONNECTIONS) { free(s); return -1; }
     s->cfg.difficulty = normalize_difficulty(cfg->difficulty);
     s->next_entity_id = 1;
     s->conns = NULL;
@@ -1058,7 +1070,7 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
         bool destroyed = false;
         if (item->pickup_delay_ticks <= 0) {
             for (mc_conn_t *c = s->conns; c; c = c->next) {
-                if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready || !c->has_pos) continue;
+                if (c->closing || c->state != MC_STATE_PLAY || !c->play_ready || !c->has_pos || c->dead) continue;
                 double dx = c->x - item->x;
                 double dy = c->y - item->y;
                 double dz = c->z - item->z;
@@ -1117,11 +1129,13 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
         ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
         if (n == 0) return -1;
         if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
             return -1;
         }
+        buf_compact(&c->in);
+        c->in.limit = MC_MAX_INPUT_BUFFER;
         if (buf_write(&c->in, buf, (size_t)n) != 0) return -1;
-    }
 
     mc_frame_t frame;
     memset(&frame, 0, sizeof(frame));
@@ -1163,13 +1177,19 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
                      frame.payload.len, out_pending);
         }
         conn_acquire(c);
-        mc_task_queue_push(&s->task_queue, task);
+        if (!mc_task_queue_push(&s->task_queue, task)) {
+            log_error("task queue full; closing connection fd=%d", c->fd);
+            conn_release(c);
+            free(task->payload);
+            free(task);
+            return -1;
+        }
         frame.payload.data = NULL;
         frame.payload.len = 0;
         memset(&frame, 0, sizeof(frame));
     }
 
-    return 0;
+    }
 }
 
 static int handle_client_write(mc_conn_t *c) {
@@ -1177,6 +1197,7 @@ static int handle_client_write(mc_conn_t *c) {
     size_t before_pending = 0;
     size_t flushed = 0;
     pthread_mutex_lock(&c->out_lock);
+    if (c->abort_io || c->fd < 0) { pthread_mutex_unlock(&c->out_lock); return -1; }
     before_pending = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     while (c->out.rpos < c->out.len) {
         int flags = 0;
@@ -1185,10 +1206,12 @@ static int handle_client_write(mc_conn_t *c) {
 #endif
         ssize_t n = send(c->fd, c->out.data + c->out.rpos, c->out.len - c->out.rpos, flags);
         if (n < 0) {
+            if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
             pthread_mutex_unlock(&c->out_lock);
             return -1;
         }
+        if (n == 0) { pthread_mutex_unlock(&c->out_lock); return -1; }
         c->out.rpos += (size_t)n;
         flushed += (size_t)n;
     }
@@ -1198,6 +1221,15 @@ static int handle_client_write(mc_conn_t *c) {
         log_info("net latency: t=%lld flush fd=%d player=%s before=%zu flushed=%zu remaining=%zu",
                  (long long)start_ms, c->fd, c->username[0] ? c->username : "(unknown)",
                  before_pending, flushed, remaining);
+    }
+    if (c->server) {
+        struct epoll_event ev = {0};
+        ev.data.ptr = c;
+        ev.events = EPOLLIN | EPOLLET | (remaining ? EPOLLOUT : 0);
+        if (epoll_ctl(c->server->epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) != 0) {
+            pthread_mutex_unlock(&c->out_lock);
+            return -1;
+        }
     }
     if (c->closing && c->out.len == 0) {
         pthread_mutex_unlock(&c->out_lock);
@@ -1792,7 +1824,7 @@ static void server_cleanup(mc_server_t *s) {
     for (mc_conn_t *c = s->conns; c; c = c->next) {
         if (!c->closing) continue;
         pthread_mutex_lock(&c->out_lock);
-        bool can_close = (c->out.len == 0);
+        bool can_close = c->abort_io || (c->out.len == 0);
         pthread_mutex_unlock(&c->out_lock);
         if (can_close) {
             mc_conn_t **next = (mc_conn_t **)realloc(to_close, (to_close_len + 1) * sizeof(*to_close));
@@ -1846,10 +1878,17 @@ int net_server_run(mc_server_t *s) {
                         close(cfd);
                         continue;
                     }
-                    add_epoll(s->epoll_fd, cfd, EPOLLIN | EPOLLET, c);
+                    if (add_epoll(s->epoll_fd, cfd, EPOLLIN | EPOLLET, c) != 0) server_close_conn(s, c);
                 }
             } else {
                 mc_conn_t *c = (mc_conn_t *)events[i].data.ptr;
+                if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+                    server_close_conn(s, c);
+                    continue;
+                }
+                if (events[i].events & EPOLLOUT) {
+                    if (handle_client_write(c) != 0) { server_close_conn(s, c); continue; }
+                }
                 if (events[i].events & EPOLLIN) {
                     if (handle_client_read(s, c) != 0) {
                         server_close_conn(s, c);
@@ -1904,6 +1943,22 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     mc_conn_t *c = server->conns;
     while (c) {
         if (strcmp(c->username, name) == 0) {
+            conn_acquire(c);
+            pthread_mutex_unlock(&server->conns_lock);
+            return c;
+        }
+        c = c->next;
+    }
+    pthread_mutex_unlock(&server->conns_lock);
+    return NULL;
+}
+
+mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {
+    if (!server || entity_id <= 0) return NULL;
+    pthread_mutex_lock(&server->conns_lock);
+    mc_conn_t *c = server->conns;
+    while (c) {
+        if (c->entity_id == entity_id) {
             conn_acquire(c);
             pthread_mutex_unlock(&server->conns_lock);
             return c;

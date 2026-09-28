@@ -58,6 +58,8 @@ TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench
 
 TEST_BINS = \
     test_varint \
+    test_framing_compression \
+    test_pvp \
     test_nbt \
     test_nbt_arena \
     test_block_registry \
@@ -182,6 +184,12 @@ mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/world/chunk_store.c src
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_varint: tests/test_varint.c src/protocol/varint.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_framing_compression: tests/test_framing_compression.c src/net/buffer.c src/protocol/varint.c src/protocol/framing.c src/protocol/crypto_stub.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_nbt: tests/test_nbt.c src/world/nbt.c src/util/arena.c

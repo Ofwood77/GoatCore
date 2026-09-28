@@ -15,12 +15,16 @@
 #define DEFAULT_VIEW_DISTANCE 10
 #define DEFAULT_SIMULATION_DISTANCE 8
 #define DEFAULT_DIFFICULTY MC_DIFFICULTY_NORMAL
+#define DEFAULT_PVP_ENABLED true
+#define DEFAULT_KEEP_INVENTORY false
 
 typedef struct {
     int64_t level_seed;
     int view_distance;
     int simulation_distance;
     mc_difficulty_t difficulty;
+    bool pvp_enabled;
+    bool keep_inventory;
 } server_disk_config_t;
 
 static void trim_ws(char *s) {
@@ -48,6 +52,8 @@ static int write_default_server_config(const char *path) {
     fprintf(f, "view-distance=%d\n", DEFAULT_VIEW_DISTANCE);
     fprintf(f, "simulation-distance=%d\n", DEFAULT_SIMULATION_DISTANCE);
     fprintf(f, "difficulty=%s\n", mc_difficulty_name(DEFAULT_DIFFICULTY));
+    fprintf(f, "pvp=%s\n", DEFAULT_PVP_ENABLED ? "true" : "false");
+    fprintf(f, "keep_inventory=%s\n", DEFAULT_KEEP_INVENTORY ? "true" : "false");
     if (fclose(f) != 0) {
         int e = errno;
         log_error("failed to write %s (errno=%d %s)", path, e, strerror(e));
@@ -84,6 +90,25 @@ static int parse_difficulty_value(const char *val, mc_difficulty_t *out) {
     return -1;
 }
 
+static int parse_bool_value(const char *val, bool *out) {
+    if (!val || !out) return -1;
+    char tmp[32];
+    size_t n = strlen(val);
+    if (n >= sizeof(tmp)) n = sizeof(tmp) - 1;
+    for (size_t i = 0; i < n; i++) tmp[i] = (char)tolower((unsigned char)val[i]);
+    tmp[n] = '\0';
+
+    if (strcmp(tmp, "1") == 0 || strcmp(tmp, "true") == 0 || strcmp(tmp, "yes") == 0 || strcmp(tmp, "on") == 0) {
+        *out = true;
+        return 0;
+    }
+    if (strcmp(tmp, "0") == 0 || strcmp(tmp, "false") == 0 || strcmp(tmp, "no") == 0 || strcmp(tmp, "off") == 0) {
+        *out = false;
+        return 0;
+    }
+    return -1;
+}
+
 static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     if (!f || !out) return -1;
     *out = (server_disk_config_t){0};
@@ -91,6 +116,8 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     out->view_distance = DEFAULT_VIEW_DISTANCE;
     out->simulation_distance = DEFAULT_SIMULATION_DISTANCE;
     out->difficulty = DEFAULT_DIFFICULTY;
+    out->pvp_enabled = DEFAULT_PVP_ENABLED;
+    out->keep_inventory = DEFAULT_KEEP_INVENTORY;
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -139,6 +166,20 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
         if (strcmp(key, "difficulty") == 0) {
             if (parse_difficulty_value(val, &out->difficulty) != 0) {
                 log_error("invalid difficulty in %s: '%s' (expected peaceful/easy/normal/hard)", SERVER_CONFIG_PATH, val);
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(key, "pvp") == 0) {
+            if (parse_bool_value(val, &out->pvp_enabled) != 0) {
+                log_error("invalid pvp in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(key, "keep_inventory") == 0 || strcmp(key, "keep-inventory") == 0) {
+            if (parse_bool_value(val, &out->keep_inventory) != 0) {
+                log_error("invalid keep_inventory in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
                 return -1;
             }
             continue;
@@ -213,13 +254,15 @@ int main(void) {
         return 1;
     }
 
-    mc_server_config_t cfg;
+    mc_server_config_t cfg = {0};
     cfg.bind_ip = NULL;
     cfg.bind_port = 25565;
     cfg.max_connections = 128;
     cfg.compression_threshold = -1;
     cfg.online_mode = false;
-    cfg.debug_packets = true;
+    cfg.debug_packets = false;
+    cfg.admin_commands = getenv("MC_ADMIN_COMMANDS") && strcmp(getenv("MC_ADMIN_COMMANDS"), "1") == 0;
+    cfg.qa_enabled = getenv("MC_QA_MODE") && strcmp(getenv("MC_QA_MODE"), "1") == 0;
     cfg.registry_blob_path = "assets/registry_packets_26_1_1.bin";
     cfg.tags_blob_path = "assets/tags_packet_26_1_1.bin";
     cfg.chunk_blob_path = "assets/chunk_0_0_26_1_1.bin";
@@ -229,6 +272,8 @@ int main(void) {
     cfg.view_distance = disk_cfg.view_distance;
     cfg.simulation_distance = disk_cfg.simulation_distance;
     cfg.difficulty = disk_cfg.difficulty;
+    cfg.pvp_enabled = disk_cfg.pvp_enabled;
+    cfg.keep_inventory = disk_cfg.keep_inventory;
 
     const char *env_world_path = getenv("MC_WORLD_PATH");
     if (env_world_path && *env_world_path) {
@@ -242,6 +287,17 @@ int main(void) {
     if (port_override > 0) {
         cfg.bind_port = env_bind_port;
         log_info("MC_BIND_PORT override: %u", cfg.bind_port);
+    }
+
+    const char *env_debug_packets = getenv("MC_DEBUG_PACKETS");
+    if (env_debug_packets && *env_debug_packets) {
+        bool debug_packets = false;
+        if (parse_bool_value(env_debug_packets, &debug_packets) != 0) {
+            log_error("invalid MC_DEBUG_PACKETS value: %s", env_debug_packets);
+            return 1;
+        }
+        cfg.debug_packets = debug_packets;
+        log_info("MC_DEBUG_PACKETS override: %s", cfg.debug_packets ? "true" : "false");
     }
 
     if (require_runtime_asset(cfg.registry_blob_path, "registry blob") != 0 ||

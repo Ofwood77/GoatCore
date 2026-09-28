@@ -3,6 +3,9 @@
 #include <string.h>
 
 int buf_init(mc_buf_t *b, size_t cap) {
+    if (cap > MC_MAX_OUTPUT_BUFFER) return -1;
+    b->limit = 0;
+    if (!cap) cap = 1;
     b->data = (uint8_t *)malloc(cap);
     if (!b->data) return -1;
     b->cap = cap;
@@ -33,9 +36,15 @@ void buf_compact(mc_buf_t *b) {
 }
 
 int buf_reserve(mc_buf_t *b, size_t need) {
-    if (b->len + need <= b->cap) return 0;
-    size_t new_cap = b->cap * 2;
-    while (new_cap < b->len + need) new_cap *= 2;
+    size_t limit = b->limit ? b->limit : MC_MAX_OUTPUT_BUFFER;
+    if (b->len > limit || need > limit - b->len) return -1;
+    size_t required = b->len + need;
+    if (required <= b->cap) return 0;
+    size_t new_cap = b->cap ? b->cap : 1;
+    while (new_cap < required) {
+        if (new_cap > limit / 2) { new_cap = limit; break; }
+        new_cap *= 2;
+    }
     uint8_t *p = (uint8_t *)realloc(b->data, new_cap);
     if (!p) return -1;
     b->data = p;
@@ -45,7 +54,7 @@ int buf_reserve(mc_buf_t *b, size_t need) {
 
 int buf_write(mc_buf_t *b, const uint8_t *src, size_t n) {
     if (buf_reserve(b, n) != 0) return -1;
-    memcpy(b->data + b->len, src, n);
+    if (n) memcpy(b->data + b->len, src, n);
     b->len += n;
     return 0;
 }
