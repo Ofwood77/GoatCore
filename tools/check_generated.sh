@@ -92,12 +92,8 @@ for root_arg in sys.argv[1:]:
             raise SystemExit(1)
 PY
 then
-    if [ "$REQUIRE_RAW_DATA" = "1" ]; then
-        echo "[generated-check] raw data is required; refusing to skip regeneration" >&2
-        exit 1
-    fi
-    echo "[generated-check] raw data invalid; validated generated files only"
-    exit 0
+    echo "[generated-check] raw data is invalid; fix the source before regeneration" >&2
+    exit 1
 fi
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/mc_c_server_generated_check.XXXXXX")

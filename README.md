@@ -53,8 +53,8 @@ Known limitations:
 Clone the repository:
 
 ```bash
-git clone https://github.com/Ofwood77/OfwoodCore.git
-cd OfwoodCore
+git clone https://github.com/Ofwood77/GoatCore.git
+cd GoatCore
 ```
 
 Install the Debian build dependencies:
