@@ -2,8 +2,8 @@
  * Network accept loop and main server tick. This file is the bridge between
  * epoll-driven socket IO and the gameplay/world modules:
  * - the network side decodes packets and pushes tasks
- * - the tick thread drains tasks, mutates world state, ticks gameplay, and
- *   flushes outbound packets in a stable order
+ * - the tick thread drains tasks and mutates world state; only the network
+ *   owner flushes outbound bytes and changes epoll registrations
  *
  * When reading this file, keep the lock model in mind: long gameplay work
  * should happen without holding conns_lock, using refcounted snapshots when
@@ -28,11 +28,13 @@
 #include <arpa/inet.h>
 #include <math.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <time.h>
 #include <pthread.h>
 #include <stdatomic.h>
 
 #define MAX_EVENTS 64
+#define MAX_WRITE_BYTES_PER_PASS (256u * 1024u)
 #define PKT_PLAY_BLOCK_UPDATE MC_PKT_PLAY_CLIENTBOUND_BLOCK_UPDATE
 #define PKT_PLAY_SPAWN_ENTITY MC_PKT_PLAY_CLIENTBOUND_ADD_ENTITY
 #define PKT_PLAY_ENTITY_METADATA MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_DATA
@@ -77,14 +79,19 @@ typedef struct {
 struct mc_server {
     int listen_fd;
     int epoll_fd;
+    int wake_fd;
     mc_server_config_t cfg;
     atomic_bool running;
     mc_conn_t *conns;
+    mc_conn_t *departures; /* conns_lock; tick owns gameplay departure handling */
+    mc_conn_t *retired; /* network owner; keeps epoll batch pointers alive */
     size_t active_connections; /* epoll thread owns accept/remove */
     int32_t next_entity_id;
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
     pthread_t tick_thread;
+    atomic_uint_fast64_t network_write_us;
+    atomic_uint_fast64_t network_flush_count;
     atomic_int difficulty;
     mc_world_t *world;
     mc_item_entity_t *item_entities;
@@ -170,18 +177,34 @@ static void del_epoll(int epfd, int fd) {
     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
 }
 
+static void server_wake_network(mc_server_t *s) {
+    if (!s || s->wake_fd < 0) return;
+    uint64_t one = 1;
+    ssize_t n;
+    do {
+        n = write(s->wake_fd, &one, sizeof(one));
+    } while (n < 0 && errno == EINTR);
+    /* EAGAIN means the event counter is already readable. */
+}
+
+static void conn_notify_output(mc_conn_t *c) {
+    if (c) server_wake_network(c->server);
+}
+
 static mc_conn_t *conn_create(mc_server_t *s, int fd) {
     if (s->active_connections >= (size_t)s->cfg.max_connections) return NULL;
     mc_conn_t *c = (mc_conn_t *)calloc(1, sizeof(mc_conn_t));
     if (!c) return NULL;
-    c->fd = fd;
+    atomic_init(&c->fd, fd);
     c->state = MC_STATE_HANDSHAKING;
     c->cfg = &s->cfg;
     c->server = s;
+    c->notify_output = conn_notify_output;
     c->command_authorized = s->cfg.admin_commands;
     c->entity_id = s->next_entity_id++;
     c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
+    atomic_init(&c->detached, false);
     if (pthread_mutex_init(&c->out_lock, NULL) != 0) {
         free(c);
         return NULL;
@@ -205,7 +228,6 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd) {
 
 static void conn_destroy(mc_conn_t *c) {
     if (!c) return;
-    proto_play_conn_cleanup(c);
     if (c->fd >= 0) close(c->fd);
     buf_free(&c->in);
     buf_free(&c->out);
@@ -304,27 +326,64 @@ static void close_matching_container_window(mc_conn_t *c) {
 
 static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
     if (!s || !c) return;
-    if (c->state == MC_STATE_PLAY) {
-        pthread_mutex_lock(&s->conns_lock);
-        for (mc_conn_t *other = s->conns; other; other = other->next) {
-            if (other == c || other->closing || other->state != MC_STATE_PLAY) continue;
-            if (proto_play_remove_remote_player(other, c) != 0) {
-                conn_close(other);
-            }
-        }
-        pthread_mutex_unlock(&s->conns_lock);
-    }
+    if (atomic_exchange(&c->detached, true)) return;
+    atomic_store(&c->closing, true);
     pthread_mutex_lock(&c->out_lock);
     c->abort_io = true;
-    c->closing = true;
     del_epoll(s->epoll_fd, c->fd);
-    conn_remove(s, c);
     if (c->fd >= 0) {
         close(c->fd);
         c->fd = -1;
     }
     pthread_mutex_unlock(&c->out_lock);
-    conn_release(c);
+    conn_remove(s, c);
+
+    /* The tick thread alone updates other players' view of this player. The
+     * extra ref survives even if the network batch has already finished. */
+    conn_acquire(c);
+    pthread_mutex_lock(&s->conns_lock);
+    c->departure_next = s->departures;
+    s->departures = c;
+    pthread_mutex_unlock(&s->conns_lock);
+    c->retired_next = s->retired;
+    s->retired = c;
+}
+
+static void server_release_retired(mc_server_t *s) {
+    mc_conn_t *c = s->retired;
+    s->retired = NULL;
+    while (c) {
+        mc_conn_t *next = c->retired_next;
+        conn_release(c);
+        c = next;
+    }
+}
+
+static void server_process_departures(mc_server_t *s) {
+    pthread_mutex_lock(&s->conns_lock);
+    mc_conn_t *departed = s->departures;
+    s->departures = NULL;
+    pthread_mutex_unlock(&s->conns_lock);
+    if (!departed) return;
+
+    mc_conn_snapshot_t viewers = {0};
+    bool have_viewers = server_snapshot_conns(s, &viewers) == 0;
+    if (!have_viewers) log_error("departure: failed to snapshot connections");
+    while (departed) {
+        mc_conn_t *next = departed->departure_next;
+        departed->departure_next = NULL;
+        if (have_viewers && atomic_load(&departed->state) == MC_STATE_PLAY) {
+            for (size_t i = 0; i < viewers.len; i++) {
+                mc_conn_t *viewer = viewers.items[i];
+                if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY) continue;
+                if (proto_play_remove_remote_player(viewer, departed) != 0) conn_close(viewer);
+            }
+        }
+        proto_play_conn_cleanup(departed);
+        conn_release(departed);
+        departed = next;
+    }
+    conn_snapshot_clear(&viewers);
 }
 
 static int64_t now_ms(void) {
@@ -438,6 +497,7 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
 
     mc_server_t *s = (mc_server_t *)calloc(1, sizeof(mc_server_t));
     if (!s) return -1;
+    s->wake_fd = -1;
     s->cfg = *cfg;
     if (cfg->max_connections <= 0 || (unsigned)cfg->max_connections > MC_MAX_CONNECTIONS) { free(s); return -1; }
     s->cfg.difficulty = normalize_difficulty(cfg->difficulty);
@@ -445,6 +505,8 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     s->conns = NULL;
     atomic_init(&s->running, false);
     atomic_init(&s->difficulty, (int)s->cfg.difficulty);
+    atomic_init(&s->network_write_us, 0);
+    atomic_init(&s->network_flush_count, 0);
     if (pthread_mutex_init(&s->conns_lock, NULL) != 0) {
         free(s);
         return -1;
@@ -545,6 +607,19 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
                   (unsigned)cfg->bind_port,
                   errno,
                   strerror(errno));
+        close(s->epoll_fd);
+        close(s->listen_fd);
+        mc_world_destroy(s->world);
+        mc_task_queue_destroy(&s->task_queue);
+        pthread_mutex_destroy(&s->conns_lock);
+        free(s);
+        return -1;
+    }
+
+    s->wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (s->wake_fd < 0 || add_epoll(s->epoll_fd, s->wake_fd, EPOLLIN, &s->wake_fd) != 0) {
+        log_error("failed to initialize network wakeup (errno=%d %s)", errno, strerror(errno));
+        if (s->wake_fd >= 0) close(s->wake_fd);
         close(s->epoll_fd);
         close(s->listen_fd);
         mc_world_destroy(s->world);
@@ -1171,8 +1246,8 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
             pthread_mutex_lock(&c->out_lock);
             size_t out_pending = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
             pthread_mutex_unlock(&c->out_lock);
-            log_info("net latency: t=%lld recv_queue fd=%d player=%s state=%s id=0x%02X%s%s len=%zu out_pending=%zu",
-                     (long long)task->enqueue_ms, c->fd, c->username[0] ? c->username : "(unknown)",
+            log_info("net latency: t=%lld recv_queue fd=%d state=%s id=0x%02X%s%s len=%zu out_pending=%zu",
+                     (long long)task->enqueue_ms, c->fd,
                      state_name(c->state), frame.packet_id, packet_name ? " " : "", packet_name ? packet_name : "",
                      frame.payload.len, out_pending);
         }
@@ -1199,12 +1274,14 @@ static int handle_client_write(mc_conn_t *c) {
     pthread_mutex_lock(&c->out_lock);
     if (c->abort_io || c->fd < 0) { pthread_mutex_unlock(&c->out_lock); return -1; }
     before_pending = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
-    while (c->out.rpos < c->out.len) {
+    while (c->out.rpos < c->out.len && flushed < MAX_WRITE_BYTES_PER_PASS) {
         int flags = 0;
 #ifdef MSG_NOSIGNAL
         flags |= MSG_NOSIGNAL;
 #endif
-        ssize_t n = send(c->fd, c->out.data + c->out.rpos, c->out.len - c->out.rpos, flags);
+        size_t amount = c->out.len - c->out.rpos;
+        if (amount > MAX_WRITE_BYTES_PER_PASS - flushed) amount = MAX_WRITE_BYTES_PER_PASS - flushed;
+        ssize_t n = send(c->fd, c->out.data + c->out.rpos, amount, flags);
         if (n < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
@@ -1218,8 +1295,8 @@ static int handle_client_write(mc_conn_t *c) {
     buf_compact(&c->out);
     size_t remaining = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     if (debug_net_latency_enabled() && (before_pending > 0 || flushed > 0)) {
-        log_info("net latency: t=%lld flush fd=%d player=%s before=%zu flushed=%zu remaining=%zu",
-                 (long long)start_ms, c->fd, c->username[0] ? c->username : "(unknown)",
+        log_info("net latency: t=%lld flush fd=%d before=%zu flushed=%zu remaining=%zu",
+                 (long long)start_ms, c->fd,
                  before_pending, flushed, remaining);
     }
     if (c->server) {
@@ -1372,25 +1449,32 @@ static size_t server_sync_remote_players_snapshot(mc_conn_snapshot_t *snapshot, 
     return attempts;
 }
 
-static size_t server_flush_writes(mc_server_t *s, const char *phase) {
+static size_t network_flush_pending(mc_server_t *s) {
     if (!s) return 0;
     size_t flushed_conns = 0;
+    mc_conn_t *pending[MC_MAX_CONNECTIONS];
+    size_t pending_len = 0;
     pthread_mutex_lock(&s->conns_lock);
-    for (mc_conn_t *c = s->conns; c; c = c->next) {
+    for (mc_conn_t *c = s->conns; c && pending_len < MC_MAX_CONNECTIONS; c = c->next) {
+        conn_acquire(c);
+        pending[pending_len++] = c;
+    }
+    pthread_mutex_unlock(&s->conns_lock);
+    for (size_t i = 0; i < pending_len; i++) {
+        mc_conn_t *c = pending[i];
+        if (atomic_load(&c->detached)) {
+            conn_release(c);
+            continue;
+        }
         pthread_mutex_lock(&c->out_lock);
         bool had_pending = c->out.len > c->out.rpos;
         pthread_mutex_unlock(&c->out_lock);
-        if (had_pending) flushed_conns++;
-        if (debug_net_latency_enabled() && had_pending) {
-            log_info("net latency: t=%lld flush_request phase=%s fd=%d player=%s",
-                     (long long)now_ms(), phase ? phase : "tick", c->fd,
-                     c->username[0] ? c->username : "(unknown)");
+        if (had_pending) {
+            flushed_conns++;
+            if (handle_client_write(c) != 0) server_close_conn(s, c);
         }
-        if (handle_client_write(c) != 0) {
-            conn_close(c);
-        }
+        conn_release(c);
     }
-    pthread_mutex_unlock(&s->conns_lock);
     return flushed_conns;
 }
 
@@ -1423,6 +1507,7 @@ static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_ti
     if (!s) return;
 
     int64_t start_ms = now_ms();
+    server_process_departures(s);
     size_t task_count = server_process_queued_tasks(s, now, "fast");
     if (task_count == 0) return;
 
@@ -1432,8 +1517,8 @@ static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_ti
     if (server_snapshot_conns(s, &conn_snapshot) == 0) {
         update_sends = server_broadcast_pending_updates(s, &conn_snapshot, "fast");
         /* Movement smoothing is deliberately kept on the fixed 20 TPS tick.
-         * The fast path remains for gameplay actions/block updates and socket
-         * flushes, but per-packet movement broadcasts create irregular bursts
+         * The fast path remains for gameplay actions/block updates, but
+         * per-packet movement broadcasts create irregular bursts
          * that look jittery on remote clients. */
         if (debug_broadcast_enabled()) {
             log_info("broadcast debug: t=%lld phase=fast remote_sync_deferred reason=stable_movement_tick",
@@ -1444,10 +1529,9 @@ static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_ti
         log_error("fast pass: failed to snapshot connections");
     }
 
-    size_t flushed_conns = server_flush_writes(s, "fast");
     if (debug_net_latency_enabled() || debug_broadcast_enabled()) {
-        log_info("net latency: t=%lld fast_pass tasks=%zu update_sends=%zu remote_syncs=%zu flushed_conns=%zu duration=%lldms next_tick_in=%lldms",
-                 (long long)now_ms(), task_count, update_sends, remote_syncs, flushed_conns,
+        log_info("net latency: t=%lld fast_pass tasks=%zu update_sends=%zu remote_syncs=%zu duration=%lldms next_tick_in=%lldms",
+                 (long long)now_ms(), task_count, update_sends, remote_syncs,
                  (long long)(now_ms() - start_ms), (long long)((next_tick_us / 1000) - now_ms()));
     }
 }
@@ -1486,6 +1570,7 @@ static void *tick_thread_main(void *arg) {
     uint64_t summary_resyncs = 0;
 
     while (atomic_load(&s->running)) {
+        server_process_departures(s);
         bool perf = mc_perf_enabled();
         int64_t tick_start_us = 0;
         int64_t tick_late_us = 0;
@@ -1656,16 +1741,8 @@ static void *tick_thread_main(void *arg) {
         remote_sync_attempts = server_sync_remote_players_snapshot(&conn_snapshot, "tick");
         if (perf) remote_sync_us = mc_now_us() - span_start_us;
 
-        pthread_mutex_lock(&s->conns_lock);
-        span_start_us = perf ? mc_now_us() : 0;
-        for (mc_conn_t *c = s->conns; c; c = c->next) {
-            write_flush_count++;
-            if (handle_client_write(c) != 0) {
-                conn_close(c);
-            }
-        }
-        if (perf) write_flush_us = mc_now_us() - span_start_us;
-        pthread_mutex_unlock(&s->conns_lock);
+        write_flush_count = (size_t)atomic_exchange(&s->network_flush_count, 0);
+        write_flush_us = (int64_t)atomic_exchange(&s->network_write_us, 0);
         conn_snapshot_clear(&conn_snapshot);
 
         if (do_evict && s->world) {
@@ -1695,10 +1772,10 @@ static void *tick_thread_main(void *arg) {
             int64_t task_wait_avg_us = task_count > 0 ? task_wait_sum_us / (int64_t)task_count : 0;
             bool slow = total_us >= slow_us || task_us >= slow_us || world_tick_us >= slow_us || furnace_tick_us >= slow_us ||
                         update_broadcast_us >= slow_us || proto_tick_us >= slow_us || item_entities_us >= slow_us ||
-                        remote_sync_us >= slow_us || write_flush_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us ||
+                        remote_sync_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us ||
                         tick_late_us >= slow_us || task_wait_max_us >= slow_us;
             if (slow) {
-                log_info("perf tick: idx=%llu total=%.3fms late=%.3fms sleep=%.3fms tasks=%.3fms task_wait_avg=%.3fms task_wait_max=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu writes=%zu item_entities=%zu keep=%zu evicted=%zu world_done=%zu world_integrated=%zu world_dirty=%zu world_saves=%zu/%zu/%zu world_jobs=%zu furnaces_scanned=%zu furnaces_ticked=%zu furnaces_changed=%zu furnaces_errors=%zu",
+                log_info("perf tick: idx=%llu total=%.3fms late=%.3fms sleep=%.3fms tasks=%.3fms task_wait_avg=%.3fms task_wait_max=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms net_write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu net_flushes=%zu item_entities=%zu keep=%zu evicted=%zu world_done=%zu world_integrated=%zu world_dirty=%zu world_saves=%zu/%zu/%zu world_jobs=%zu furnaces_scanned=%zu furnaces_ticked=%zu furnaces_changed=%zu furnaces_errors=%zu",
                          (unsigned long long)tick_index,
                          perf_ms(total_us),
                          perf_ms(tick_late_us),
@@ -1758,7 +1835,7 @@ static void *tick_thread_main(void *arg) {
                 summary_remote_syncs += remote_sync_attempts;
                 if (schedule_resync) summary_resyncs++;
                 if (summary_total.count >= summary_ticks) {
-                    log_info("perf summary: ticks=%llu avg_total=%.3fms max_total=%.3fms avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
+                    log_info("perf summary: ticks=%llu avg_total=%.3fms max_total=%.3fms avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_net_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
                              (unsigned long long)summary_total.count,
                              perf_accum_avg_ms(&summary_total),
                              perf_ms(summary_total.max_us),
@@ -1814,6 +1891,7 @@ static void *tick_thread_main(void *arg) {
         free(task);
         task = next;
     }
+    server_process_departures(s);
     return NULL;
 }
 
@@ -1880,14 +1958,26 @@ int net_server_run(mc_server_t *s) {
                     }
                     if (add_epoll(s->epoll_fd, cfd, EPOLLIN | EPOLLET, c) != 0) server_close_conn(s, c);
                 }
+            } else if (events[i].data.ptr == &s->wake_fd) {
+                uint64_t count;
+                while (read(s->wake_fd, &count, sizeof(count)) > 0) {}
+                int64_t start_us = mc_now_us();
+                size_t flushed = network_flush_pending(s);
+                atomic_fetch_add(&s->network_flush_count, flushed);
+                atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
             } else {
                 mc_conn_t *c = (mc_conn_t *)events[i].data.ptr;
+                if (atomic_load(&c->detached)) continue;
                 if (events[i].events & (EPOLLERR | EPOLLHUP)) {
                     server_close_conn(s, c);
                     continue;
                 }
                 if (events[i].events & EPOLLOUT) {
-                    if (handle_client_write(c) != 0) { server_close_conn(s, c); continue; }
+                    int64_t start_us = mc_now_us();
+                    int rc = handle_client_write(c);
+                    atomic_fetch_add(&s->network_flush_count, 1);
+                    atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
+                    if (rc != 0) { server_close_conn(s, c); continue; }
                 }
                 if (events[i].events & EPOLLIN) {
                     if (handle_client_read(s, c) != 0) {
@@ -1895,10 +1985,12 @@ int net_server_run(mc_server_t *s) {
                         continue;
                     }
                 }
+                if (events[i].events & EPOLLRDHUP) server_close_conn(s, c);
             }
         }
 
         server_cleanup(s);
+        server_release_retired(s);
     }
 
     atomic_store(&s->running, false);
@@ -1909,6 +2001,7 @@ int net_server_run(mc_server_t *s) {
 void net_server_stop(mc_server_t *s) {
     if (!s) return;
     atomic_store(&s->running, false);
+    server_wake_network(s);
 }
 
 void net_server_destroy(mc_server_t *s) {
@@ -1925,7 +2018,16 @@ void net_server_destroy(mc_server_t *s) {
         conn_destroy(c);
         c = next;
     }
+    server_release_retired(s);
+    c = s->departures;
+    while (c) {
+        mc_conn_t *next = c->departure_next;
+        proto_play_conn_cleanup(c);
+        conn_release(c);
+        c = next;
+    }
     close(s->epoll_fd);
+    close(s->wake_fd);
     close(s->listen_fd);
     for (size_t i = 0; i < s->item_entities_len; i++) {
         mc_slot_clear(&s->item_entities[i].slot);

@@ -56,16 +56,18 @@ typedef struct {
 } mc_remote_player_t;
 
 struct mc_conn {
-    int fd;
+    atomic_int fd; /* network owner writes; tick may log the value */
     mc_buf_t in;
     mc_buf_t out;
     pthread_mutex_t out_lock;
     atomic_int state;
     atomic_bool closing;
     atomic_bool abort_io;
+    atomic_bool detached; /* network owner has removed the fd from epoll */
     bool command_authorized;
     const mc_server_config_t *cfg;
     mc_server_t *server;
+    void (*notify_output)(struct mc_conn *c);
     atomic_int refcount;
 
     /* Login/config/play identity and lifecycle flags. */
@@ -121,6 +123,8 @@ struct mc_conn {
     void *ssl_write; /* EVP_CIPHER_CTX* */
 
     struct mc_conn *next;
+    struct mc_conn *departure_next;
+    struct mc_conn *retired_next;
 
     /* Chunk streaming and prediction-ack state (PLAY). */
     bool has_center_chunk;

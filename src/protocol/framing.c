@@ -221,6 +221,7 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
 
     size_t out_before = 0;
     size_t out_after = 0;
+    int fd = -1;
     pthread_mutex_lock(&c->out_lock);
     buf_compact(&c->out);
     if (c->abort_io || c->out.len > MC_MAX_OUTPUT_BUFFER ||
@@ -230,21 +231,31 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
         c->closing = true;
         pthread_mutex_unlock(&c->out_lock);
         free(body);
+        if (c->notify_output) c->notify_output(c);
         return -1;
     }
     out_before = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
     if (buf_write(&c->out, len_buf, len_bytes) != 0) {
+        c->abort_io = true;
+        c->closing = true;
         pthread_mutex_unlock(&c->out_lock);
         free(body);
+        if (c->notify_output) c->notify_output(c);
         return -1;
     }
 
     int rc = mc_crypto_write(c, body, body_len, &c->out);
+    if (rc != 0) {
+        c->abort_io = true;
+        c->closing = true;
+    }
     out_after = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
+    fd = c->fd;
     pthread_mutex_unlock(&c->out_lock);
+    if (c->notify_output && (rc != 0 || (out_before == 0 && out_after > 0))) c->notify_output(c);
     if (debug_net_latency_enabled()) {
         log_info("net latency: t=%lld queue_out fd=%d player=%s state=%d packet=0x%02X payload=%zu framed=%zu out_before=%zu out_after=%zu rc=%d",
-                 (long long)frame_now_ms(), c->fd, c->username[0] ? c->username : "(unknown)",
+                 (long long)frame_now_ms(), fd, c->username[0] ? c->username : "(unknown)",
                  atomic_load(&c->state), packet_id, payload_len, len_bytes + body_len, out_before, out_after, rc);
     }
     free(body);
@@ -253,5 +264,5 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
 
 void conn_close(mc_conn_t *c) {
     if (!c) return;
-    c->closing = true;
+    if (!atomic_exchange(&c->closing, true) && c->notify_output) c->notify_output(c);
 }
