@@ -42,7 +42,7 @@ int proto_handle_status(mc_conn_t *c, const mc_frame_t *frame, const char *motd_
         /* Ping: payload is 8 bytes */
         if (frame->payload.len != 8) return -1;
         if (conn_write_packet(c, MC_PKT_STATUS_CLIENTBOUND_PONG_RESPONSE, frame->payload.data, frame->payload.len, -1) != 0) return -1;
-        c->closing = true;
+        conn_close(c);
         return 0;
     }
 

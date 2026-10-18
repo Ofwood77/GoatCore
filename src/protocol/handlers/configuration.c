@@ -72,7 +72,7 @@ static int send_config_disconnect(mc_conn_t *c, const char *reason_json) {
     pos += msg_len;
 
     if (conn_write_packet(c, MC_PKT_CONFIGURATION_CLIENTBOUND_DISCONNECT, buf, pos, -1) != 0) return -1;
-    c->closing = true;
+    conn_close(c);
     return 0;
 }
 

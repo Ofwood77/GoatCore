@@ -138,11 +138,48 @@ static void test_partial_frame_needs_more_data(void) {
     test_conn_clear(&c);
 }
 
+static int wake_count;
+
+static void count_wake(mc_conn_t *c) {
+    (void)c;
+    wake_count++;
+}
+
+static void test_output_wakeup_and_backpressure(void) {
+    mc_conn_t c;
+    const uint8_t payload[] = {0x11, 0x22};
+    test_conn_init(&c);
+    c.notify_output = count_wake;
+    c.out.limit = 8;
+    wake_count = 0;
+
+    assert(conn_write_packet(&c, 0x01, payload, sizeof(payload), -1) == 0);
+    assert(wake_count == 1);
+    assert(conn_write_packet(&c, 0x02, payload, sizeof(payload), -1) == 0);
+    assert(wake_count == 1); /* already queued; one network wake is enough */
+
+    c.out.rpos = c.out.len;
+    buf_compact(&c.out);
+    assert(conn_write_packet(&c, 0x03, payload, sizeof(payload), -1) == 0);
+    assert(wake_count == 2);
+    assert(conn_write_packet(&c, 0x04, payload, sizeof(payload), -1) == 0);
+    assert(wake_count == 2);
+    assert(conn_write_packet(&c, 0x05, payload, sizeof(payload), -1) == -1);
+    assert(atomic_load(&c.closing));
+    assert(atomic_load(&c.abort_io));
+    assert(wake_count == 3); /* network must notice the saturated buffer */
+
+    conn_close(&c);
+    assert(wake_count == 3);
+    test_conn_clear(&c);
+}
+
 int main(void) {
     test_no_compression();
     test_below_threshold_uncompressed();
     test_above_threshold_compressed();
     test_compressed_roundtrip_read();
     test_partial_frame_needs_more_data();
+    test_output_wakeup_and_backpressure();
     return 0;
 }
