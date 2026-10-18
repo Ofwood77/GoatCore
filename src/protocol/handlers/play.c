@@ -6709,7 +6709,7 @@ int proto_send_play_disconnect(mc_conn_t *c, const char *reason_json) {
     if (w_string(buf, sizeof(buf), &pos, msg) != 0) return -1;
 
     if (conn_write_packet(c, PKT_PLAY_DISCONNECT, buf, pos, -1) != 0) return -1;
-    c->closing = true;
+    conn_close(c);
     return 0;
 }
 
