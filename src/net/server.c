@@ -1896,28 +1896,21 @@ static void *tick_thread_main(void *arg) {
 }
 
 static void server_cleanup(mc_server_t *s) {
-    mc_conn_t **to_close = NULL;
+    mc_conn_t *to_close[MC_MAX_CONNECTIONS];
     size_t to_close_len = 0;
     pthread_mutex_lock(&s->conns_lock);
-    for (mc_conn_t *c = s->conns; c; c = c->next) {
+    for (mc_conn_t *c = s->conns; c && to_close_len < MC_MAX_CONNECTIONS; c = c->next) {
         if (!c->closing) continue;
         pthread_mutex_lock(&c->out_lock);
         bool can_close = c->abort_io || (c->out.len == 0);
         pthread_mutex_unlock(&c->out_lock);
-        if (can_close) {
-            mc_conn_t **next = (mc_conn_t **)realloc(to_close, (to_close_len + 1) * sizeof(*to_close));
-            if (next) {
-                to_close = next;
-                to_close[to_close_len++] = c;
-            }
-        }
+        if (can_close) to_close[to_close_len++] = c;
     }
     pthread_mutex_unlock(&s->conns_lock);
 
     for (size_t i = 0; i < to_close_len; i++) {
         server_close_conn(s, to_close[i]);
     }
-    free(to_close);
 }
 
 int net_server_run(mc_server_t *s) {
