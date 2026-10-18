@@ -151,7 +151,7 @@ static uint64_t hash_u64(uint64_t x) {
 }
 
 static int64_t chunk_key(int32_t cx, int32_t cz) {
-    return ((int64_t)cx << 32) | (uint32_t)cz;
+    return (int64_t)(((uint64_t)(uint32_t)cx << 32) | (uint32_t)cz);
 }
 
 static int32_t floor_div_i32(int32_t a, int32_t b) {
