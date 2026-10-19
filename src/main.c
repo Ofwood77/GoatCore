@@ -1,4 +1,6 @@
 #include "mc_server.h"
+#include "mc_net.h"
+#include "mc_setup.h"
 #include "mc_util.h"
 
 #include <ctype.h>
@@ -254,14 +256,37 @@ int main(void) {
         return 1;
     }
 
+    const char *setup_override = getenv("MC_SETUP_FILE");
+    const char *setup_path = (setup_override && *setup_override) ? setup_override : "setup.conf";
+    mc_setup_config_t setup;
+    char setup_error[512];
+    if (mc_setup_load(setup_path, setup_override && *setup_override, &setup,
+                      setup_error, sizeof(setup_error)) != 0 ||
+        mc_setup_apply_affinity(&setup, setup_error, sizeof(setup_error)) != 0) {
+        log_error("CPU setup: %s", setup_error);
+        return 1;
+    }
+    log_info("CPU setup: file=%s Linux_online=%d Linux_cpuset=%d allowed=%d CPUs=%s network_workers=1 chunk_workers=%d save_workers=0 simulation_workers=0 tick_rate=20",
+             setup_path, setup.linux_online_cpus, setup.linux_available_cpus, setup.allowed_cpus, setup.allowed_cpu_list,
+             mc_setup_resolve_chunk_workers(&setup));
+
     mc_server_config_t cfg = {0};
     cfg.bind_ip = NULL;
     cfg.bind_port = 25565;
     cfg.max_connections = 128;
+    cfg.chunk_workers = mc_setup_resolve_chunk_workers(&setup);
     cfg.compression_threshold = -1;
     cfg.online_mode = false;
     cfg.debug_packets = false;
     cfg.admin_commands = getenv("MC_ADMIN_COMMANDS") && strcmp(getenv("MC_ADMIN_COMMANDS"), "1") == 0;
+    cfg.admin_username = getenv("MC_ADMIN_USERNAME");
+    if (cfg.admin_username && *cfg.admin_username) {
+        if (strlen(cfg.admin_username) > 16) {
+            log_error("invalid MC_ADMIN_USERNAME: maximum 16 characters");
+            return 1;
+        }
+        log_info("admin username enabled (offline mode: names are not authenticated)");
+    }
     cfg.qa_enabled = getenv("MC_QA_MODE") && strcmp(getenv("MC_QA_MODE"), "1") == 0;
     cfg.registry_blob_path = "assets/registry_packets_26_1_1.bin";
     cfg.tags_blob_path = "assets/tags_packet_26_1_1.bin";
@@ -274,6 +299,20 @@ int main(void) {
     cfg.difficulty = disk_cfg.difficulty;
     cfg.pvp_enabled = disk_cfg.pvp_enabled;
     cfg.keep_inventory = disk_cfg.keep_inventory;
+
+    const char *env_max_connections = getenv("MC_MAX_CONNECTIONS");
+    if (env_max_connections && *env_max_connections) {
+        char *end = NULL;
+        errno = 0;
+        long value = strtol(env_max_connections, &end, 10);
+        if (errno != 0 || end == env_max_connections || *end != '\0' ||
+            value < 1 || value > (long)MC_MAX_CONNECTIONS) {
+            log_error("invalid MC_MAX_CONNECTIONS: '%s' (expected 1..%u)",
+                      env_max_connections, MC_MAX_CONNECTIONS);
+            return 1;
+        }
+        cfg.max_connections = (int)value;
+    }
 
     const char *env_world_path = getenv("MC_WORLD_PATH");
     if (env_world_path && *env_world_path) {

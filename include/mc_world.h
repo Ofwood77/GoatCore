@@ -63,6 +63,8 @@ typedef struct {
 } mc_world_furnace_tick_stats_t;
 
 mc_world_t *mc_world_create(const char *world_path, int64_t level_seed);
+mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count);
+int mc_world_worker_count(const mc_world_t *w);
 void mc_world_destroy(mc_world_t *w);
 
 const char *mc_world_path(const mc_world_t *w);

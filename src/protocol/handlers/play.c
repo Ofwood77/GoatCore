@@ -234,7 +234,7 @@ static mc_container_kind_t container_kind_for_state(int32_t state_id);
 static mc_block_entity_type_t container_entity_type_for_state(int32_t state_id);
 static int block_entity_from_container_instance(mc_block_entity_t *dst, mc_block_entity_type_t type, const mc_container_instance_t *src);
 static int sync_active_container_window(mc_conn_t *c);
-static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, const mc_chunk_t *chunk);
+static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, mc_chunk_t *chunk);
 static int paletted_word_count_for_network(int entry_count, int bits);
 static int encode_paletted_container_network(mc_buf_t *out, const uint32_t *values, int entry_count, int palette_bits);
 static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face,
@@ -6284,7 +6284,24 @@ static int send_center_chunk(mc_conn_t *c, int32_t cx, int32_t cz) {
     return conn_write_packet(c, PKT_PLAY_SET_CENTER_CHUNK, buf, pos, -1);
 }
 
-static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, const mc_chunk_t *chunk) {
+/* Most sections (especially air and flat terrain) cannot contain block
+ * entities. Their palettes let us skip a 4096-block scan per section without
+ * changing the packet contents. Direct sections have no palette: scan them. */
+static bool section_may_have_block_entity(const mc_paletted_container_t *sec) {
+    if (!sec) return false;
+    if (sec->is_direct) return true;
+    if (sec->bits_per_block == 0) {
+        int32_t state = mc_world_normalize_container_state_id((int32_t)sec->uniform_state);
+        return container_block_entity_type(state) >= 0;
+    }
+    for (uint16_t i = 0; i < sec->palette_len; i++) {
+        int32_t state = mc_world_normalize_container_state_id((int32_t)sec->palette[i]);
+        if (container_block_entity_type(state) >= 0) return true;
+    }
+    return false;
+}
+
+static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t cz, mc_chunk_t *chunk) {
     if (!c || !world || !chunk) return -1;
     bool perf = mc_perf_enabled();
     int64_t perf_start_us = perf ? mc_now_us() : 0;
@@ -6302,11 +6319,24 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
      * only contributes heightmaps/biomes fallback/light payload, not block
      * state storage. */
     span_start_us = perf ? mc_now_us() : 0;
-    int rc = proto_play_encode_chunkdata_for_test(world, chunk, &chunkdata);
+    bool cache_valid = chunk->network_cache_revision == chunk->revision;
+    int rc = cache_valid && chunk->network_chunkdata
+        ? buf_write(&chunkdata, chunk->network_chunkdata, chunk->network_chunkdata_len)
+        : proto_play_encode_chunkdata_for_test(world, chunk, &chunkdata);
     if (perf) chunkdata_us = mc_now_us() - span_start_us;
     if (rc != 0) {
         buf_free(&chunkdata);
         return -1;
+    }
+    if (!cache_valid || !chunk->network_chunkdata) {
+        uint8_t *cached = (uint8_t *)malloc(chunkdata.len);
+        if (cached) {
+            memcpy(cached, chunkdata.data, chunkdata.len);
+            free(chunk->network_chunkdata);
+            chunk->network_chunkdata = cached;
+            chunk->network_chunkdata_len = chunkdata.len;
+            chunk->network_cache_revision = chunk->revision;
+        }
     }
 
     mc_buf_t payload;
@@ -6323,49 +6353,66 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     int32_t block_entity_count = 0;
     uint8_t *hm = NULL;
     size_t hm_len = 0;
+    bool hm_owned = false;
     span_start_us = perf ? mc_now_us() : 0;
-    if (build_motion_blocking_heightmaps(world, chunk, &hm, &hm_len) != 0) {
+    if (chunk->network_cache_revision == chunk->revision && chunk->network_heightmaps) {
+        hm = chunk->network_heightmaps;
+        hm_len = chunk->network_heightmaps_len;
+    } else if (build_motion_blocking_heightmaps(world, chunk, &hm, &hm_len) == 0) {
+        hm_owned = true;
+        uint8_t *cached = (uint8_t *)malloc(hm_len);
+        if (cached) {
+            memcpy(cached, hm, hm_len);
+            free(chunk->network_heightmaps);
+            chunk->network_heightmaps = cached;
+            chunk->network_heightmaps_len = hm_len;
+            chunk->network_cache_revision = chunk->revision;
+        }
+    } else {
         hm = NULL;
         hm_len = 0;
     }
     if (perf) heightmap_us = mc_now_us() - span_start_us;
 
     span_start_us = perf ? mc_now_us() : 0;
-    for (int y_index = 0; y_index < MC_WORLD_HEIGHT; y_index++) {
-        int32_t world_y = MC_WORLD_MIN_Y + y_index;
-        for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
-            for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
-                int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
-                int32_t be_type = container_block_entity_type(state_id);
-                if (be_type < 0) continue;
+    for (int section = 0; section < MC_WORLD_SECTION_COUNT; section++) {
+        if (!section_may_have_block_entity(&chunk->sections[section])) continue;
+        for (int local_y = 0; local_y < 16; local_y++) {
+            int32_t world_y = MC_WORLD_MIN_Y + section * 16 + local_y;
+            for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
+                for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
+                    int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
+                    int32_t be_type = container_block_entity_type(state_id);
+                    if (be_type < 0) continue;
 
-                uint8_t *nbt = NULL;
-                size_t nbt_len = 0;
-                int32_t world_x = cx * MC_CHUNK_XZ + lx;
-                int32_t world_z = cz * MC_CHUNK_XZ + lz;
-                if (container_block_entity_chunk_nbt(world, state_id, world_x, world_y, world_z, &nbt, &nbt_len) != 0) {
-                    buf_free(&block_entities);
-                    free(hm);
-                    buf_free(&payload);
-                    buf_free(&chunkdata);
-                    return -1;
-                }
+                    uint8_t *nbt = NULL;
+                    size_t nbt_len = 0;
+                    int32_t world_x = cx * MC_CHUNK_XZ + lx;
+                    int32_t world_z = cz * MC_CHUNK_XZ + lz;
+                    if (container_block_entity_chunk_nbt(world, state_id, world_x, world_y, world_z, &nbt, &nbt_len) != 0) {
+                        buf_free(&block_entities);
+                        if (hm_owned) free(hm);
+                        buf_free(&payload);
+                        buf_free(&chunkdata);
+                        return -1;
+                    }
 
-                uint8_t packed_xz = (uint8_t)((((world_x & 15) << 4) | (world_z & 15)) & 0xFF);
-                if (buf_w_u8(&block_entities, packed_xz) != 0 || buf_w_u16_be(&block_entities, (uint16_t)world_y) != 0 ||
-                    buf_w_varint(&block_entities, be_type) != 0 || buf_write(&block_entities, nbt, nbt_len) != 0) {
+                    uint8_t packed_xz = (uint8_t)((((world_x & 15) << 4) | (world_z & 15)) & 0xFF);
+                    if (buf_w_u8(&block_entities, packed_xz) != 0 || buf_w_u16_be(&block_entities, (uint16_t)world_y) != 0 ||
+                        buf_w_varint(&block_entities, be_type) != 0 || buf_write(&block_entities, nbt, nbt_len) != 0) {
+                        free(nbt);
+                        buf_free(&block_entities);
+                        if (hm_owned) free(hm);
+                        buf_free(&payload);
+                        buf_free(&chunkdata);
+                        return -1;
+                    }
                     free(nbt);
-                    buf_free(&block_entities);
-                    free(hm);
-                    buf_free(&payload);
-                    buf_free(&chunkdata);
-                    return -1;
-                }
-                free(nbt);
-                block_entity_count++;
-                if (debug_container_pos_match(world_x, world_y, world_z)) {
-                    log_info("containers debug: send_chunk_ready chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s", cx, cz, world_x,
-                             world_y, world_z, state_id, mc_block_state_key(state_id) ? mc_block_state_key(state_id) : "(null)");
+                    block_entity_count++;
+                    if (debug_container_pos_match(world_x, world_y, world_z)) {
+                        log_info("containers debug: send_chunk_ready chunk=(%d,%d) pos=(%d,%d,%d) state_id=%d key=%s", cx, cz, world_x,
+                                 world_y, world_z, state_id, mc_block_state_key(state_id) ? mc_block_state_key(state_id) : "(null)");
+                    }
                 }
             }
         }
@@ -6383,7 +6430,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
         buf_write(&payload, block_entities.data, block_entities.len) != 0 ||
         buf_write(&payload, light, light_len) != 0) {
         buf_free(&block_entities);
-        free(hm);
+        if (hm_owned) free(hm);
         buf_free(&payload);
         buf_free(&chunkdata);
         return -1;
@@ -6400,7 +6447,7 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     rc = conn_write_packet(c, PKT_PLAY_CHUNK_DATA, payload.data, payload.len, -1);
     if (perf) write_queue_us = mc_now_us() - span_start_us;
     buf_free(&block_entities);
-    free(hm);
+    if (hm_owned) free(hm);
     buf_free(&payload);
     buf_free(&chunkdata);
     if (rc == 0) {
@@ -6450,17 +6497,20 @@ static int send_sent_chunks_post_updates(mc_conn_t *c) {
         mc_chunk_t *chunk = mc_world_get_chunk(world, cx, cz, UINT32_MAX);
         if (!chunk) continue;
 
-        for (int y_index = 0; y_index < MC_WORLD_HEIGHT; y_index++) {
-            int32_t world_y = MC_WORLD_MIN_Y + y_index;
-            for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
-                for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
-                    int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
-                    int32_t be_type = container_block_entity_type(state_id);
-                    if (be_type < 0) continue;
-                    int32_t world_x = cx * MC_CHUNK_XZ + lx;
-                    int32_t world_z = cz * MC_CHUNK_XZ + lz;
-                    if (send_block_update_packet(c, world_x, world_y, world_z, state_id) != 0) return -1;
-                    if (send_block_entity_data_packet(c, state_id, world_x, world_y, world_z) != 0) return -1;
+        for (int section = 0; section < MC_WORLD_SECTION_COUNT; section++) {
+            if (!section_may_have_block_entity(&chunk->sections[section])) continue;
+            for (int local_y = 0; local_y < 16; local_y++) {
+                int32_t world_y = MC_WORLD_MIN_Y + section * 16 + local_y;
+                for (int lz = 0; lz < MC_CHUNK_XZ; lz++) {
+                    for (int lx = 0; lx < MC_CHUNK_XZ; lx++) {
+                        int32_t state_id = mc_world_normalize_container_state_id((int32_t)mc_chunk_get_block(chunk, lx, world_y, lz));
+                        int32_t be_type = container_block_entity_type(state_id);
+                        if (be_type < 0) continue;
+                        int32_t world_x = cx * MC_CHUNK_XZ + lx;
+                        int32_t world_z = cz * MC_CHUNK_XZ + lz;
+                        if (send_block_update_packet(c, world_x, world_y, world_z, state_id) != 0) return -1;
+                        if (send_block_entity_data_packet(c, state_id, world_x, world_y, world_z) != 0) return -1;
+                    }
                 }
             }
         }
@@ -6582,18 +6632,19 @@ static int chunk_stream_tick(mc_conn_t *c) {
     int misses = 0;
     while (sent < CHUNKS_PER_TICK) {
         if (pending_chunks_count(c) == 0) break;
-        mc_chunk_req_t req;
-        if (!pending_chunks_pop(c, &req)) break;
+        /* Keep the nearest pending chunk at the head until it is ready. Moving
+         * an unloaded spawn chunk to the tail lets hundreds of distant chunks
+         * arrive first, leaving a freshly joined player looking into the void. */
+        mc_chunk_req_t req = c->pending_chunks.items[c->pending_chunks.head];
 
         mc_chunk_t *chunk = mc_world_get_chunk(world, req.cx, req.cz, req.prio);
         if (!chunk) {
-            if (pending_chunks_push(c, req.cx, req.cz, req.prio) != 0) return -1;
             misses++;
             scans++;
-            if (scans >= CHUNK_SEND_SCAN_LIMIT) break;
-            continue;
+            break;
         }
 
+        if (!pending_chunks_pop(c, &req)) return -1;
         if (sent == 0 && send_chunk_batch_start_packet(c) != 0) return -1;
         if (send_chunk_ready(c, world, req.cx, req.cz, chunk) != 0) return -1;
         if (sent_chunks_insert(c, chunk_key(req.cx, req.cz)) != 0) return -1;

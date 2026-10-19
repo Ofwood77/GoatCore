@@ -35,6 +35,8 @@
 
 #define MAX_EVENTS 64
 #define MAX_WRITE_BYTES_PER_PASS (256u * 1024u)
+#define PERF_TICK_BIN_US 100u
+#define PERF_TICK_BIN_MAX 10000u
 #define PKT_PLAY_BLOCK_UPDATE MC_PKT_PLAY_CLIENTBOUND_BLOCK_UPDATE
 #define PKT_PLAY_SPAWN_ENTITY MC_PKT_PLAY_CLIENTBOUND_ADD_ENTITY
 #define PKT_PLAY_ENTITY_METADATA MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_DATA
@@ -492,6 +494,19 @@ static double perf_ms(int64_t us) {
     return (double)us / 1000.0;
 }
 
+/* Nearest-rank percentile, quantized to 0.1 ms. The last bin represents
+ * durations >= 1000 ms; exact maxima remain in perf_accum_t. */
+static double perf_tick_percentile_ms(const uint32_t *bins, uint64_t count, unsigned percentile) {
+    if (!bins || count == 0 || percentile == 0 || percentile > 100) return 0.0;
+    uint64_t target = (count * percentile + 99u) / 100u;
+    uint64_t seen = 0;
+    for (size_t i = 0; i <= PERF_TICK_BIN_MAX; i++) {
+        seen += bins[i];
+        if (seen >= target) return (double)i * ((double)PERF_TICK_BIN_US / 1000.0);
+    }
+    return (double)PERF_TICK_BIN_MAX * ((double)PERF_TICK_BIN_US / 1000.0);
+}
+
 int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     if (!out || !cfg) return -1;
 
@@ -517,13 +532,15 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
         return -1;
     }
 
-    s->world = mc_world_create(cfg->world_path, cfg->level_seed);
+    s->world = mc_world_create_with_workers(cfg->world_path, cfg->level_seed, cfg->chunk_workers);
     if (!s->world) {
         mc_task_queue_destroy(&s->task_queue);
         pthread_mutex_destroy(&s->conns_lock);
         free(s);
         return -1;
     }
+    log_info("runtime threads: network_owners=1 tick_threads=1 chunk_workers=%d save_workers=0 simulation_workers=0",
+             mc_world_worker_count(s->world));
 
     s->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->listen_fd < 0) {
@@ -1568,6 +1585,9 @@ static void *tick_thread_main(void *arg) {
     uint64_t summary_proto_ticks = 0;
     uint64_t summary_remote_syncs = 0;
     uint64_t summary_resyncs = 0;
+    uint32_t summary_tick_bins[PERF_TICK_BIN_MAX + 1] = {0};
+    uint64_t summary_ticks_over_budget = 0;
+    int64_t summary_wall_start_us = 0;
 
     while (atomic_load(&s->running)) {
         server_process_departures(s);
@@ -1818,7 +1838,12 @@ static void *tick_thread_main(void *arg) {
 
             uint64_t summary_ticks = mc_perf_summary_ticks();
             if (summary_ticks > 0) {
+                if (summary_total.count == 0) summary_wall_start_us = tick_start_us;
                 perf_accum_add(&summary_total, total_us);
+                size_t tick_bin = (size_t)((total_us < 0 ? 0 : total_us) / PERF_TICK_BIN_US);
+                if (tick_bin > PERF_TICK_BIN_MAX) tick_bin = PERF_TICK_BIN_MAX;
+                summary_tick_bins[tick_bin]++;
+                if (total_us > tick_us) summary_ticks_over_budget++;
                 perf_accum_add(&summary_late, tick_late_us);
                 perf_accum_add(&summary_task, task_us);
                 perf_accum_add(&summary_world, world_tick_us);
@@ -1835,10 +1860,19 @@ static void *tick_thread_main(void *arg) {
                 summary_remote_syncs += remote_sync_attempts;
                 if (schedule_resync) summary_resyncs++;
                 if (summary_total.count >= summary_ticks) {
-                    log_info("perf summary: ticks=%llu avg_total=%.3fms max_total=%.3fms avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_net_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
+                    int64_t wall_us = tick_end_us - summary_wall_start_us + tick_us;
+                    double measured_tps = wall_us > 0 ?
+                        (double)summary_total.count * 1000000.0 / (double)wall_us : 0.0;
+                    if (measured_tps > 20.0) measured_tps = 20.0;
+                    log_info("perf summary: ticks=%llu tps=%.2f avg_total=%.3fms p50_total=%.1fms p95_total=%.1fms p99_total=%.1fms max_total=%.3fms over_50ms=%llu avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_net_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
                              (unsigned long long)summary_total.count,
+                             measured_tps,
                              perf_accum_avg_ms(&summary_total),
+                             perf_tick_percentile_ms(summary_tick_bins, summary_total.count, 50),
+                             perf_tick_percentile_ms(summary_tick_bins, summary_total.count, 95),
+                             perf_tick_percentile_ms(summary_tick_bins, summary_total.count, 99),
                              perf_ms(summary_total.max_us),
+                             (unsigned long long)summary_ticks_over_budget,
                              perf_accum_avg_ms(&summary_late),
                              perf_ms(summary_late.max_us),
                              perf_accum_avg_ms(&summary_task),
@@ -1871,6 +1905,8 @@ static void *tick_thread_main(void *arg) {
                     summary_proto_ticks = 0;
                     summary_remote_syncs = 0;
                     summary_resyncs = 0;
+                    memset(summary_tick_bins, 0, sizeof(summary_tick_bins));
+                    summary_ticks_over_budget = 0;
                 }
             }
         }

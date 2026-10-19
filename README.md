@@ -53,8 +53,8 @@ Known limitations:
 Clone the repository:
 
 ```bash
-git clone https://github.com/Ofwood77/OfwoodCore.git
-cd OfwoodCore
+git clone https://github.com/Ofwood77/GoatCore.git
+cd GoatCore
 ```
 
 Install the Debian build dependencies:
@@ -119,6 +119,33 @@ MC_PERF=1 ./mc_server
 
 The default server port is normally `25565`, unless overridden by environment
 or configuration.
+
+### CPU setup per instance
+
+Edit `setup.conf` or select a separate file for each instance:
+
+```sh
+MC_SETUP_FILE=config/server1.setup.conf MC_BIND_PORT=25565 ./mc_server
+MC_SETUP_FILE=config/server2.setup.conf MC_BIND_PORT=25587 ./mc_server
+```
+
+The `[performance]` keys are `cpu_cores`, `cpu_affinity`, `chunk_workers`, and
+`tick_rate`. `cpu_cores = 0` uses every logical CPU selected by Linux; a
+positive value keeps that many CPUs from the affinity list, in ascending CPU-ID
+order. `cpu_affinity = auto` uses the current Linux/cpuset mask; explicit lists
+accept `0-3`, `0,2,4,6`, etc. A CPU outside that mask is a startup error, not a
+silent fallback. The affinity is applied before thread creation, so network,
+tick, and chunk threads inherit it. `chunk_workers = auto` uses 1–4 workers
+based on the effective CPU count; explicit values 1–16 are supported. Only
+`tick_rate = 20` is currently valid.
+
+There is one epoll network owner, no asynchronous save-worker pool, and no
+parallel simulation-worker pool yet. `network_workers`, `save_workers`, and
+`simulation_workers` are rejected rather than pretending to control threads.
+Affinity limits where a process may run; it does **not** reserve physical cores
+or cap CPU time. Use a separate systemd `CPUQuota=` or cgroups v2 quota if a
+consumption limit is required. The server logs the effective CPU IDs and worker
+counts at startup; `MC_PERF=1` adds tick/MSPT summaries.
 
 ## Tests
 

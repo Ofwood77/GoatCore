@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * World/chunk runtime, async chunk loading, and persistence glue.
  *
@@ -22,6 +23,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,7 +34,7 @@
 #include <unistd.h>
 
 #define ANVIL_SAVE_ATTEMPTS_PER_TICK 1
-#define MAX_WORKERS 4
+#define MAX_WORKERS 16
 
 typedef struct {
     int32_t x;
@@ -681,14 +683,6 @@ void mc_world_set_generation_params(mc_world_t *w, float freq, int32_t base_y, i
     w->gen_base_amp = amp;
 }
 
-static float noise2_seed(int32_t wx, int32_t wz, float freq, int seed) {
-    return stb_perlin_noise3_seed((float)wx * freq, 0.0f, (float)wz * freq, 0, 0, 0, seed);
-}
-
-static float noise3_seed(int32_t wx, int32_t wy, int32_t wz, float freq, int seed) {
-    return stb_perlin_noise3_seed((float)wx * freq, (float)wy * freq, (float)wz * freq, 0, 0, 0, seed);
-}
-
 void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     if (!w || !chunk) return;
     const int32_t min_y = MC_WORLD_MIN_Y;
@@ -892,7 +886,8 @@ static void *worker_main(void *arg) {
     return NULL;
 }
 
-mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
+mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count) {
+    if (worker_count < 0 || worker_count > MAX_WORKERS) return NULL;
     mc_world_t *w = (mc_world_t *)calloc(1, sizeof(*w));
     if (!w) return NULL;
 
@@ -960,10 +955,11 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
         return NULL;
     }
 
-    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    int wc = (cpus > 1) ? (int)(cpus - 1) : 1;
+    cpu_set_t available;
+    int cpus = sched_getaffinity(0, sizeof(available), &available) == 0 ? CPU_COUNT(&available) : 1;
+    int wc = worker_count ? worker_count : ((cpus > 2) ? cpus - 2 : 1);
     if (wc < 1) wc = 1;
-    if (wc > MAX_WORKERS) wc = MAX_WORKERS;
+    if (!worker_count && wc > 4) wc = 4;
     w->worker_count = wc;
 
     for (int i = 0; i < w->worker_count; i++) {
@@ -990,6 +986,14 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
 
     w->tick_count = 0;
     return w;
+}
+
+mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
+    return mc_world_create_with_workers(world_path, level_seed, 0);
+}
+
+int mc_world_worker_count(const mc_world_t *w) {
+    return w ? w->worker_count : 0;
 }
 
 void mc_world_destroy(mc_world_t *w) {

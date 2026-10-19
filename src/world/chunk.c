@@ -1,5 +1,6 @@
 #include "mc_chunk.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static int chunk_section_index_from_y(int y) {
@@ -35,6 +36,8 @@ void mc_chunk_destroy(mc_chunk_t *chunk) {
     for (i = 0; i < MC_WORLD_SECTION_COUNT; i++) {
         mc_paletted_container_destroy(&chunk->sections[i]);
     }
+    free(chunk->network_chunkdata);
+    free(chunk->network_heightmaps);
     memset(chunk, 0, sizeof(*chunk));
 }
 
@@ -59,5 +62,16 @@ int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_i
     sec_index = chunk_section_index_from_y(y);
     if (sec_index < 0) return -1;
     local_y = chunk_local_y_from_world_y(y);
-    return mc_paletted_container_set_block(&chunk->sections[sec_index], x, local_y, z, global_id);
+    mc_global_state_id_t old_id = mc_paletted_container_get_block(&chunk->sections[sec_index], x, local_y, z);
+    int rc = mc_paletted_container_set_block(&chunk->sections[sec_index], x, local_y, z, global_id);
+    if (rc == 0 && old_id != global_id) {
+        chunk->revision++;
+        free(chunk->network_chunkdata);
+        chunk->network_chunkdata = NULL;
+        chunk->network_chunkdata_len = 0;
+        free(chunk->network_heightmaps);
+        chunk->network_heightmaps = NULL;
+        chunk->network_heightmaps_len = 0;
+    }
+    return rc;
 }
