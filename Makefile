@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Iinclude -Isrc/generated -Isrc/world -Isrc/util -D_POSIX_C_SOURCE=200809L -MMD -MP -pthread
-LDFLAGS ?= -lz -pthread
+LDFLAGS ?= -lz -lm -pthread
 
 USE_OPENSSL ?= 0
 ifeq ($(USE_OPENSSL),1)
@@ -41,6 +41,7 @@ SRC = \
     src/world/block_registry.c \
     src/world/world.c \
     src/util/arena.c \
+    src/util/setup.c \
     src/util/mc_util.c \
     src/generated/generated_minecraft_ids.c \
     src/generated/generated_registries.c \
@@ -70,7 +71,8 @@ TEST_BINS = \
     test_player_nbt \
     test_mining \
     test_block_drops \
-    test_world_consistency
+    test_world_consistency \
+    test_setup
 
 GENERATED_HEADERS = \
     src/world/block_registry.h \
@@ -223,6 +225,9 @@ test_block_drops: tests/test_block_drops.c src/gameplay/block_drops.c src/gamepl
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_world_consistency: tests/test_world_consistency.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_setup: tests/test_setup.c src/util/setup.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: $(TEST_BINS)

@@ -37,6 +37,7 @@ docs/*
 llm/
 reports/
 test-results/
+tests/stress/results/
 changed,*
 not staged for commit:
 tatus

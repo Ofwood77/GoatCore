@@ -210,10 +210,32 @@ int main(void) {
         return 1;
     }
 
+    chunk.network_chunkdata = malloc(1);
+    chunk.network_heightmaps = malloc(1);
+    if (!chunk.network_chunkdata || !chunk.network_heightmaps) {
+        mc_chunk_destroy(&chunk);
+        mc_world_destroy(world);
+        return fail("allocate chunk cache fixtures");
+    }
+    chunk.network_chunkdata_len = 1;
+    chunk.network_heightmaps_len = 1;
+
     if (mc_chunk_set_block(&chunk, 3, 12, 8, (mc_global_state_id_t)ids->stone) != 0) {
         mc_chunk_destroy(&chunk);
         mc_world_destroy(world);
         return fail("set local palette block");
+    }
+    if (chunk.revision != 1 || chunk.network_chunkdata || chunk.network_heightmaps ||
+        chunk.network_chunkdata_len != 0 || chunk.network_heightmaps_len != 0) {
+        mc_chunk_destroy(&chunk);
+        mc_world_destroy(world);
+        return fail("chunk network cache invalidation");
+    }
+    if (mc_chunk_set_block(&chunk, 3, 12, 8, (mc_global_state_id_t)ids->stone) != 0 ||
+        chunk.revision != 1) {
+        mc_chunk_destroy(&chunk);
+        mc_world_destroy(world);
+        return fail("unchanged block must keep revision");
     }
     if (run_case(world, &chunk, "single local palette section") != 0) {
         mc_chunk_destroy(&chunk);

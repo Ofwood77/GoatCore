@@ -1,0 +1,18 @@
+[Unit]
+Description=GoatCore test server (port 25587)
+After=network.target
+
+[Service]
+Type=simple
+User=goatcore
+Group=goatcore
+WorkingDirectory=/opt/goatcore/app
+Environment=MC_WORLD_PATH=/var/lib/goatcore/test-world
+Environment=MC_BIND_PORT=25587
+Environment=MC_SETUP_FILE=/etc/goatcore/server2.setup.conf
+Environment=MC_ADMIN_USERNAME=Ofwood_
+Environment=MC_MAX_CONNECTIONS=1000
+StateDirectory=goatcore
+ExecStart=/opt/goatcore/app/mc_server
+Restart=no
+LimitNOFILE=65536

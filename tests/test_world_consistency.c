@@ -28,8 +28,9 @@ int main(void) {
     char world_path[128];
     assert(mk_temp_world(world_path, sizeof(world_path)) == 0);
 
-    mc_world_t *world = mc_world_create(world_path, 1234);
+    mc_world_t *world = mc_world_create_with_workers(world_path, 1234, 2);
     assert(world);
+    assert(mc_world_worker_count(world) == 2);
     const mc_world_ids_t *ids = mc_world_ids(world);
     assert(ids);
 

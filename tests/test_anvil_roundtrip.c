@@ -403,7 +403,7 @@ static int chunkdata_section_contains_state(const mc_buf_t *buf, int section_ind
     return 0;
 }
 
-static int write_uniform_anvil_chunk(const char *region_path, int8_t sec_y, const char *name_value) {
+static __attribute__((unused)) int write_uniform_anvil_chunk(const char *region_path, int8_t sec_y, const char *name_value) {
     mc_nbt_tag_t *data_version = nbt_new(MC_NBT_TAG_INT, "DataVersion");
     mc_nbt_tag_t *xpos = nbt_new(MC_NBT_TAG_INT, "xPos");
     mc_nbt_tag_t *zpos = nbt_new(MC_NBT_TAG_INT, "zPos");

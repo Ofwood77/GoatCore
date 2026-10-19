@@ -60,13 +60,6 @@ static int w_uuid(uint8_t *buf, size_t cap, size_t *pos, const uint8_t uuid[16])
     return 0;
 }
 
-static int w_bool(uint8_t *buf, size_t cap, size_t *pos, bool v) {
-    if (*pos + 1 > cap) return -1;
-    buf[*pos] = v ? 0x01 : 0x00;
-    *pos += 1;
-    return 0;
-}
-
 static int send_login_success(mc_conn_t *c) {
     uint8_t buf[512];
     size_t pos = 0;
@@ -94,6 +87,10 @@ int proto_handle_login(mc_conn_t *c, const mc_frame_t *frame) {
         r.pos = 0;
 
         if (r_string(&r, c->username, sizeof(c->username)) != 0) return -1;
+        c->command_authorized = c->cfg &&
+            (c->cfg->admin_commands ||
+             (c->cfg->admin_username && *c->cfg->admin_username &&
+              strcmp(c->username, c->cfg->admin_username) == 0));
         if (r_uuid(&r, c->uuid) == 0) c->has_uuid = true;
 
         log_info("LoginStart: name=%s", c->username);

@@ -29,10 +29,12 @@ typedef struct {
     const char *bind_ip;
     uint16_t bind_port;
     int max_connections;
+    int chunk_workers; /* 0: automatic, otherwise explicit worker count */
     int compression_threshold; /* -1 disables compression */
     bool online_mode;
     bool debug_packets;
     bool admin_commands; /* explicit development authorization for all connections */
+    const char *admin_username; /* offline-mode name allowlist; spoofable without authentication */
     bool qa_enabled;
     const char *registry_blob_path;
     const char *tags_blob_path;

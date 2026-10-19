@@ -1,0 +1,21 @@
+[Unit]
+Description=GoatCore Minecraft server
+After=network.target
+
+[Service]
+Type=simple
+User=goatcore
+Group=goatcore
+WorkingDirectory=/opt/goatcore/app
+Environment=MC_WORLD_PATH=/var/lib/goatcore/world
+Environment=MC_BIND_PORT=25565
+Environment=MC_SETUP_FILE=/etc/goatcore/server1.setup.conf
+Environment=MC_ADMIN_USERNAME=Ofwood_
+StateDirectory=goatcore
+ExecStart=/opt/goatcore/app/mc_server
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

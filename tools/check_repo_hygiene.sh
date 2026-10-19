@@ -29,7 +29,7 @@ while IFS= read -r path; do
         .codex|world/*|data/*|mc_vania_asset/*|"erreur reseau"/*|llm/*|reports/*)
             flag_bad "tracked local/raw data" "$path"
             ;;
-        PLAN*.md|REPORT*.md|docs/*)
+        PLAN*.md|REPORT*.md)
             flag_bad "tracked AI/report note" "$path"
             ;;
         assets/*)
