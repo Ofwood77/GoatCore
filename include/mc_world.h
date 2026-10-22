@@ -50,6 +50,13 @@ typedef struct {
     size_t dirty_chunks;
     size_t updates_len;
     size_t jobs_pending;
+    int64_t integrate_us;
+    int64_t save_us;
+    int64_t save_max_us;
+    int64_t done_lock_wait_us;
+    size_t flush_count;
+    int64_t flush_us;
+    int64_t flush_max_us;
 } mc_world_tick_stats_t;
 
 typedef struct {

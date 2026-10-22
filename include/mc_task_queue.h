@@ -24,12 +24,26 @@ typedef struct mc_task {
 } mc_task_t;
 
 typedef struct {
+    uint64_t pushes;
+    uint64_t rejected;
+    uint64_t drains;
+    uint64_t push_wait_us;
+    uint64_t push_hold_us;
+    uint64_t drain_wait_us;
+    uint64_t drain_hold_us;
+    size_t peak_depth;
+    size_t depth;
+} mc_task_queue_stats_t;
+
+typedef struct {
     mc_task_t *head;
     mc_task_t *tail;
     size_t len;
     size_t max_len;
     pthread_mutex_t lock;
     pthread_cond_t cv;
+    bool profile;
+    mc_task_queue_stats_t stats; /* protected by lock */
 } mc_task_queue_t;
 
 int mc_task_queue_init(mc_task_queue_t *q);
@@ -37,5 +51,6 @@ void mc_task_queue_destroy(mc_task_queue_t *q);
 bool mc_task_queue_push(mc_task_queue_t *q, mc_task_t *task);
 mc_task_t *mc_task_queue_drain(mc_task_queue_t *q);
 bool mc_task_queue_wait_until(mc_task_queue_t *q, int64_t deadline_us);
+void mc_task_queue_get_stats(mc_task_queue_t *q, mc_task_queue_stats_t *out);
 
 #endif /* MC_TASK_QUEUE_H */
