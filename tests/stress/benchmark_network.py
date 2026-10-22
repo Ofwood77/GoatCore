@@ -36,7 +36,8 @@ def free_port():
 
 
 def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1000,
-              server_binary=None, world_template=None):
+              server_binary=None, world_template=None, cycles_per_bot=None,
+              block_cooldown=0.01):
     name = {1: "one", 2: "two", 4: "four"}[count]
     port = free_port()
     world = result_dir / f"world-{name}"
@@ -76,6 +77,9 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
                        "--report", str(report_path)]
             if mode in ("blocks", "mixed", "fastblocks"):
                 command += ["--allow-block-changes"]
+            if cycles_per_bot is not None:
+                command += ["--cycles-per-bot", str(cycles_per_bot), "--block-cooldown", str(block_cooldown),
+                            "--interval", "0.001"]
             run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
                                  timeout=max(50, duration + bots * 0.1 + 30))
             if run.returncode != 0 and not report_path.is_file():
@@ -118,6 +122,9 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
         "movements_sent": report["movements_sent"],
         "blocks_placed_verified": report["blocks_placed_verified"],
         "blocks_broken_verified": report["blocks_broken_verified"],
+        "requested_cycles": report["requested_cycles"],
+        "completed_cycles": report["completed_cycles"],
+        "missing_cycles": report["missing_cycles"],
         "actions_failed": report["actions_failed"],
         "chunks_received": report["chunks_received"],
         "origin_chunk_seconds_mean": report["origin_chunk_seconds_mean"],
@@ -137,16 +144,16 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
             "ticks_over_50ms": int(worst_active[4]), "tasks": int(worst_active[5]),
             "protocol_player_ticks": int(worst_active[6]),
         },
-        "worker_accepted": [int(workers[i][2]) for i in range(count)],
-        "worker_packets": [int(workers[i][4]) for i in range(count)],
-        "worker_bytes_in": [int(workers[i][5]) for i in range(count)],
-        "worker_bytes_out": [int(workers[i][6]) for i in range(count)],
+        "worker_accepted": [int(workers[i][2]) if i in workers else None for i in range(count)],
+        "worker_packets": [int(workers[i][4]) if i in workers else None for i in range(count)],
+        "worker_bytes_in": [int(workers[i][5]) if i in workers else None for i in range(count)],
+        "worker_bytes_out": [int(workers[i][6]) if i in workers else None for i in range(count)],
         "bytes_in_per_second_approx": round(sum(workers[i][5] for i in range(count)) /
-                                             report["duration_seconds"], 1),
+                                             report["duration_seconds"], 1) if len(workers) == count else None,
         "bytes_out_per_second_approx": round(sum(workers[i][6] for i in range(count)) /
-                                              report["duration_seconds"], 1),
-        "worker_task_wait_avg_ms": [workers[i][7] for i in range(count)],
-        "worker_cpu_pct": [workers[i][8] for i in range(count)],
+                                              report["duration_seconds"], 1) if len(workers) == count else None,
+        "worker_task_wait_avg_ms": [workers[i][7] if i in workers else None for i in range(count)],
+        "worker_cpu_pct": [workers[i][8] if i in workers else None for i in range(count)],
     }
 
 
@@ -154,6 +161,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bots", type=int, default=50)
     parser.add_argument("--duration", type=float, default=12)
+    parser.add_argument("--cycles-per-bot", type=int,
+                        help="fixed verified place+break cycles per bot (blocks mode); duration is a deadline")
+    parser.add_argument("--block-cooldown", type=float, default=0.01,
+                        help="seconds between fixed-workload place/break operations")
     parser.add_argument("--mode", choices=("connect", "movement", "blocks", "mixed", "fastblocks"), default="connect")
     parser.add_argument("--slow-ms", type=int, default=1000,
                         help="MC_PERF slow-tick logging threshold")
@@ -166,6 +177,10 @@ def main():
         parser.error("bots outside the supported range for this mode")
     if args.duration <= 0 or args.slow_ms <= 0:
         parser.error("duration must be positive")
+    if not 0 <= args.block_cooldown <= 10:
+        parser.error("block-cooldown must be in [0, 10]")
+    if args.cycles_per_bot is not None and (args.cycles_per_bot <= 0 or args.mode != "blocks"):
+        parser.error("--cycles-per-bot requires blocks mode and a positive count")
     if not args.server_binary.is_file():
         parser.error(f"server binary not found: {args.server_binary}")
     if args.world_template and not args.world_template.is_dir():
@@ -177,7 +192,8 @@ def main():
     rows = []
     for count in args.workers:
         row = benchmark(count, result_dir, args.bots, args.duration, args.mode,
-                        args.slow_ms, args.server_binary.resolve(), args.world_template)
+                        args.slow_ms, args.server_binary.resolve(), args.world_template,
+                        args.cycles_per_bot, args.block_cooldown)
         rows.append(row)
         print(json.dumps(row), flush=True)
     (result_dir / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")

@@ -132,6 +132,7 @@ class Bot:
         self.closed = None
         self.expected_close = False
         self.actions = 0
+        self.cycles_completed = 0
         self.movements = 0
         self.movement_confirmed = 0
         self.placed = 0
@@ -360,7 +361,7 @@ class Bot:
             await self.conn.send(41, varint(0) + position(*block) + varint(1) + varint(self.sequence))
             if await self.expect_block(block, lambda state: state == 0) is None:
                 self.failures += 1
-                return
+                return False
             self.block_prepared = True
         self.clear_block_events(block)
         self.sequence += 1
@@ -373,7 +374,7 @@ class Bot:
         self.place_send_times.append(sent_at)
         if await self.expect_block(block, lambda state: state != 0) is None:
             self.failures += 1
-            return
+            return False
         if self.args.shared_zone:
             self.shared_placed_observed += 1
         else:
@@ -391,13 +392,14 @@ class Bot:
         self.break_send_times.append(sent_at)
         if await self.expect_block(block, lambda state: state == 0) is None:
             self.failures += 1
-            return
+            return False
         if self.args.shared_zone:
             self.shared_broken_observed += 1
         else:
             self.broken += 1
             self.break_verified_times.append(time.monotonic())
         await asyncio.sleep(self.args.block_cooldown)
+        return True
 
     async def fast_block_cycle(self, block):
         base = (block[0], block[1] - 1, block[2])
@@ -431,7 +433,8 @@ class Bot:
                 await self.setup_block_item()
             center_x, center_z = self.pos[0], self.pos[2]
             phase = 0
-            while time.monotonic() < stop and self.state == "play":
+            while (time.monotonic() < stop and self.state == "play" and
+                   (self.args.cycles_per_bot is None or self.cycles_completed < self.args.cycles_per_bot)):
                 self.actions += 1
                 if self.args.mode == "movement":
                     angle = phase * math.pi / 2 + 2 * math.pi * self.index / self.args.bots
@@ -449,7 +452,8 @@ class Bot:
                     if self.args.mode == "fastblocks":
                         await self.fast_block_cycle(block)
                     else:
-                        await self.block_cycle(block)
+                        if await self.block_cycle(block):
+                            self.cycles_completed += 1
                 phase += 1
                 if self.args.mode != "fastblocks":
                     await asyncio.sleep(min(self.args.interval, max(0, stop - time.monotonic())))
@@ -486,6 +490,7 @@ class Bot:
             "movements_sent": self.movements,
             "movement_confirmed": self.movement_confirmed if self.args.qa_verify_movement else None,
             "blocks_placed_verified": self.placed, "blocks_broken_verified": self.broken,
+            "cycles_completed": self.cycles_completed,
             "block_place_packets_sent": len(self.place_send_times),
             "block_break_packets_sent": len(self.break_send_times),
             "shared_place_observations": self.shared_placed_observed,
@@ -503,6 +508,8 @@ def options(argv=None):
     parser.add_argument("--bots", type=int, default=1)
     parser.add_argument("--max-bots", type=int, default=1000)
     parser.add_argument("--duration", type=float, default=30)
+    parser.add_argument("--cycles-per-bot", type=int,
+                        help="fixed verified place+break cycles per bot; --duration is a hard deadline (blocks mode)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=25565)
     parser.add_argument("--radius", type=float, default=3)
@@ -544,6 +551,8 @@ def options(argv=None):
         parser.error("remote block modes require --allow-remote-destructive")
     if args.shared_zone and args.mode not in ("blocks", "mixed"):
         parser.error("--shared-zone is only valid for block modes")
+    if args.cycles_per_bot is not None and (args.cycles_per_bot <= 0 or args.mode != "blocks" or args.shared_zone):
+        parser.error("--cycles-per-bot requires private-target blocks mode and a positive count")
     return args
 
 
@@ -608,6 +617,10 @@ async def run(args):
             "movements_confirmed": sum(row["movement_confirmed"] or 0 for row in rows) if args.qa_verify_movement else None,
             "blocks_placed_verified": sum(row["blocks_placed_verified"] for row in rows),
             "blocks_broken_verified": sum(row["blocks_broken_verified"] for row in rows),
+            "requested_cycles": args.bots * args.cycles_per_bot if args.cycles_per_bot is not None else None,
+            "completed_cycles": sum(row["cycles_completed"] for row in rows),
+            "missing_cycles": sum(max(0, args.cycles_per_bot - row["cycles_completed"]) for row in rows)
+            if args.cycles_per_bot is not None else None,
             "block_place_packets_sent": sum(row["block_place_packets_sent"] for row in rows),
             "block_break_packets_sent": sum(row["block_break_packets_sent"] for row in rows),
             "place_packets_peak_one_second": place_send_peak,
@@ -645,7 +658,8 @@ async def run(args):
                    f"unexpected_disconnects={report['unexpected_disconnects']}\n"
                    f"movements_sent={report['movements_sent']} movements_confirmed={report['movements_confirmed']}\n"
                    f"blocks_placed_verified={report['blocks_placed_verified']} "
-                   f"blocks_broken_verified={report['blocks_broken_verified']} action_failures={report['actions_failed']}\n"
+                   f"blocks_broken_verified={report['blocks_broken_verified']} action_failures={report['actions_failed']} "
+                   f"cycles={report['completed_cycles']}/{report['requested_cycles']} missing={report['missing_cycles']}\n"
                    f"peak_1s_sent_place={place_send_peak} peak_1s_sent_break={break_send_peak} "
                    f"peak_1s_confirmed_place={placed_peak} peak_1s_confirmed_break={broken_peak} "
                    f"cap_per_action={args.block_rate}\n")
@@ -658,7 +672,7 @@ async def run(args):
         print(f"Reports: {result_dir}")
         return 1 if (report["connected_successfully"] != args.bots or
                      report["bots_not_started"] or report["connections_failed"] or
-                     report["unexpected_disconnects"] or report["actions_failed"]) else 0
+                     report["unexpected_disconnects"] or report["actions_failed"] or report["missing_cycles"]) else 0
 
 
 if __name__ == "__main__":
