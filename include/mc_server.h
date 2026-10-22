@@ -29,6 +29,7 @@ typedef struct {
     const char *bind_ip;
     uint16_t bind_port;
     int max_connections;
+    int network_workers; /* 0/1: one owner, or 2/4 */
     int chunk_workers; /* 0: automatic, otherwise explicit worker count */
     int compression_threshold; /* -1 disables compression */
     bool online_mode;

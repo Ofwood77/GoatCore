@@ -43,6 +43,7 @@ void mc_setup_defaults(mc_setup_config_t *cfg) {
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
     snprintf(cfg->cpu_affinity, sizeof(cfg->cpu_affinity), "auto");
+    cfg->network_workers = 1;
     cfg->tick_rate = 20;
 }
 
@@ -98,7 +99,8 @@ int mc_setup_load(const char *path, bool required, mc_setup_config_t *cfg, char 
         else if (strcmp(key, "cpu_affinity") == 0) bit = 2;
         else if (strcmp(key, "chunk_workers") == 0) bit = 4;
         else if (strcmp(key, "tick_rate") == 0) bit = 8;
-        else if (strcmp(key, "network_workers") == 0 || strcmp(key, "save_workers") == 0 ||
+        else if (strcmp(key, "network_workers") == 0) bit = 16;
+        else if (strcmp(key, "save_workers") == 0 ||
                  strcmp(key, "simulation_workers") == 0) {
             result = fail(error, error_cap, "%s:%d: %s is not implemented", path, line_no, key);
             break;
@@ -123,6 +125,12 @@ int mc_setup_load(const char *path, bool required, mc_setup_config_t *cfg, char 
                           path, line_no, MC_SETUP_MAX_CHUNK_WORKERS);
         else if (bit == 8 && parse_uint(value, 20, 20, &cfg->tick_rate) != 0)
             result = fail(error, error_cap, "%s:%d: only tick_rate = 20 is supported", path, line_no);
+        else if (bit == 16) {
+            int workers = 0;
+            if (parse_uint(value, 1, 4, &workers) != 0 || workers == 3)
+                result = fail(error, error_cap, "%s:%d: network_workers must be 1, 2 or 4", path, line_no);
+            else cfg->network_workers = workers;
+        }
         if (result) break;
     }
     if (!result && ferror(file)) result = fail(error, error_cap, "cannot read %s: %s", path, strerror(errno));

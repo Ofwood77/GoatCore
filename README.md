@@ -129,23 +129,25 @@ MC_SETUP_FILE=config/server1.setup.conf MC_BIND_PORT=25565 ./mc_server
 MC_SETUP_FILE=config/server2.setup.conf MC_BIND_PORT=25587 ./mc_server
 ```
 
-The `[performance]` keys are `cpu_cores`, `cpu_affinity`, `chunk_workers`, and
-`tick_rate`. `cpu_cores = 0` uses every logical CPU selected by Linux; a
+The `[performance]` keys are `cpu_cores`, `cpu_affinity`, `network_workers`,
+`chunk_workers`, and `tick_rate`. `cpu_cores = 0` uses every logical CPU selected by Linux; a
 positive value keeps that many CPUs from the affinity list, in ascending CPU-ID
 order. `cpu_affinity = auto` uses the current Linux/cpuset mask; explicit lists
 accept `0-3`, `0,2,4,6`, etc. A CPU outside that mask is a startup error, not a
 silent fallback. The affinity is applied before thread creation, so network,
 tick, and chunk threads inherit it. `chunk_workers = auto` uses 1–4 workers
-based on the effective CPU count; explicit values 1–16 are supported. Only
+based on the effective CPU count; explicit values 1–16 are supported.
+`network_workers` accepts 1, 2, or 4 independent epoll socket owners, selected
+round-robin at accept time; the acceptor itself is a separate thread. Only
 `tick_rate = 20` is currently valid.
 
-There is one epoll network owner, no asynchronous save-worker pool, and no
-parallel simulation-worker pool yet. `network_workers`, `save_workers`, and
-`simulation_workers` are rejected rather than pretending to control threads.
+There is no asynchronous save-worker pool or parallel simulation-worker pool
+yet. `save_workers` and `simulation_workers` are rejected rather than
+pretending to control threads.
 Affinity limits where a process may run; it does **not** reserve physical cores
 or cap CPU time. Use a separate systemd `CPUQuota=` or cgroups v2 quota if a
 consumption limit is required. The server logs the effective CPU IDs and worker
-counts at startup; `MC_PERF=1` adds tick/MSPT summaries.
+counts at startup; `MC_PERF=1` adds tick/MSPT and per-network-worker summaries.
 
 ## Tests
 

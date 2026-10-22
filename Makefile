@@ -72,7 +72,8 @@ TEST_BINS = \
     test_mining \
     test_block_drops \
     test_world_consistency \
-    test_setup
+    test_setup \
+    test_task_queue
 
 GENERATED_HEADERS = \
     src/world/block_registry.h \
@@ -154,7 +155,7 @@ $(GENERATED_HEADERS) $(GENERATED_SOURCES):
 	@test -f "$@" || { echo "missing generated file: $@; run make regenerate with local raw data" >&2; exit 1; }
 endif
 
-.PHONY: generated_headers generated_sources regenerate test generated-check hygiene-check smoke-start precommit-check dev-run clean distclean
+.PHONY: generated_headers generated_sources regenerate test generated-check hygiene-check smoke-start multi-epoll-check precommit-check dev-run clean distclean
 
 generated_headers: $(GENERATED_HEADERS)
 
@@ -230,6 +231,9 @@ test_world_consistency: tests/test_world_consistency.c src/world/world.c src/wor
 test_setup: tests/test_setup.c src/util/setup.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+test_task_queue: tests/test_task_queue.c src/net/task_queue.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 test: $(TEST_BINS)
 	@set -e; \
 	for test_bin in $(TEST_BINS); do \
@@ -256,7 +260,10 @@ smoke-start: mc_server
 	fi; \
 	exit "$$status"
 
-precommit-check: hygiene-check generated-check test smoke-start
+multi-epoll-check: mc_server
+	python3 tests/test_multi_epoll.py
+
+precommit-check: hygiene-check generated-check test smoke-start multi-epoll-check
 
 dev-run:
 	$(MAKE) clean

@@ -61,7 +61,15 @@ int main(void) {
 
     write_setup(path, "[performance]\ncpu_cores = 99999\n");
     assert(mc_setup_load(path, true, &cfg, error, sizeof(error)) != 0);
-    write_setup(path, "[performance]\nnetwork_workers = 2\n");
+    for (int n = 1; n <= 4; n *= 2) {
+        snprintf(body, sizeof(body), "[performance]\nnetwork_workers = %d\n", n);
+        write_setup(path, body);
+        assert(mc_setup_load(path, true, &cfg, error, sizeof(error)) == 0);
+        assert(cfg.network_workers == n);
+    }
+    write_setup(path, "[performance]\nnetwork_workers = 3\n");
+    assert(mc_setup_load(path, true, &cfg, error, sizeof(error)) != 0);
+    write_setup(path, "[performance]\nsimulation_workers = 1\n");
     assert(mc_setup_load(path, true, &cfg, error, sizeof(error)) != 0);
     assert(strstr(error, "not implemented"));
     write_setup(path, "[performance]\ntick_rate = 40\n");

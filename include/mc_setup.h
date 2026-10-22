@@ -11,6 +11,7 @@
 typedef struct {
     int cpu_cores; /* 0: every CPU in the selected Linux mask */
     char cpu_affinity[MC_SETUP_AFFINITY_LEN]; /* auto or logical CPU list/ranges */
+    int network_workers; /* 1, 2 or 4 independent epoll owners */
     int chunk_workers; /* 0: automatic; otherwise 1..MC_SETUP_MAX_CHUNK_WORKERS */
     int tick_rate; /* only 20 is currently supported */
     int linux_online_cpus;

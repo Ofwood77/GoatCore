@@ -67,6 +67,10 @@ struct mc_conn {
     bool command_authorized;
     const mc_server_config_t *cfg;
     mc_server_t *server;
+    unsigned network_worker_index; /* immutable after accept */
+    struct mc_conn *owner_next; /* network owner only */
+    struct mc_conn *pending_next; /* acceptor -> network owner command queue */
+    bool owner_registered; /* network owner only */
     void (*notify_output)(struct mc_conn *c);
     atomic_int refcount;
 
