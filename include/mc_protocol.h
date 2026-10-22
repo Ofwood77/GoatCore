@@ -14,6 +14,9 @@ int varint_write(uint8_t *buf, size_t buf_len, int32_t val, size_t *bytes_writte
 int proto_handle_handshake(mc_conn_t *c, const mc_frame_t *frame);
 int proto_handle_status(mc_conn_t *c, const mc_frame_t *frame, const char *motd_json, int32_t online_players, int32_t max_players);
 int proto_handle_login(mc_conn_t *c, const mc_frame_t *frame);
+int proto_login_tick(mc_conn_t *c, int64_t now_ms);
+size_t proto_profile_properties_capacity(const mc_conn_t *c);
+int proto_profile_write_properties(const mc_conn_t *c, uint8_t *buf, size_t cap, size_t *pos);
 int proto_config_handle(mc_conn_t *c, const mc_frame_t *frame);
 int proto_config_send_known_packs(mc_conn_t *c);
 int proto_config_send_registry(mc_conn_t *c);

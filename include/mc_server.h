@@ -33,6 +33,7 @@ typedef struct {
     int chunk_workers; /* 0: automatic, otherwise explicit worker count */
     int compression_threshold; /* -1 disables compression */
     bool online_mode;
+    bool offline_skins; /* cosmetic public texture lookup; never authenticates */
     bool debug_packets;
     bool admin_commands; /* explicit development authorization for all connections */
     const char *admin_username; /* offline-mode name allowlist; spoofable without authentication */

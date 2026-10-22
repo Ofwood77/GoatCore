@@ -134,6 +134,7 @@ struct mc_server {
     unsigned next_worker; /* acceptor-owned round-robin cursor */
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
+    mc_profile_service_t *profiles;
     pthread_t tick_thread;
     atomic_uint_fast64_t network_write_us;
     atomic_uint_fast64_t network_flush_count;
@@ -297,6 +298,8 @@ static void conn_destroy(mc_conn_t *c) {
     free(c->sent_chunks.states);
     free(c->pending_chunks.items);
     free(c->remote_players);
+    free(c->skin_value);
+    free(c->skin_signature);
     free(c);
 }
 
@@ -819,6 +822,22 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
         pthread_mutex_destroy(&s->conns_lock);
         free(s);
         return -1;
+    }
+
+    if (s->cfg.offline_skins) {
+        s->profiles = mc_profile_service_create();
+        if (!s->profiles) {
+            log_error("failed to initialize offline skin lookup service");
+            network_workers_destroy(s);
+            close(s->wake_fd);
+            close(s->epoll_fd);
+            close(s->listen_fd);
+            mc_world_destroy(s->world);
+            mc_task_queue_destroy(&s->task_queue);
+            pthread_mutex_destroy(&s->conns_lock);
+            free(s);
+            return -1;
+        }
     }
 
     *out = s;
@@ -1983,6 +2002,8 @@ static void *tick_thread_main(void *arg) {
                 }
                 if (perf) proto_tick_us += mc_now_us() - span_start_us;
             }
+            if (state == MC_STATE_LOGIN && !closing && c->skin_lookup_pending &&
+                proto_login_tick(c, now) != 0) conn_close(c);
         }
 
         int64_t items_lock_start_us = perf ? mc_now_us() : 0;
@@ -2430,6 +2451,7 @@ void net_server_stop(mc_server_t *s) {
 
 void net_server_destroy(mc_server_t *s) {
     if (!s) return;
+    mc_profile_service_destroy(s->profiles);
     pthread_mutex_lock(&s->conns_lock);
     mc_conn_t *c = s->conns;
     s->conns = NULL;
@@ -2479,6 +2501,10 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     }
     pthread_mutex_unlock(&server->conns_lock);
     return NULL;
+}
+
+mc_profile_service_t *net_server_profiles(mc_server_t *server) {
+    return server ? server->profiles : NULL;
 }
 
 bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]) {
