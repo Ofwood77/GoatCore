@@ -3426,8 +3426,11 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
     }
 
     if (!mc_mining_state_is_air(state_id)) {
+        bool break_perf = mc_perf_enabled();
+        int64_t break_start_us = break_perf ? mc_now_us() : 0;
         mc_block_drop_t drop = {-1, 0};
         bool have_drop = mc_block_drop_resolve_default(state_id, allow_default_drop, x, y, z, now_ms, &drop);
+        int64_t break_drop_us = break_perf ? mc_now_us() - break_start_us : 0;
         if (debug_items_enabled() || debug_broadcast_enabled()) {
             log_info("items debug: t=%lld block_break_validated player=%s pos=(%d,%d,%d) old_state=%d drop_item=%d drop_count=%d harvest=%d",
                      (long long)debug_now_ms(), c->username[0] ? c->username : "(unknown)",
@@ -3440,7 +3443,11 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
          * useful item when harvesting conditions are not met. */
         (void)mc_world_remove_block_entity(world, x, y, z);
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
+        int64_t break_set_us = break_perf ? mc_now_us() - break_start_us - break_drop_us : 0;
+        int64_t phase_start_us = break_perf ? mc_now_us() : 0;
         if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+        int64_t break_flush_us = break_perf ? mc_now_us() - phase_start_us : 0;
+        phase_start_us = break_perf ? mc_now_us() : 0;
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
         {
             char door_base[128];
@@ -3460,7 +3467,9 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
             }
         }
         if (send_recomputed_connected_neighbors(c, world, x, y, z) != 0) return -1;
+        int64_t break_outbound_us = break_perf ? mc_now_us() - phase_start_us : 0;
 
+        phase_start_us = break_perf ? mc_now_us() : 0;
         if (have_drop) {
             mc_slot_t block_drop = {0};
             if (mc_slot_set_simple(&block_drop, drop.item_id, drop.count) == 0) {
@@ -3471,7 +3480,18 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
             }
             mc_slot_clear(&block_drop);
         }
-        return queue_block_changed_ack_packet(c, seq);
+        int64_t break_spawn_us = break_perf ? mc_now_us() - phase_start_us : 0;
+        int ack_rc = queue_block_changed_ack_packet(c, seq);
+        if (break_perf) {
+            int64_t elapsed_us = mc_now_us() - break_start_us;
+            if (elapsed_us >= mc_perf_slow_us()) {
+                log_info("perf block_break: total=%.3fms drop=%.3fms world_set=%.3fms flush=%.3fms outbound=%.3fms spawn=%.3fms state=%d",
+                         (double)elapsed_us / 1000.0, (double)break_drop_us / 1000.0,
+                         (double)break_set_us / 1000.0, (double)break_flush_us / 1000.0,
+                         (double)break_outbound_us / 1000.0, (double)break_spawn_us / 1000.0, state_id);
+            }
+        }
+        return ack_rc;
     }
 
     if (send_block_update_packet(c, x, y, z, state_id) != 0) return -1;
@@ -5302,9 +5322,26 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
     if (strcmp(cmd_lower, "qa") == 0) {
         char *sub = strtok_r(NULL, " ", &save);
         if (!sub || !c->player) {
-            return proto_play_send_system_message(c, "QA: usage !qa state|pos|give|clear|armor|cleararmor|chest|survival|creative|kill|damage|heal");
+            return proto_play_send_system_message(c, "QA: usage !qa state|pos|block|give|clear|armor|cleararmor|chest|survival|creative|kill|damage|heal");
         }
         for (size_t i = 0; sub[i]; i++) sub[i] = (char)tolower((unsigned char)sub[i]);
+
+        if (strcmp(sub, "block") == 0) {
+            char *sx = strtok_r(NULL, " ", &save);
+            char *sy = strtok_r(NULL, " ", &save);
+            char *sz = strtok_r(NULL, " ", &save);
+            int32_t x = 0, y = 0, z = 0, state_id = -1;
+            if (!sx || !sy || !sz || !parse_i32(sx, &x) || !parse_i32(sy, &y) || !parse_i32(sz, &z)) {
+                return proto_play_send_system_message(c, "QA block: usage !qa block <x> <y> <z>");
+            }
+            mc_world_t *world = get_world(c);
+            if (!world || mc_world_get_block_ready(world, x, y, z, &state_id) != 0) {
+                return proto_play_send_system_message(c, "QA block: unavailable");
+            }
+            char msg[128];
+            snprintf(msg, sizeof(msg), "QA block x=%d y=%d z=%d state=%d", x, y, z, state_id);
+            return proto_play_send_system_message(c, msg);
+        }
 
         if (strcmp(sub, "pos") == 0 || strcmp(sub, "position") == 0) {
             const char *gm_name = "unknown";
@@ -7435,20 +7472,30 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                         }
                     }
                 }
-                if (!placed_block && mc_world_set_block(world, px, py, pz, normalized_state_id) == 0) {
+                bool place_perf = mc_perf_enabled();
+                int64_t place_start_us = place_perf ? mc_now_us() : 0;
+                int place_set_rc = placed_block ? -1 : mc_world_set_block(world, px, py, pz, normalized_state_id);
+                int64_t place_set_us = place_perf ? mc_now_us() - place_start_us : 0;
+                if (!placed_block && place_set_rc == 0) {
                     placed_block = true;
                     authoritative_state_id = normalized_state_id;
+                    int64_t phase_start_us = place_perf ? mc_now_us() : 0;
                     if (recompute_connected_block_at(world, px, py, pz, &authoritative_state_id) < 0) return -1;
                     if (mc_world_get_block(world, px, py, pz, &authoritative_state_id) != 0) {
                         authoritative_state_id = normalized_state_id;
                     }
+                    int64_t place_recompute_us = place_perf ? mc_now_us() - phase_start_us : 0;
                     network_state_id = authoritative_state_id;
+                    phase_start_us = place_perf ? mc_now_us() : 0;
                     if (send_block_update_packet(c, px, py, pz, network_state_id) != 0) return -1;
                     if (send_recomputed_connected_neighbors(c, world, px, py, pz) != 0) return -1;
                     if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
+                    int64_t place_outbound_us = place_perf ? mc_now_us() - phase_start_us : 0;
+                    phase_start_us = place_perf ? mc_now_us() : 0;
                     if (c->server) {
                         (void)net_server_resolve_item_entities_for_block(c->server, px, py, pz, authoritative_state_id);
                     }
+                    int64_t place_items_us = place_perf ? mc_now_us() - phase_start_us : 0;
                     if (container_block_entity_type(authoritative_state_id) >= 0) {
                         if (is_world_container_state(authoritative_state_id)) {
                             mc_container_instance_t fresh_container;
@@ -7476,6 +7523,15 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                     }
                     if (c->gamemode != GAMEMODE_CREATIVE && held_idx >= 0 && held && held->present) {
                         if (consume_selected_item(c) != 0) return -1;
+                    }
+                    if (place_perf) {
+                        int64_t elapsed_us = mc_now_us() - place_start_us;
+                        if (elapsed_us >= mc_perf_slow_us()) {
+                            log_info("perf use_item_on: total=%.3fms world_set=%.3fms recompute=%.3fms outbound=%.3fms item_resolve=%.3fms state=%d",
+                                     (double)elapsed_us / 1000.0, (double)place_set_us / 1000.0,
+                                     (double)place_recompute_us / 1000.0, (double)place_outbound_us / 1000.0,
+                                     (double)place_items_us / 1000.0, authoritative_state_id);
+                        }
                     }
                 }
             }
