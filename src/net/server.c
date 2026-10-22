@@ -1256,8 +1256,13 @@ static bool resolve_item_entity_if_inside_solid(mc_server_t *s, mc_item_entity_t
 
 static void item_entities_tick(mc_server_t *s, int64_t now) {
     if (!s) return;
+    bool perf = mc_perf_enabled();
+    int64_t tick_start_us = perf ? mc_now_us() : 0;
+    int64_t resolve_us = 0, physics_us = 0, broadcast_us = 0, pickup_us = 0;
+    size_t inspected = 0;
     size_t idx = 0;
     while (idx < s->item_entities_len) {
+        inspected++;
         mc_item_entity_t *item = &s->item_entities[idx];
         if (item->expires_at_ms <= now) {
             if (debug_items_enabled()) {
@@ -1276,8 +1281,11 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
         bool moved = false;
         bool metadata_dirty = false;
         bool on_ground = false;
+        int64_t phase_start_us = perf ? mc_now_us() : 0;
         if (resolve_item_entity_if_inside_solid(s, item)) moved = true;
+        if (perf) resolve_us += mc_now_us() - phase_start_us;
 
+        phase_start_us = perf ? mc_now_us() : 0;
         double next_x = item->x + item->vx;
         double next_y = item->y;
         double next_z = item->z + item->vz;
@@ -1327,11 +1335,15 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
             item->z = next_z;
             moved = true;
         }
+        if (perf) physics_us += mc_now_us() - phase_start_us;
 
+        phase_start_us = perf ? mc_now_us() : 0;
         if (moved) {
             (void)broadcast_item_entity_teleport(s, item);
         }
+        if (perf) broadcast_us += mc_now_us() - phase_start_us;
 
+        phase_start_us = perf ? mc_now_us() : 0;
         bool destroyed = false;
         if (item->pickup_delay_ticks <= 0) {
             for (mc_conn_t *c = s->conns; c; c = c->next) {
@@ -1376,7 +1388,10 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
                 metadata_dirty = true;
             }
         }
-        if (destroyed) continue;
+        if (destroyed) {
+            if (perf) pickup_us += mc_now_us() - phase_start_us;
+            continue;
+        }
 
         if (metadata_dirty) {
             for (mc_conn_t *c = s->conns; c; c = c->next) {
@@ -1384,7 +1399,16 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
                 if (send_item_entity_metadata(c, item) != 0) conn_close(c);
             }
         }
+        if (perf) pickup_us += mc_now_us() - phase_start_us;
         idx++;
+    }
+    if (perf && inspected > 0) {
+        int64_t elapsed_us = mc_now_us() - tick_start_us;
+        if (elapsed_us >= mc_perf_slow_us()) {
+            log_info("perf item_entities: count=%zu remaining=%zu total=%.3fms resolve=%.3fms physics=%.3fms broadcast=%.3fms pickup=%.3fms",
+                     inspected, s->item_entities_len, perf_ms(elapsed_us), perf_ms(resolve_us),
+                     perf_ms(physics_us), perf_ms(broadcast_us), perf_ms(pickup_us));
+        }
     }
 }
 
