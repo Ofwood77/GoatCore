@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
@@ -37,6 +38,7 @@
 
 #define MAX_EVENTS 64
 #define MAX_WRITE_BYTES_PER_PASS (256u * 1024u)
+#define PRE_PLAY_TIMEOUT_MS 30000
 #define PERF_TICK_BIN_US 100u
 #define PERF_TICK_BIN_MAX 10000u
 #define PKT_PLAY_BLOCK_UPDATE MC_PKT_PLAY_CLIENTBOUND_BLOCK_UPDATE
@@ -254,6 +256,7 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd, unsigned worker_index) {
     c->notify_output = conn_notify_output;
     c->command_authorized = s->cfg.admin_commands;
     c->entity_id = atomic_fetch_add(&s->next_entity_id, 1);
+    c->accepted_ms = mc_now_us() / 1000;
     c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
     atomic_init(&c->detached, false);
@@ -297,7 +300,7 @@ static void conn_destroy(mc_conn_t *c) {
     free(c);
 }
 
-static void conn_remove(mc_server_t *s, mc_conn_t *c) {
+static void conn_remove_and_queue_departure(mc_server_t *s, mc_conn_t *c) {
     pthread_mutex_lock(&s->conns_lock);
     mc_conn_t **pp = &s->conns;
     while (*pp) {
@@ -308,6 +311,8 @@ static void conn_remove(mc_server_t *s, mc_conn_t *c) {
         }
         pp = &(*pp)->next;
     }
+    c->departure_next = s->departures;
+    s->departures = c;
     pthread_mutex_unlock(&s->conns_lock);
 }
 
@@ -405,16 +410,13 @@ static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
         c->owner_next = NULL;
         c->owner_registered = false;
     }
-    conn_remove(s, c);
-    atomic_fetch_add(&worker->disconnected, 1);
-
     /* The tick thread alone updates other players' view of this player. The
-     * extra ref survives even if the network batch has already finished. */
+     * extra ref survives even if the network batch has already finished.
+     * Removal and departure publication share one lock so a new login cannot
+     * claim the same identity before the old player's save is complete. */
     conn_acquire(c);
-    pthread_mutex_lock(&s->conns_lock);
-    c->departure_next = s->departures;
-    s->departures = c;
-    pthread_mutex_unlock(&s->conns_lock);
+    conn_remove_and_queue_departure(s, c);
+    atomic_fetch_add(&worker->disconnected, 1);
     c->retired_next = worker->retired;
     worker->retired = c;
 }
@@ -1929,6 +1931,12 @@ static void *tick_thread_main(void *arg) {
             mc_conn_t *c = conn_snapshot.items[ci];
             mc_proto_state_t state = (mc_proto_state_t)atomic_load(&c->state);
             bool closing = atomic_load(&c->closing);
+            if (!closing && state != MC_STATE_PLAY &&
+                now - c->accepted_ms >= PRE_PLAY_TIMEOUT_MS) {
+                log_info("pre-play timeout: fd=%d state=%s", atomic_load(&c->fd), state_name(state));
+                conn_close(c);
+                closing = true;
+            }
             conn_count++;
             if (state == MC_STATE_PLAY && c->play_ready && !closing) play_ready_count++;
             if (do_evict && state == MC_STATE_PLAY && c->has_pos && !closing) {
@@ -2471,6 +2479,29 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     }
     pthread_mutex_unlock(&server->conns_lock);
     return NULL;
+}
+
+bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]) {
+    if (!server || !name || !uuid) return false;
+    bool found = false;
+    pthread_mutex_lock(&server->conns_lock);
+    for (mc_conn_t *c = server->conns; c; c = c->next) {
+        if (c == exclude || !c->username[0]) continue;
+        if (strcasecmp(c->username, name) == 0 ||
+            (c->has_uuid && memcmp(c->uuid, uuid, 16) == 0)) {
+            found = true;
+            break;
+        }
+    }
+    /* A detached connection may still be pending save on the tick thread.
+     * Keep its identity reserved until departure cleanup completes. */
+    for (mc_conn_t *c = server->departures; !found && c; c = c->departure_next) {
+        if (c == exclude || !c->username[0]) continue;
+        if (strcasecmp(c->username, name) == 0 ||
+            (c->has_uuid && memcmp(c->uuid, uuid, 16) == 0)) found = true;
+    }
+    pthread_mutex_unlock(&server->conns_lock);
+    return found;
 }
 
 mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {

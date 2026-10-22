@@ -23,6 +23,7 @@ int proto_play_tick(mc_conn_t *c, int64_t now_ms);
 int proto_send_play_disconnect(mc_conn_t *c, const char *reason_json);
 void proto_play_conn_cleanup(mc_conn_t *c);
 void proto_fill_offline_uuid(const char *username, uint8_t out[16]);
+void proto_fill_legacy_offline_uuid(const char *username, uint8_t out[16]);
 int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_remove_remote_player(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_send_difficulty(mc_conn_t *c);

@@ -55,11 +55,12 @@ int proto_handle_handshake(mc_conn_t *c, const mc_frame_t *frame) {
 
     int32_t next_state = 0;
     if (r_varint(&r, &next_state) != 0) return -1;
+    if (r.pos != r.len) return -1;
 
     log_info("Handshake: proto=%d addr=%s port=%u next=%d", proto_ver, server_addr, server_port, next_state);
 
     if (next_state == 1) c->state = MC_STATE_STATUS;
-    else if (next_state == 2) c->state = MC_STATE_LOGIN;
+    else if (next_state == 2 && proto_ver == MC_PROTO_VERSION) c->state = MC_STATE_LOGIN;
     else {
         log_error("Invalid next_state=%d, dumping payload", next_state);
         hex_dump(frame->payload.data, frame->payload.len);

@@ -612,6 +612,17 @@ static int ensure_player_loaded(mc_conn_t *c) {
     int rc = 1;
     if (world_path && *world_path) {
         rc = mc_player_store_load(world_path, c->uuid, c->has_uuid, c->username, player);
+        if (rc == 1 && c->has_uuid && c->cfg && !c->cfg->online_mode) {
+            uint8_t legacy_uuid[16];
+            proto_fill_legacy_offline_uuid(c->username, legacy_uuid);
+            rc = mc_player_store_load(world_path, legacy_uuid, true, c->username, player);
+            if (rc == 0) {
+                /* Keep the old file as a backup; future saves use the correct key. */
+                memcpy(player->uuid, c->uuid, sizeof(player->uuid));
+                player->has_uuid = true;
+                log_info("loaded legacy offline player data: user=%s", c->username);
+            }
+        }
         if (rc < 0) {
             log_error("player load failed: user=%s world=%s", c->username, world_path);
             mc_player_data_clear(player);
@@ -1227,22 +1238,6 @@ static uint64_t fnv1a64_bytes(const uint8_t *data, size_t len, uint64_t seed) {
         h *= 1099511628211ULL;
     }
     return h;
-}
-
-void proto_fill_offline_uuid(const char *username, uint8_t out[16]) {
-    static const char prefix[] = "OfflinePlayer:";
-    uint64_t a = fnv1a64_bytes((const uint8_t *)prefix, sizeof(prefix) - 1, 1469598103934665603ULL);
-    uint64_t b = fnv1a64_bytes((const uint8_t *)prefix, sizeof(prefix) - 1, 1099511628211ULL);
-    if (username) {
-        a = fnv1a64_bytes((const uint8_t *)username, strlen(username), a);
-        b = fnv1a64_bytes((const uint8_t *)username, strlen(username), b);
-    }
-    for (int i = 0; i < 8; i++) {
-        out[i] = (uint8_t)((a >> (56 - i * 8)) & 0xFF);
-        out[8 + i] = (uint8_t)((b >> (56 - i * 8)) & 0xFF);
-    }
-    out[6] = (uint8_t)((out[6] & 0x0F) | 0x30);
-    out[8] = (uint8_t)((out[8] & 0x3F) | 0x80);
 }
 
 static mc_inventory_t *conn_inventory(mc_conn_t *c) {

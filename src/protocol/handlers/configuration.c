@@ -207,18 +207,20 @@ int proto_config_handle(mc_conn_t *c, const mc_frame_t *frame) {
     }
 
     if (frame->packet_id == MC_PKT_CONFIGURATION_SERVERBOUND_SELECT_KNOWN_PACKS) {
+        if (c->config_registry_sent || c->config_finish_sent) return -1;
         mc_reader_t r;
         r.data = frame->payload.data;
         r.len = frame->payload.len;
         r.pos = 0;
 
         int32_t count = 0;
-        if (r_varint(&r, &count) != 0) return -1;
+        if (r_varint(&r, &count) != 0 || count < 0 || count > 64) return -1;
         for (int32_t i = 0; i < count; i++) {
             if (r_string_skip(&r) != 0) return -1;
             if (r_string_skip(&r) != 0) return -1;
             if (r_string_skip(&r) != 0) return -1;
         }
+        if (r.pos != r.len) return -1;
 
         if (proto_config_send_registry(c) != 0) return -1;
         if (proto_config_send_tags(c) != 0) return -1;
@@ -231,7 +233,7 @@ int proto_config_handle(mc_conn_t *c, const mc_frame_t *frame) {
     }
 
     if (frame->packet_id == MC_PKT_CONFIGURATION_SERVERBOUND_FINISH_CONFIGURATION) {
-        if (!c->config_finish_sent) return -1;
+        if (!c->config_finish_sent || frame->payload.len != 0) return -1;
         c->state = MC_STATE_PLAY;
         return proto_play_send_initial(c);
     }
