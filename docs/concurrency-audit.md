@@ -321,5 +321,10 @@ the fully populated window. A one-bot connect run received 441 chunks with
 no error at TPS 19.96. A 2-worker 25-bot mixed run verified 84 places
 and breaks without error, but sent no movement packets, so it does not
 validate mixed-mode movement. The sanitizer and stress runs cover sampled
-interleavings, not a proof of race freedom or durable shutdown under active
-world writes.
+interleavings, not a proof of race freedom. A separate normal-build shutdown
+test sent SIGTERM to a two-worker server after seven seconds of 25 active
+`fastblocks` bots on a disposable world: the server exited 0, 1,501 places
+and 1,484 breaks had been verified, and all 25 clients observed the expected
+shutdown disconnect. The world retained 441 per-chunk files; this checks
+clean termination under writes, but not full post-restart durability of every
+individual block action.
