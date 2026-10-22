@@ -73,7 +73,8 @@ TEST_BINS = \
     test_block_drops \
     test_world_consistency \
     test_setup \
-    test_task_queue
+    test_task_queue \
+    test_perf_config
 
 GENERATED_HEADERS = \
     src/world/block_registry.h \
@@ -232,6 +233,9 @@ test_setup: tests/test_setup.c src/util/setup.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_task_queue: tests/test_task_queue.c src/net/task_queue.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_perf_config: tests/test_perf_config.c src/util/mc_util.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: $(TEST_BINS)

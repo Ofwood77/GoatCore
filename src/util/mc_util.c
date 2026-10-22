@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
+#include <stdint.h>
 
 void log_info(const char *fmt, ...) {
     va_list ap;
@@ -82,47 +84,42 @@ int64_t mc_now_us(void) {
     return (int64_t)ts.tv_sec * 1000000 + (ts.tv_nsec / 1000);
 }
 
-bool mc_perf_enabled(void) {
-    static int initialized = 0;
-    static bool enabled = false;
-    if (!initialized) {
-        const char *env = getenv("MC_PERF");
-        enabled = env && *env && strcmp(env, "0") != 0;
-        initialized = 1;
+static pthread_once_t perf_config_once = PTHREAD_ONCE_INIT;
+static bool perf_enabled = false;
+static int64_t perf_slow_us = 10000;
+static uint64_t perf_summary_ticks = 200;
+
+static void init_perf_config(void) {
+    const char *env = getenv("MC_PERF");
+    perf_enabled = env && *env && strcmp(env, "0") != 0;
+
+    env = getenv("MC_PERF_SLOW_MS");
+    if (env && *env) {
+        char *end = NULL;
+        long ms = strtol(env, &end, 10);
+        if (end != env && *end == '\0' && ms > 0 && (uint64_t)ms <= INT64_MAX / 1000u) {
+            perf_slow_us = (int64_t)ms * 1000;
+        }
     }
-    return enabled;
+    env = getenv("MC_PERF_SUMMARY_TICKS");
+    if (env && *env) {
+        char *end = NULL;
+        unsigned long long value = strtoull(env, &end, 10);
+        if (end != env && *end == '\0') perf_summary_ticks = (uint64_t)value;
+    }
+}
+
+bool mc_perf_enabled(void) {
+    pthread_once(&perf_config_once, init_perf_config);
+    return perf_enabled;
 }
 
 int64_t mc_perf_slow_us(void) {
-    static int initialized = 0;
-    static int64_t slow_us = 10000;
-    if (!initialized) {
-        const char *env = getenv("MC_PERF_SLOW_MS");
-        if (env && *env) {
-            char *end = NULL;
-            long ms = strtol(env, &end, 10);
-            if (end != env && *end == '\0' && ms > 0) {
-                slow_us = (int64_t)ms * 1000;
-            }
-        }
-        initialized = 1;
-    }
-    return slow_us;
+    pthread_once(&perf_config_once, init_perf_config);
+    return perf_slow_us;
 }
 
 uint64_t mc_perf_summary_ticks(void) {
-    static int initialized = 0;
-    static uint64_t ticks = 200;
-    if (!initialized) {
-        const char *env = getenv("MC_PERF_SUMMARY_TICKS");
-        if (env && *env) {
-            char *end = NULL;
-            unsigned long long value = strtoull(env, &end, 10);
-            if (end != env && *end == '\0') {
-                ticks = (uint64_t)value;
-            }
-        }
-        initialized = 1;
-    }
-    return ticks;
+    pthread_once(&perf_config_once, init_perf_config);
+    return perf_summary_ticks;
 }

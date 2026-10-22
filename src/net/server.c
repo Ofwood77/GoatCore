@@ -75,6 +75,12 @@ typedef struct {
     int32_t pickup_delay_ticks;
     mc_slot_t slot;
 } mc_item_entity_t;
+
+typedef struct {
+    uint64_t count;
+    int64_t total_us;
+    int64_t max_us;
+} mc_packet_perf_t;
 /* Runtime entity used for block/item drops. It is owned by the server tick,
  * not by the world module, because pickup and networking are connection-aware. */
 
@@ -129,6 +135,12 @@ struct mc_server {
     pthread_t tick_thread;
     atomic_uint_fast64_t network_write_us;
     atomic_uint_fast64_t network_flush_count;
+    int64_t task_handler_us; /* tick-thread only, includes fast packet passes */
+    int64_t task_handler_max_us;
+    size_t task_handler_count;
+    int64_t fast_pass_us;
+    size_t fast_pass_tasks;
+    mc_packet_perf_t play_packet_perf[128]; /* tick-thread only */
     atomic_int difficulty;
     mc_world_t *world;
     mc_item_entity_t *item_entities;
@@ -548,6 +560,12 @@ static double perf_accum_avg_ms(const perf_accum_t *acc) {
 
 static double perf_ms(int64_t us) {
     return (double)us / 1000.0;
+}
+
+static int64_t tick_thread_cpu_us(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 /* Nearest-rank percentile, quantized to 0.1 ms. The last bin represents
@@ -1493,11 +1511,13 @@ static int handle_client_write(mc_conn_t *c) {
 }
 
 static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
-    (void)s;
     if (!task) return 0;
     mc_conn_t *c = task->conn;
     if (!c) return 0;
     if (c->closing) return 0;
+    bool perf = mc_perf_enabled();
+    int64_t handler_start_us = perf ? mc_now_us() : 0;
+    mc_proto_state_t profile_state = perf ? (mc_proto_state_t)atomic_load(&c->state) : MC_STATE_HANDSHAKING;
 
     mc_frame_t frame;
     memset(&frame, 0, sizeof(frame));
@@ -1559,6 +1579,18 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
         rc = -1;
     }
 
+    if (perf && s) {
+        int64_t elapsed_us = mc_now_us() - handler_start_us;
+        s->task_handler_us += elapsed_us;
+        s->task_handler_count++;
+        if (elapsed_us > s->task_handler_max_us) s->task_handler_max_us = elapsed_us;
+        if (profile_state == MC_STATE_PLAY && task->packet_id >= 0 && task->packet_id < 128) {
+            mc_packet_perf_t *entry = &s->play_packet_perf[task->packet_id];
+            entry->count++;
+            entry->total_us += elapsed_us;
+            if (elapsed_us > entry->max_us) entry->max_us = elapsed_us;
+        }
+    }
     return rc;
 }
 
@@ -1674,6 +1706,7 @@ static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_ti
     if (!s) return;
 
     int64_t start_ms = now_ms();
+    int64_t start_us = mc_perf_enabled() ? mc_now_us() : 0;
     server_process_departures(s);
     size_t task_count = server_process_queued_tasks(s, now, "fast");
     if (task_count == 0) return;
@@ -1694,6 +1727,10 @@ static void server_fast_packet_pass(mc_server_t *s, int64_t now, int64_t next_ti
         conn_snapshot_clear(&conn_snapshot);
     } else {
         log_error("fast pass: failed to snapshot connections");
+    }
+    if (start_us) {
+        s->fast_pass_us += mc_now_us() - start_us;
+        s->fast_pass_tasks += task_count;
     }
 
     if (debug_net_latency_enabled() || debug_broadcast_enabled()) {
@@ -1730,6 +1767,11 @@ static void *tick_thread_main(void *arg) {
     perf_accum_t summary_remote = {0};
     perf_accum_t summary_write = {0};
     perf_accum_t summary_evict = {0};
+    perf_accum_t summary_handlers = {0};
+    perf_accum_t summary_fast = {0};
+    perf_accum_t summary_world_save = {0};
+    perf_accum_t summary_flush = {0};
+    perf_accum_t summary_item_lock_wait = {0};
     uint64_t summary_task_count = 0;
     uint64_t summary_update_sends = 0;
     uint64_t summary_proto_ticks = 0;
@@ -1738,11 +1780,13 @@ static void *tick_thread_main(void *arg) {
     uint32_t summary_tick_bins[PERF_TICK_BIN_MAX + 1] = {0};
     uint64_t summary_ticks_over_budget = 0;
     int64_t summary_wall_start_us = 0;
+    int64_t summary_cpu_start_us = 0;
 
     while (atomic_load(&s->running)) {
         server_process_departures(s);
         bool perf = mc_perf_enabled();
         int64_t tick_start_us = 0;
+        int64_t tick_start_cpu_us = 0;
         int64_t tick_late_us = 0;
         int64_t sleep_planned_us = 0;
         int64_t task_wait_sum_us = 0;
@@ -1757,6 +1801,8 @@ static void *tick_thread_main(void *arg) {
         int64_t write_flush_us = 0;
         int64_t evict_us = 0;
         int64_t clear_updates_us = 0;
+        int64_t furnace_lock_wait_us = 0;
+        int64_t items_lock_wait_us = 0;
         size_t task_count = 0;
         size_t conn_count = 0;
         size_t play_ready_count = 0;
@@ -1787,7 +1833,10 @@ static void *tick_thread_main(void *arg) {
 
         int64_t now = now_us_value / 1000;
 
-        if (perf) tick_start_us = now_us_value;
+        if (perf) {
+            tick_start_us = now_us_value;
+            tick_start_cpu_us = tick_thread_cpu_us();
+        }
         int64_t span_start_us = perf ? mc_now_us() : 0;
         /* Packet handlers run on the tick thread via the task queue so they can
          * safely touch world state without fighting the epoll loop. */
@@ -1820,7 +1869,9 @@ static void *tick_thread_main(void *arg) {
 
             /* Furnace ticking consults open-container state, so it briefly
              * shares conns_lock with the connection list. */
+            int64_t lock_start_us = perf ? mc_now_us() : 0;
             pthread_mutex_lock(&s->conns_lock);
+            if (perf) furnace_lock_wait_us = mc_now_us() - lock_start_us;
             span_start_us = perf ? mc_now_us() : 0;
             if (perf) (void)mc_world_tick_furnaces_profiled(s->world, server_container_is_open_unlocked, s, &furnace_stats);
             else (void)mc_world_tick_furnaces(s->world, server_container_is_open_unlocked, s);
@@ -1865,7 +1916,7 @@ static void *tick_thread_main(void *arg) {
                     for (int dx = -sim; dx <= sim; dx++) {
                         int32_t cx = pcx + dx;
                         int32_t cz = pcz + dz;
-                        int64_t key = ((int64_t)cx << 32) | (uint32_t)cz;
+                        int64_t key = (int64_t)(((uint64_t)(uint32_t)cx << 32) | (uint32_t)cz);
                         if (keep_keys_push(&keep_keys, &keep_len, &keep_cap, key) != 0) {
                             do_evict = false;
                             break;
@@ -1902,7 +1953,9 @@ static void *tick_thread_main(void *arg) {
             }
         }
 
+        int64_t items_lock_start_us = perf ? mc_now_us() : 0;
         pthread_mutex_lock(&s->conns_lock);
+        if (perf) items_lock_wait_us = mc_now_us() - items_lock_start_us;
         span_start_us = perf ? mc_now_us() : 0;
         item_entities_tick(s, now);
         if (perf) item_entities_us = mc_now_us() - span_start_us;
@@ -1944,7 +1997,8 @@ static void *tick_thread_main(void *arg) {
             bool slow = total_us >= slow_us || task_us >= slow_us || world_tick_us >= slow_us || furnace_tick_us >= slow_us ||
                         update_broadcast_us >= slow_us || proto_tick_us >= slow_us || item_entities_us >= slow_us ||
                         remote_sync_us >= slow_us || evict_us >= slow_us || clear_updates_us >= slow_us ||
-                        tick_late_us >= slow_us || task_wait_max_us >= slow_us;
+                        tick_late_us >= slow_us || task_wait_max_us >= slow_us ||
+                        items_lock_wait_us >= slow_us || furnace_lock_wait_us >= slow_us;
             if (slow) {
                 log_info("perf tick: idx=%llu total=%.3fms late=%.3fms sleep=%.3fms tasks=%.3fms task_wait_avg=%.3fms task_wait_max=%.3fms world=%.3fms furnaces=%.3fms updates=%.3fms proto=%.3fms items=%.3fms remote=%.3fms net_write=%.3fms evict=%.3fms clear=%.3fms task_count=%zu conns=%zu ready=%zu updates_len=%zu update_sends=%zu proto_ticks=%zu remote_syncs=%zu net_flushes=%zu item_entities=%zu keep=%zu evicted=%zu world_done=%zu world_integrated=%zu world_dirty=%zu world_saves=%zu/%zu/%zu world_jobs=%zu furnaces_scanned=%zu furnaces_ticked=%zu furnaces_changed=%zu furnaces_errors=%zu",
                          (unsigned long long)tick_index,
@@ -1985,11 +2039,22 @@ static void *tick_thread_main(void *arg) {
                          furnace_stats.ticked,
                          furnace_stats.changed,
                          furnace_stats.errors);
+                log_info("perf tick_detail: idx=%llu handlers=%.3fms handlers_max=%.3fms handlers_count=%zu fast_pass=%.3fms fast_tasks=%zu world_integrate=%.3fms world_save=%.3fms world_save_max=%.3fms world_done_lock_wait=%.3fms flush=%.3fms flush_max=%.3fms flush_count=%zu furnace_lock_wait=%.3fms items_lock_wait=%.3fms",
+                         (unsigned long long)tick_index,
+                         perf_ms(s->task_handler_us), perf_ms(s->task_handler_max_us), s->task_handler_count,
+                         perf_ms(s->fast_pass_us), s->fast_pass_tasks,
+                         perf_ms(world_stats.integrate_us), perf_ms(world_stats.save_us), perf_ms(world_stats.save_max_us),
+                         perf_ms(world_stats.done_lock_wait_us), perf_ms(world_stats.flush_us),
+                         perf_ms(world_stats.flush_max_us), world_stats.flush_count,
+                         perf_ms(furnace_lock_wait_us), perf_ms(items_lock_wait_us));
             }
 
             uint64_t summary_ticks = mc_perf_summary_ticks();
             if (summary_ticks > 0) {
-                if (summary_total.count == 0) summary_wall_start_us = tick_start_us;
+                if (summary_total.count == 0) {
+                    summary_wall_start_us = tick_start_us;
+                    summary_cpu_start_us = tick_start_cpu_us;
+                }
                 perf_accum_add(&summary_total, total_us);
                 size_t tick_bin = (size_t)((total_us < 0 ? 0 : total_us) / PERF_TICK_BIN_US);
                 if (tick_bin > PERF_TICK_BIN_MAX) tick_bin = PERF_TICK_BIN_MAX;
@@ -2005,6 +2070,11 @@ static void *tick_thread_main(void *arg) {
                 perf_accum_add(&summary_remote, remote_sync_us);
                 perf_accum_add(&summary_write, write_flush_us);
                 perf_accum_add(&summary_evict, evict_us);
+                perf_accum_add(&summary_handlers, s->task_handler_us);
+                perf_accum_add(&summary_fast, s->fast_pass_us);
+                perf_accum_add(&summary_world_save, world_stats.save_us);
+                perf_accum_add(&summary_flush, world_stats.flush_us);
+                perf_accum_add(&summary_item_lock_wait, items_lock_wait_us);
                 summary_task_count += task_count;
                 summary_update_sends += block_update_sends;
                 summary_proto_ticks += proto_tick_count;
@@ -2014,6 +2084,8 @@ static void *tick_thread_main(void *arg) {
                     int64_t wall_us = tick_end_us - summary_wall_start_us + tick_us;
                     double measured_tps = wall_us > 0 ?
                         (double)summary_total.count * 1000000.0 / (double)wall_us : 0.0;
+                    double tick_cpu_pct = wall_us > 0 && summary_cpu_start_us > 0 ?
+                        100.0 * (double)(tick_thread_cpu_us() - summary_cpu_start_us) / (double)wall_us : 0.0;
                     if (measured_tps > 20.0) measured_tps = 20.0;
                     log_info("perf summary: ticks=%llu tps=%.2f avg_total=%.3fms p50_total=%.1fms p95_total=%.1fms p99_total=%.1fms max_total=%.3fms over_50ms=%llu avg_late=%.3fms max_late=%.3fms avg_tasks=%.3fms avg_world=%.3fms avg_furnaces=%.3fms avg_updates=%.3fms avg_proto=%.3fms avg_items=%.3fms avg_remote=%.3fms avg_net_write=%.3fms avg_evict=%.3fms tasks=%llu update_sends=%llu proto_ticks=%llu remote_syncs=%llu resyncs=%llu",
                              (unsigned long long)summary_total.count,
@@ -2041,6 +2113,32 @@ static void *tick_thread_main(void *arg) {
                              (unsigned long long)summary_remote_syncs,
                              (unsigned long long)summary_resyncs);
                     log_network_workers_stats(s);
+                    mc_task_queue_stats_t queue_stats;
+                    mc_task_queue_get_stats(&s->task_queue, &queue_stats);
+                    log_info("perf detail_summary: tick_cpu=%.1f%% avg_handlers=%.3fms max_handlers=%.3fms avg_fast_pass=%.3fms avg_world_save=%.3fms max_world_save=%.3fms avg_flush=%.3fms max_flush=%.3fms avg_items_lock_wait=%.3fms task_queue_depth=%zu task_queue_peak=%zu task_pushes=%llu task_rejected=%llu task_push_wait=%.3fms task_push_hold=%.3fms task_drain_wait=%.3fms task_drain_hold=%.3fms",
+                             tick_cpu_pct, perf_accum_avg_ms(&summary_handlers), perf_ms(summary_handlers.max_us),
+                             perf_accum_avg_ms(&summary_fast), perf_accum_avg_ms(&summary_world_save),
+                             perf_ms(summary_world_save.max_us), perf_accum_avg_ms(&summary_flush),
+                             perf_ms(summary_flush.max_us), perf_accum_avg_ms(&summary_item_lock_wait),
+                             queue_stats.depth, queue_stats.peak_depth,
+                             (unsigned long long)queue_stats.pushes, (unsigned long long)queue_stats.rejected,
+                             perf_ms((int64_t)queue_stats.push_wait_us), perf_ms((int64_t)queue_stats.push_hold_us),
+                             perf_ms((int64_t)queue_stats.drain_wait_us), perf_ms((int64_t)queue_stats.drain_hold_us));
+                    for (int rank = 0; rank < 5; rank++) {
+                        int best = -1;
+                        for (int id = 0; id < 128; id++) {
+                            if (s->play_packet_perf[id].total_us <= 0) continue;
+                            if (best < 0 || s->play_packet_perf[id].total_us > s->play_packet_perf[best].total_us) best = id;
+                        }
+                        if (best < 0) break;
+                        mc_packet_perf_t *entry = &s->play_packet_perf[best];
+                        const char *name = serverbound_packet_name(MC_STATE_PLAY, best);
+                        log_info("perf packet: id=0x%02X name=%s count=%llu total=%.3fms max=%.3fms",
+                                 best, name ? name : "(unknown)", (unsigned long long)entry->count,
+                                 perf_ms(entry->total_us), perf_ms(entry->max_us));
+                        entry->total_us = 0;
+                    }
+                    memset(s->play_packet_perf, 0, sizeof(s->play_packet_perf));
                     summary_total = (perf_accum_t){0};
                     summary_late = (perf_accum_t){0};
                     summary_task = (perf_accum_t){0};
@@ -2052,6 +2150,11 @@ static void *tick_thread_main(void *arg) {
                     summary_remote = (perf_accum_t){0};
                     summary_write = (perf_accum_t){0};
                     summary_evict = (perf_accum_t){0};
+                    summary_handlers = (perf_accum_t){0};
+                    summary_fast = (perf_accum_t){0};
+                    summary_world_save = (perf_accum_t){0};
+                    summary_flush = (perf_accum_t){0};
+                    summary_item_lock_wait = (perf_accum_t){0};
                     summary_task_count = 0;
                     summary_update_sends = 0;
                     summary_proto_ticks = 0;
@@ -2062,6 +2165,11 @@ static void *tick_thread_main(void *arg) {
                 }
             }
         }
+        s->task_handler_us = 0;
+        s->task_handler_max_us = 0;
+        s->task_handler_count = 0;
+        s->fast_pass_us = 0;
+        s->fast_pass_tasks = 0;
 
         next_tick_us = candidate_next_tick_us;
         if (schedule_resync) {

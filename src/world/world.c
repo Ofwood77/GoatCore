@@ -131,6 +131,9 @@ struct mc_world {
     mc_chunk_done_t *done_tail;
 
     uint64_t tick_count;
+    size_t flush_count; /* tick-owned MC_PERF samples since the previous world tick */
+    int64_t flush_us;
+    int64_t flush_max_us;
 
     bool debug_reload;
     int32_t debug_cx;
@@ -664,9 +667,11 @@ static void done_queue_push(mc_world_t *w, mc_chunk_done_t *d) {
     pthread_mutex_unlock(&w->done_lock);
 }
 
-static mc_chunk_done_t *done_queue_drain(mc_world_t *w) {
+static mc_chunk_done_t *done_queue_drain(mc_world_t *w, int64_t *lock_wait_us) {
     if (!w) return NULL;
+    int64_t start_us = lock_wait_us ? mc_now_us() : 0;
     pthread_mutex_lock(&w->done_lock);
+    if (lock_wait_us) *lock_wait_us += mc_now_us() - start_us;
     mc_chunk_done_t *head = w->done_head;
     w->done_head = NULL;
     w->done_tail = NULL;
@@ -1008,7 +1013,7 @@ void mc_world_destroy(mc_world_t *w) {
         if (w->workers[i]) pthread_join(w->workers[i], NULL);
     }
 
-    mc_chunk_done_t *done = done_queue_drain(w);
+    mc_chunk_done_t *done = done_queue_drain(w, NULL);
     while (done) {
         mc_chunk_done_t *next = done->next;
         mc_chunk_entry_t *e = chunk_map_get(&w->chunks, done->key);
@@ -1195,7 +1200,16 @@ int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     mc_chunk_t *chunk = mc_world_get_chunk(w, cx, cz, UINT32_MAX);
     if (!chunk) return -1;
     if (!chunk->dirty) return 0;
-    if (save_chunk_to_store(w, chunk) != 0) return -1;
+    bool perf = mc_perf_enabled();
+    int64_t flush_start_us = perf ? mc_now_us() : 0;
+    int save_rc = save_chunk_to_store(w, chunk);
+    if (perf) {
+        int64_t elapsed_us = mc_now_us() - flush_start_us;
+        w->flush_count++;
+        w->flush_us += elapsed_us;
+        if (elapsed_us > w->flush_max_us) w->flush_max_us = elapsed_us;
+    }
+    if (save_rc != 0) return -1;
     chunk->dirty = false;
     if (mc_world_debug_container_match(w, x, y, z)) {
         int32_t sid = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
@@ -1229,11 +1243,20 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
     if (stats) memset(stats, 0, sizeof(*stats));
     if (!w) return;
     w->tick_count++;
+    if (stats) {
+        stats->flush_count = w->flush_count;
+        stats->flush_us = w->flush_us;
+        stats->flush_max_us = w->flush_max_us;
+    }
+    w->flush_count = 0;
+    w->flush_us = 0;
+    w->flush_max_us = 0;
 
     /* 1) Integrate worker results and any writes that piled up while those
      * chunks were loading. Gameplay code after this point sees only READY
      * chunks or explicit "not ready" answers. */
-    mc_chunk_done_t *done = done_queue_drain(w);
+    int64_t integration_start_us = stats ? mc_now_us() : 0;
+    mc_chunk_done_t *done = done_queue_drain(w, stats ? &stats->done_lock_wait_us : NULL);
     while (done) {
         mc_chunk_done_t *next = done->next;
         if (stats) stats->done_seen++;
@@ -1272,6 +1295,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
         free(done);
         done = next;
     }
+    if (stats) stats->integrate_us = mc_now_us() - integration_start_us;
 
     /* 2) Save at a bounded rate so large worlds do not monopolize the tick. */
     if (w->world_path && *w->world_path && w->chunk_list_len > 0) {
@@ -1287,7 +1311,14 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
 
             attempts++;
             if (stats) stats->saves_attempted++;
-            if (save_chunk_to_store(w, c) == 0) {
+            int64_t save_start_us = stats ? mc_now_us() : 0;
+            int save_rc = save_chunk_to_store(w, c);
+            if (stats) {
+                int64_t save_elapsed_us = mc_now_us() - save_start_us;
+                stats->save_us += save_elapsed_us;
+                if (save_elapsed_us > stats->save_max_us) stats->save_max_us = save_elapsed_us;
+            }
+            if (save_rc == 0) {
                 c->dirty = false;
                 if (stats) stats->saves_succeeded++;
                 if (c->evict_after_save) {
