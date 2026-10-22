@@ -328,3 +328,114 @@ and 1,484 breaks had been verified, and all 25 clients observed the expected
 shutdown disconnect. The world retained 441 per-chunk files; this checks
 clean termination under writes, but not full post-restart durability of every
 individual block action.
+
+## Simulation-worker gate: fixed work and item ownership (2026-10-22)
+
+`stress.py --mode blocks --cycles-per-bot N` now completes exactly N verified
+place+break cycles per bot or reports how many remain at its deadline. The
+benchmark records confirmed work, elapsed time, per-operation latency, packet
+profiles and sampled item-tick phases. Its 100-tick summaries omit the final
+partial window; scheduled-tick `tasks` also omit packets handled by the fast
+pass. Neither is a complete operation counter. The authoritative completion
+counter is the client-observed block update after each action. Tests use a
+fresh bot identity and private targets; the existing safe target limit is 50
+bots. Extending to 100 block bots needs a distinct, valid, within-reach target
+layout, not two clients racing the same block.
+
+With one epoll worker, two chunk workers, fresh flat worlds, a 10 ms pause
+after each place and break, and a 120-second deadline (60 seconds for 10 bots):
+
+| Bots | Confirmed place+break | Missing cycles | Elapsed | Confirmed blocks/s | Worst fully populated 100-tick TPS; P95/P99 MSPT; ticks >50 ms |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 10 | 1000+1000 | 0 | 8.520 s | 234.7 | 19.95; 14.0/15.7 ms; 0 |
+| 25 | 2500+2500 | 0 | 8.050 s | 621.1 | 19.92; 19.8/20.6 ms; 0 |
+| 50 | 5000+5000 | 0 | 20.758 s | 481.7 | 19.93; 37.4/49.9 ms; 1 |
+
+There were no action failures or unexpected disconnects. Different bot counts
+are different workloads and these short samples must not be interpreted as a
+scaling curve. Logs/reports are in ignored `tests/stress/results/` directories
+`network-benchmark-20261022T064044Z`, `...T064102Z`, and `...T064116Z`.
+
+A same-work 50-bot, 100-cycle pair copied the *same* disposable world into
+each run. The `28c8f827` reference finished 5000+5000 in 21.801 s; the
+current instrumented binary finished 5000+5000 in 23.772 s. Their worst
+fully populated 100-tick windows were respectively 17.84 TPS, P95/P99
+70.3/96.6 ms, 12 ticks >50 ms, and 19.49 TPS, P95/P99 50.0/73.6 ms,
+6 ticks >50 ms. Both had zero missing cycles and zero unexpected disconnects.
+The current run was **slower end-to-end** despite a better sampled tick tail;
+extra profiling logs and run-to-run effects confound attribution. No
+throughput gain is claimed. Reports: `network-benchmark-20261022T064248Z`
+and `...T064326Z`.
+
+The new `MC_PERF` spans separate the normal placement path's world write,
+connected-block recomputation, outbound queueing and item relocation scan.
+In the 50-bot run one 1.250 ms placement spent 1.242 ms in
+`net_server_resolve_item_entities_for_block`; world write and recomputation
+were 0.001 ms each. The relocation helper scans *all* live items for each
+placement, so many drops make placement O(items). Player-action/break and
+`USE_ITEM_ON` packet totals also rise as entities accumulate. Break profiling
+now separates drop resolution, world mutation, synchronous flush, outbound
+updates and item spawn. These spans are opt-in with `MC_PERF` and only log
+operations above `MC_PERF_SLOW_MS`; they are samples, not latency percentiles.
+In a separate 25-bot fixed-work sample, two >1 ms break handlers spent
+1.596/1.620 ms and 1.224/1.267 ms in the synchronous flush; drop resolution
+was at most 0.001 ms in those cases. The same run confirmed 2500+2500 edits
+with no missing cycle (`network-benchmark-20261022T205629Z`). This identifies
+occasional flush latency without yet demonstrating that async saves would
+improve total throughput or preserve durability.
+
+Item-tick profiling separates collision relocation, physics/world lookup,
+outbound teleports, and pickup/inventory work. At 4,407 items, sampled pure
+physics cost was 0.265 ms and collision relocation 0.184 ms. An earlier
+1,229-item tick took 34.503 ms, of which 32.184 ms was pickup processing
+and only 0.138 ms physics. Parallelizing the tiny arithmetic phase would
+require copying thousands of records, a synchronization barrier and ordered
+commit, while leaving the measured dominant pickup, broadcasts and placement
+scan serial. Consequently **no `simulation_workers` or job pool is enabled**;
+the existing setup rejection remains correct. This is a measured gate, not a
+claim that all future simulations should remain serial.
+
+The authoritative tick owns player state, inventories, world/chunk mutations,
+item-array contents, pickups and packet ordering. A future independent job
+must receive a value-only snapshot (item ID/generation, scalar position and
+velocity, pickup delay, tick number, and copied collision samples or an
+immutable versioned chunk view). It must contain no pointer to a live chunk,
+connection, item slot or inventory. The tick must validate item identity and
+world/chunk revision before committing results, recompute stale proposals
+serially, apply proposals in original entity order, and perform pickups,
+creation/destruction and broadcasts only after commit. The snapshot and
+result buffers must remain owned until every worker has joined the barrier;
+shutdown must drain or cancel jobs before freeing world and connections.
+No such immutable collision snapshot or bounded proposal queue exists yet.
+
+The next lower-risk performance candidate is a tick-owned spatial broadphase
+for item/block intersections, with explicit updates on item spawn, motion and
+destruction; it should be benchmarked against the O(items) scan before adding
+threads. Pickup candidate filtering and broadcast fanout also merit profiling.
+Do not move world writes or live connection pointers to workers. The
+single-threaded item update order is the determinism baseline for any later
+0/1/2/4-worker comparison.
+
+`test_block_persistence.py` uses only a disposable local world and QA/admin
+flags on that temporary process. Three bots each confirmed a place+break
+cycle on a private target, then two left stone placed. A fresh server read
+states `[1, 0, 1]` at the three coordinates after clean shutdown; a bot
+broke the first stone, and a third server read `[0, 0, 1]` after the next
+shutdown. This verifies actual block states after restart, not just the
+existence of chunk files. It does not test crash consistency or concurrent
+saving. The QA block read command is gated by existing QA and command
+authorization checks.
+
+Validation for this step: `make -B precommit-check` passed. An ASan+UBSan
+server passed the three-bot, three-start persistence scenario and a two-epoll-worker
+10-bot fixed workload (200 verified poses and 200 verified breaks, no missing
+cycles or sanitizer report). A TSan server passed the same three-bot persistence test
+and a four-epoll-worker 10-bot workload with the same 200+200 verified edits,
+again without a reported race. These small sanitizer runs end before a full
+100-tick `MC_PERF` window and their timing is not a performance baseline.
+Sanitizers sample executed paths only; they do not prove race freedom.
+The first multi-bot sanitizer attempts exposed a test-probe error: the QA
+read used `mc_world_get_block`, which reports air for a chunk still loading.
+It now uses `mc_world_get_block_ready`, and the test retries an unavailable
+chunk rather than confusing it with persisted air. The corrected three-bot
+scenario passed under both sanitizers.
