@@ -27,6 +27,9 @@ WORKER = re.compile(
     r"accepted=(\d+) disconnected=(\d+) packets=(\d+) bytes_in=(\d+) "
     r"bytes_out=(\d+).*?task_wait_avg=([\d.]+)ms.*?cpu=([\d.]+)%"
 )
+PACKET = re.compile(r"perf packet: id=0x([0-9A-F]+) name=\S+ count=(\d+) total=([\d.]+)ms max=([\d.]+)ms")
+ITEM_TICK = re.compile(r"perf item_entities: count=(\d+) remaining=\d+ total=([\d.]+)ms "
+                       r"resolve=([\d.]+)ms physics=([\d.]+)ms broadcast=([\d.]+)ms pickup=([\d.]+)ms")
 
 
 def free_port():
@@ -109,6 +112,14 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     for match in WORKER.findall(log):
         worker, *values = match
         workers[int(worker)] = tuple(map(float, values))
+    packet_profiles = {}
+    for packet_id, packet_count, total, maximum in PACKET.findall(log):
+        row = packet_profiles.setdefault(packet_id, {"count": 0, "total_ms": 0.0, "max_ms": 0.0})
+        row["count"] += int(packet_count)
+        row["total_ms"] += float(total)
+        row["max_ms"] = max(row["max_ms"], float(maximum))
+    item_samples = [tuple(map(float, row)) for row in ITEM_TICK.findall(log)]
+    peak_item_tick = max(item_samples, key=lambda row: row[1]) if item_samples else None
     return {
         "network_workers": count,
         "initial_world": "copied" if world_template else "fresh",
@@ -122,6 +133,10 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
         "movements_sent": report["movements_sent"],
         "blocks_placed_verified": report["blocks_placed_verified"],
         "blocks_broken_verified": report["blocks_broken_verified"],
+        "confirmed_blocks_per_second": round((report["blocks_placed_verified"] + report["blocks_broken_verified"]) /
+                                             report["duration_seconds"], 1),
+        "operation_latency_ms_mean": report["operation_latency_ms_mean"],
+        "operation_latency_ms_max": report["operation_latency_ms_max"],
         "requested_cycles": report["requested_cycles"],
         "completed_cycles": report["completed_cycles"],
         "missing_cycles": report["missing_cycles"],
@@ -154,6 +169,12 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
                                               report["duration_seconds"], 1) if len(workers) == count else None,
         "worker_task_wait_avg_ms": [workers[i][7] if i in workers else None for i in range(count)],
         "worker_cpu_pct": [workers[i][8] if i in workers else None for i in range(count)],
+        "profiled_packet_windows": packet_profiles,
+        "peak_sampled_item_tick": None if peak_item_tick is None else {
+            "items": int(peak_item_tick[0]), "total_ms": peak_item_tick[1],
+            "resolve_ms": peak_item_tick[2], "physics_ms": peak_item_tick[3],
+            "broadcast_ms": peak_item_tick[4], "pickup_ms": peak_item_tick[5],
+        },
     }
 
 
@@ -198,6 +219,8 @@ def main():
         print(json.dumps(row), flush=True)
     (result_dir / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     print(f"Benchmark reports: {result_dir}")
+    if any(row["stress_exit_code"] != 0 or row["missing_cycles"] for row in rows):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

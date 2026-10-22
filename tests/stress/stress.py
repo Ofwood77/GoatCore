@@ -19,6 +19,7 @@ from protocol import Connection, PROTOCOL, position, read_position, read_string,
 
 HERE = Path(__file__).resolve().parent
 QA_POS = re.compile(rb"QA state pos=(-?\d+\.\d+) (-?\d+\.\d+) (-?\d+\.\d+)")
+QA_BLOCK = re.compile(rb"QA block x=(-?\d+) y=(-?\d+) z=(-?\d+) state=(-?\d+)")
 
 
 def local_host(host):
@@ -151,7 +152,9 @@ class Bot:
         self.block_events = defaultdict(asyncio.Queue)
         self.slot_events = asyncio.Queue()
         self.qa_positions = asyncio.Queue()
+        self.qa_messages = asyncio.Queue()
         self.sequence = 0
+        self.stop_at = None
 
     async def connect(self):
         self.started = time.monotonic()
@@ -286,6 +289,8 @@ class Bot:
             item = read_varint(payload, offset)[0] if count else 0
             self.slot_events.put_nowait((slot, item, count))
         elif packet_id == 121:
+            if b"QA block" in payload:
+                self.qa_messages.put_nowait(payload)
             match = QA_POS.search(payload)
             if match:
                 self.qa_positions.put_nowait(tuple(float(x) for x in match.groups()))
@@ -343,7 +348,12 @@ class Bot:
         started = time.monotonic()
         try:
             while True:
-                state = await asyncio.wait_for(queue.get(), max(0.001, self.args.timeout - (time.monotonic() - started)))
+                remaining = self.args.timeout - (time.monotonic() - started)
+                if self.stop_at is not None:
+                    remaining = min(remaining, self.stop_at - time.monotonic())
+                if remaining <= 0:
+                    return None
+                state = await asyncio.wait_for(queue.get(), remaining)
                 if predicate(state):
                     self.latencies.append((time.monotonic() - started) * 1000)
                     return state
@@ -424,6 +434,7 @@ class Bot:
         self.break_send_times.append(sent_at)
 
     async def work(self, stop):
+        self.stop_at = stop if self.args.cycles_per_bot is not None else None
         try:
             await self.connect()
             if self.args.shared_zone:
