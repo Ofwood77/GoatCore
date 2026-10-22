@@ -22,6 +22,7 @@
 #define DEFAULT_PVP_ENABLED true
 #define DEFAULT_KEEP_INVENTORY false
 #define DEFAULT_ONLINE_MODE false
+#define DEFAULT_OFFLINE_SKINS false
 
 typedef struct {
     int64_t level_seed;
@@ -31,6 +32,7 @@ typedef struct {
     bool pvp_enabled;
     bool keep_inventory;
     bool online_mode;
+    bool offline_skins;
 } server_disk_config_t;
 
 static void trim_ws(char *s) {
@@ -61,6 +63,7 @@ static int write_default_server_config(const char *path) {
     fprintf(f, "pvp=%s\n", DEFAULT_PVP_ENABLED ? "true" : "false");
     fprintf(f, "keep_inventory=%s\n", DEFAULT_KEEP_INVENTORY ? "true" : "false");
     fprintf(f, "online-mode=%s\n", DEFAULT_ONLINE_MODE ? "true" : "false");
+    fprintf(f, "offline-skins=%s\n", DEFAULT_OFFLINE_SKINS ? "true" : "false");
     if (fclose(f) != 0) {
         int e = errno;
         log_error("failed to write %s (errno=%d %s)", path, e, strerror(e));
@@ -126,6 +129,7 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     out->pvp_enabled = DEFAULT_PVP_ENABLED;
     out->keep_inventory = DEFAULT_KEEP_INVENTORY;
     out->online_mode = DEFAULT_ONLINE_MODE;
+    out->offline_skins = DEFAULT_OFFLINE_SKINS;
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -196,6 +200,13 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
         if (strcmp(key, "online-mode") == 0) {
             if (parse_bool_value(val, &out->online_mode) != 0) {
                 log_error("invalid online-mode in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(key, "offline-skins") == 0) {
+            if (parse_bool_value(val, &out->offline_skins) != 0) {
+                log_error("invalid offline-skins in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
                 return -1;
             }
             continue;
@@ -292,6 +303,7 @@ int main(void) {
     cfg.chunk_workers = mc_setup_resolve_chunk_workers(&setup);
     cfg.compression_threshold = -1;
     cfg.online_mode = disk_cfg.online_mode;
+    cfg.offline_skins = disk_cfg.offline_skins;
     if (cfg.online_mode) {
         log_error("online-mode=true is not yet supported: encrypted login and Mojang session verification are missing; refusing to start");
         return 1;

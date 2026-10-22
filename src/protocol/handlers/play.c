@@ -3626,21 +3626,29 @@ static void remote_player_remove_local(mc_conn_t *viewer, int32_t entity_id) {
 }
 
 static int send_player_info_add(mc_conn_t *viewer, mc_conn_t *subject) {
-    uint8_t buf[512];
+    size_t cap = 128 + proto_profile_properties_capacity(subject);
+    uint8_t *buf = (uint8_t *)malloc(cap);
+    if (!buf) return -1;
     size_t pos = 0;
     uint8_t action = PLAYER_INFO_ACTION_ADD | PLAYER_INFO_ACTION_UPDATE_GAMEMODE | PLAYER_INFO_ACTION_UPDATE_LISTED |
                      PLAYER_INFO_ACTION_UPDATE_LATENCY;
-    if (w_ubyte(buf, sizeof(buf), &pos, action) != 0) return -1;
-    if (w_varint(buf, sizeof(buf), &pos, 1) != 0) return -1;
-    if (pos + 16 > sizeof(buf)) return -1;
+    if (w_ubyte(buf, cap, &pos, action) != 0 || w_varint(buf, cap, &pos, 1) != 0 || pos + 16 > cap) {
+        free(buf);
+        return -1;
+    }
     memcpy(buf + pos, subject->uuid, 16);
     pos += 16;
-    if (w_string(buf, sizeof(buf), &pos, subject->username) != 0) return -1;
-    if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1; /* properties */
-    if (w_varint(buf, sizeof(buf), &pos, subject->gamemode) != 0) return -1;
-    if (w_varint(buf, sizeof(buf), &pos, 1) != 0) return -1; /* listed */
-    if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1; /* latency */
-    return conn_write_packet(viewer, PKT_PLAY_PLAYER_INFO, buf, pos, -1);
+    if (w_string(buf, cap, &pos, subject->username) != 0 ||
+        proto_profile_write_properties(subject, buf, cap, &pos) != 0 ||
+        w_varint(buf, cap, &pos, subject->gamemode) != 0 ||
+        w_varint(buf, cap, &pos, 1) != 0 || /* listed */
+        w_varint(buf, cap, &pos, 0) != 0) { /* latency */
+        free(buf);
+        return -1;
+    }
+    int rc = conn_write_packet(viewer, PKT_PLAY_PLAYER_INFO, buf, pos, -1);
+    free(buf);
+    return rc;
 }
 
 static int send_player_remove(mc_conn_t *viewer, mc_conn_t *subject) {

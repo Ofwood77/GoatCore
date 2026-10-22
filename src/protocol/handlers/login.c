@@ -65,17 +65,49 @@ static int w_uuid(uint8_t *buf, size_t cap, size_t *pos, const uint8_t uuid[16])
 }
 
 static int send_login_success(mc_conn_t *c) {
-    uint8_t buf[512];
+    size_t cap = 128 + proto_profile_properties_capacity(c);
+    uint8_t *buf = (uint8_t *)malloc(cap);
+    if (!buf) return -1;
     size_t pos = 0;
 
-    if (!c->has_uuid) return -1;
-    if (w_uuid(buf, sizeof(buf), &pos, c->uuid) != 0) return -1;
-    if (w_string(buf, sizeof(buf), &pos, c->username) != 0) return -1;
-    if (w_varint(buf, sizeof(buf), &pos, 0) != 0) return -1; /* properties count */
+    if (!c->has_uuid || w_uuid(buf, cap, &pos, c->uuid) != 0 ||
+        w_string(buf, cap, &pos, c->username) != 0 ||
+        proto_profile_write_properties(c, buf, cap, &pos) != 0) {
+        free(buf);
+        return -1;
+    }
 
-    if (conn_write_packet(c, MC_PKT_LOGIN_CLIENTBOUND_LOGIN_FINISHED, buf, pos, -1) != 0) return -1;
+    int rc = conn_write_packet(c, MC_PKT_LOGIN_CLIENTBOUND_LOGIN_FINISHED, buf, pos, -1);
+    free(buf);
+    if (rc != 0) return -1;
     c->login_success_sent = true;
     return 0;
+}
+
+static void apply_public_skin(mc_conn_t *c, const mc_public_profile_t *profile) {
+    if (!c || !profile || !profile->found) return;
+    char *value = strdup(profile->texture_value);
+    char *signature = strdup(profile->texture_signature);
+    if (!value || !signature) { free(value); free(signature); return; }
+    free(c->skin_value);
+    free(c->skin_signature);
+    c->skin_value = value;
+    c->skin_signature = signature;
+}
+
+int proto_login_tick(mc_conn_t *c, int64_t now_ms) {
+    if (!c || !c->skin_lookup_pending || c->login_success_sent) return 0;
+    if (now_ms < c->skin_lookup_deadline_ms) {
+        mc_public_profile_t *profile = malloc(sizeof(*profile));
+        if (profile) {
+            int rc = mc_profile_service_lookup(net_server_profiles(c->server), c->username, profile);
+            if (rc == 0) { free(profile); return 0; }
+            if (rc == 1) apply_public_skin(c, profile);
+            free(profile);
+        }
+    }
+    c->skin_lookup_pending = false;
+    return send_login_success(c);
 }
 
 int proto_handle_login(mc_conn_t *c, const mc_frame_t *frame) {
@@ -104,6 +136,20 @@ int proto_handle_login(mc_conn_t *c, const mc_frame_t *frame) {
              (c->cfg->admin_username && *c->cfg->admin_username &&
               strcmp(c->username, c->cfg->admin_username) == 0));
         log_info("LoginStart: name=%s", c->username);
+        if (c->cfg && c->cfg->offline_skins) {
+            mc_public_profile_t *profile = malloc(sizeof(*profile));
+            if (profile) {
+                int rc = mc_profile_service_lookup(net_server_profiles(c->server), c->username, profile);
+                if (rc == 0) {
+                    c->skin_lookup_pending = true;
+                    c->skin_lookup_deadline_ms = mc_now_us() / 1000 + 4000;
+                    free(profile);
+                    return 0;
+                }
+                if (rc == 1) apply_public_skin(c, profile);
+                free(profile);
+            }
+        }
         return send_login_success(c);
     }
 

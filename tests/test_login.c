@@ -15,6 +15,11 @@ bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, c
     return duplicate_identity;
 }
 
+mc_profile_service_t *net_server_profiles(mc_server_t *server) { (void)server; return NULL; }
+int mc_profile_service_lookup(mc_profile_service_t *service, const char *name, mc_public_profile_t *out) {
+    (void)service; (void)name; (void)out; return -1;
+}
+
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t len, int compression_threshold) {
     (void)c; (void)compression_threshold;
     assert(len <= sizeof(sent_payload));

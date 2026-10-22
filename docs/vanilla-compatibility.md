@@ -13,7 +13,7 @@ avec le client Java officiel.
 | Ping/Pong `0x01` | Status | Oui | Oui pour l'écho des 8 octets | Test epoll |
 | Hello C→S `0x00` | Login | Oui | Offline : nom 3–16 ASCII alphanumérique/`_`, UUID client ignoré | Unitaire + intégration |
 | Hello S→C `0x01`, Key C→S `0x01` | Login | Non | Non : chiffrement/authentification online absents | Non |
-| Login finished S→C `0x02` | Login | Oui | Partiel : profil sans propriétés | Unitaire + intégration |
+| Login finished S→C `0x02` | Login | Oui | Propriété `textures` signée facultative en mode offline ; rendu client Java non vérifié | Unitaire + intégration + API réelle |
 | Login acknowledged C→S `0x03` | Login | Oui | Oui pour paquet vide et transition unique | Unitaire |
 | Login compression S→C `0x03` | Login | Non émis | Non testé avec clients officiels ; compression désactivée | Test de framing seul |
 | Select known packs S→C `0x0e`, C→S `0x07` | Configuration | Oui | Partiel : liste fixe, réponse bornée et non répétable | Client Python |
@@ -30,6 +30,19 @@ avec le client Java officiel.
   ne choisit plus son UUID. Un seul login par nom (sans distinction de casse)
   ou UUID est admis à la fois, y compris pendant la sauvegarde d'une connexion
   qui se ferme. Les connexions pré-Play expirent après 30 s.
+- `offline-skins=false` par défaut. Avec `offline-skins=true`, un seul thread
+  interroge les API publiques Mojang pour obtenir le profil et ses textures
+  signées ; le tick et les workers epoll ne font aucune requête HTTP. Le cache
+  conserve les succès pendant une heure et les échecs pendant une minute ;
+  la file est bornée à huit noms, le débit à deux profils par seconde et les
+  requêtes HTTPS à 3,5 s chacune. Un échec ou une saturation garde le skin
+  Vanilla par défaut. La connexion attend au plus quatre secondes pour son
+  skin. L'UUID de connexion, les permissions et les sauvegardes restent
+  **offline** : un skin récupéré ne prouve jamais la propriété du compte.
+  Les textures signées sont présentes dans Login Success et Player Info Update
+  dans les tests de protocole, mais leur affichage avec un UUID offline doit
+  encore être vérifié avec deux vrais clients Java 26.1.1 ; certains clients
+  peuvent refuser cette association d'identités.
 - Anciennes sauvegardes GoatCore : si la sauvegarde au nouvel UUID n'existe
   pas, le serveur lit l'ancien nom de fichier FNV. Il conserve ce fichier et
   écrit les sauvegardes suivantes sous l'UUID corrigé. Un fichier actuel

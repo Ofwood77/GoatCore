@@ -10,6 +10,7 @@
 #include "mc_inventory.h"
 #include "mc_mining.h"
 #include "mc_world.h"
+#include "mc_profile.h"
 
 #define MC_BUF_CAP 8192
 /* Current chunks (24 sections + light) fit well below 2 MiB. */
@@ -80,6 +81,10 @@ struct mc_conn {
     uint8_t uuid[16];
     bool has_uuid;
     bool login_success_sent;
+    bool skin_lookup_pending;
+    int64_t skin_lookup_deadline_ms;
+    char *skin_value;
+    char *skin_signature;
     bool config_known_packs_sent;
     bool config_registry_sent;
     bool config_finish_sent;
@@ -171,6 +176,7 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold);
 void conn_close(mc_conn_t *c);
 mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name);
+mc_profile_service_t *net_server_profiles(mc_server_t *server);
 bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]);
 void net_server_release_conn(mc_conn_t *conn);
 mc_world_t *net_server_world(mc_server_t *server);
