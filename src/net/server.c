@@ -29,6 +29,8 @@
 #include <math.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/signalfd.h>
+#include <signal.h>
 #include <time.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -76,19 +78,52 @@ typedef struct {
 /* Runtime entity used for block/item drops. It is owned by the server tick,
  * not by the world module, because pickup and networking are connection-aware. */
 
-/* Global server runtime. World state is mostly mutated from the tick thread,
- * while the network thread owns socket readiness and enqueues packet tasks. */
+typedef struct mc_network_worker {
+    struct mc_server *server;
+    unsigned index;
+    int epoll_fd;
+    int wake_fd;
+    pthread_t thread;
+    pthread_mutex_t command_lock;
+    mc_conn_t *command_head;
+    mc_conn_t *command_tail;
+    size_t command_len;
+    mc_conn_t *owned; /* only this worker changes the list */
+    mc_conn_t *retired; /* retain epoll-batch pointers until the batch ends */
+    atomic_size_t connections;
+    atomic_size_t connections_peak;
+    atomic_size_t commands_peak;
+    atomic_uint_fast64_t accepted;
+    atomic_uint_fast64_t packets;
+    atomic_uint_fast64_t bytes_in;
+    atomic_uint_fast64_t bytes_out;
+    atomic_uint_fast64_t epoll_wait_us;
+    atomic_uint_fast64_t epoll_calls;
+    atomic_uint_fast64_t task_wait_us;
+    atomic_uint_fast64_t task_wait_count;
+    atomic_uint_fast64_t task_wait_max_us;
+    atomic_uint_fast64_t disconnected;
+    int64_t started_us;
+} mc_network_worker_t;
+
+/* The caller owns the acceptor epoll; workers each own a separate epoll and
+ * all socket operations for their stable subset of connections. */
 struct mc_server {
     int listen_fd;
     int epoll_fd;
     int wake_fd;
+    int signal_fd;
     mc_server_config_t cfg;
     atomic_bool running;
     mc_conn_t *conns;
     mc_conn_t *departures; /* conns_lock; tick owns gameplay departure handling */
-    mc_conn_t *retired; /* network owner; keeps epoll batch pointers alive */
-    size_t active_connections; /* epoll thread owns accept/remove */
-    int32_t next_entity_id;
+    size_t active_connections; /* guarded by conns_lock */
+    atomic_int next_entity_id;
+    atomic_bool stop_requested;
+    atomic_bool network_error;
+    int network_worker_count;
+    mc_network_worker_t workers[4];
+    unsigned next_worker; /* acceptor-owned round-robin cursor */
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
     pthread_t tick_thread;
@@ -179,31 +214,34 @@ static void del_epoll(int epfd, int fd) {
     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
 }
 
-static void server_wake_network(mc_server_t *s) {
-    if (!s || s->wake_fd < 0) return;
+static void wake_eventfd(int wake_fd) {
+    if (wake_fd < 0) return;
     uint64_t one = 1;
     ssize_t n;
     do {
-        n = write(s->wake_fd, &one, sizeof(one));
+        n = write(wake_fd, &one, sizeof(one));
     } while (n < 0 && errno == EINTR);
     /* EAGAIN means the event counter is already readable. */
 }
 
 static void conn_notify_output(mc_conn_t *c) {
-    if (c) server_wake_network(c->server);
+    if (c && c->server && c->network_worker_index < (unsigned)c->server->network_worker_count)
+        wake_eventfd(c->server->workers[c->network_worker_index].wake_fd);
 }
 
-static mc_conn_t *conn_create(mc_server_t *s, int fd) {
-    if (s->active_connections >= (size_t)s->cfg.max_connections) return NULL;
+static void conn_destroy(mc_conn_t *c);
+
+static mc_conn_t *conn_create(mc_server_t *s, int fd, unsigned worker_index) {
     mc_conn_t *c = (mc_conn_t *)calloc(1, sizeof(mc_conn_t));
     if (!c) return NULL;
     atomic_init(&c->fd, fd);
     c->state = MC_STATE_HANDSHAKING;
     c->cfg = &s->cfg;
     c->server = s;
+    c->network_worker_index = worker_index;
     c->notify_output = conn_notify_output;
     c->command_authorized = s->cfg.admin_commands;
-    c->entity_id = s->next_entity_id++;
+    c->entity_id = atomic_fetch_add(&s->next_entity_id, 1);
     c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
     atomic_init(&c->detached, false);
@@ -219,6 +257,12 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd) {
         return NULL;
     }
     pthread_mutex_lock(&s->conns_lock);
+    if (s->active_connections >= (size_t)s->cfg.max_connections) {
+        pthread_mutex_unlock(&s->conns_lock);
+        c->fd = -1; /* the acceptor retains ownership of the rejected fd */
+        conn_destroy(c);
+        return NULL;
+    }
     c->in.limit = MC_MAX_INPUT_BUFFER;
     c->out.limit = MC_MAX_OUTPUT_BUFFER;
     s->active_connections++;
@@ -328,17 +372,29 @@ static void close_matching_container_window(mc_conn_t *c) {
 
 static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
     if (!s || !c) return;
+    mc_network_worker_t *worker = &s->workers[c->network_worker_index];
     if (atomic_exchange(&c->detached, true)) return;
     atomic_store(&c->closing, true);
     pthread_mutex_lock(&c->out_lock);
     c->abort_io = true;
-    del_epoll(s->epoll_fd, c->fd);
+    if (c->owner_registered) del_epoll(worker->epoll_fd, c->fd);
     if (c->fd >= 0) {
         close(c->fd);
         c->fd = -1;
     }
     pthread_mutex_unlock(&c->out_lock);
+    if (c->owner_registered) {
+        mc_conn_t **pp = &worker->owned;
+        while (*pp && *pp != c) pp = &(*pp)->owner_next;
+        if (*pp == c) {
+            *pp = c->owner_next;
+            atomic_fetch_sub(&worker->connections, 1);
+        }
+        c->owner_next = NULL;
+        c->owner_registered = false;
+    }
     conn_remove(s, c);
+    atomic_fetch_add(&worker->disconnected, 1);
 
     /* The tick thread alone updates other players' view of this player. The
      * extra ref survives even if the network batch has already finished. */
@@ -347,13 +403,13 @@ static void server_close_conn(mc_server_t *s, mc_conn_t *c) {
     c->departure_next = s->departures;
     s->departures = c;
     pthread_mutex_unlock(&s->conns_lock);
-    c->retired_next = s->retired;
-    s->retired = c;
+    c->retired_next = worker->retired;
+    worker->retired = c;
 }
 
-static void server_release_retired(mc_server_t *s) {
-    mc_conn_t *c = s->retired;
-    s->retired = NULL;
+static void server_release_retired(mc_network_worker_t *worker) {
+    mc_conn_t *c = worker->retired;
+    worker->retired = NULL;
     while (c) {
         mc_conn_t *next = c->retired_next;
         conn_release(c);
@@ -507,18 +563,104 @@ static double perf_tick_percentile_ms(const uint32_t *bins, uint64_t count, unsi
     return (double)PERF_TICK_BIN_MAX * ((double)PERF_TICK_BIN_US / 1000.0);
 }
 
+static void network_worker_record_task_wait(mc_server_t *s, const mc_task_t *task, int64_t now_ms_value) {
+    if (!task || !task->conn || task->conn->network_worker_index >= (unsigned)s->network_worker_count) return;
+    mc_network_worker_t *worker = &s->workers[task->conn->network_worker_index];
+    uint64_t wait_us = now_ms_value > task->enqueue_ms ? (uint64_t)(now_ms_value - task->enqueue_ms) * 1000u : 0;
+    atomic_fetch_add(&worker->task_wait_us, wait_us);
+    atomic_fetch_add(&worker->task_wait_count, 1);
+    uint64_t old = atomic_load(&worker->task_wait_max_us);
+    while (wait_us > old && !atomic_compare_exchange_weak(&worker->task_wait_max_us, &old, wait_us)) {}
+}
+
+static void log_network_workers_stats(mc_server_t *s) {
+    int64_t now_us = mc_now_us();
+    pthread_mutex_lock(&s->task_queue.lock);
+    size_t task_depth = s->task_queue.len;
+    pthread_mutex_unlock(&s->task_queue.lock);
+    for (int i = 0; i < s->network_worker_count; i++) {
+        mc_network_worker_t *worker = &s->workers[i];
+        pthread_mutex_lock(&worker->command_lock);
+        size_t command_depth = worker->command_len;
+        pthread_mutex_unlock(&worker->command_lock);
+        clockid_t cpu_clock;
+        struct timespec cpu_time = {0};
+        double cpu_pct = 0.0;
+        if (pthread_getcpuclockid(worker->thread, &cpu_clock) == 0 &&
+            clock_gettime(cpu_clock, &cpu_time) == 0 && now_us > worker->started_us) {
+            uint64_t cpu_us = (uint64_t)cpu_time.tv_sec * 1000000u + (uint64_t)cpu_time.tv_nsec / 1000u;
+            cpu_pct = (double)cpu_us * 100.0 / (double)(now_us - worker->started_us);
+        }
+        uint64_t wait_count = atomic_load(&worker->task_wait_count);
+        log_info("perf network: worker=%d connections=%zu peak=%zu accepted=%llu disconnected=%llu packets=%llu bytes_in=%llu bytes_out=%llu command_depth=%zu command_peak=%zu task_depth=%zu task_wait_avg=%.3fms task_wait_max=%.3fms epoll_calls=%llu epoll_wait=%.3fms cpu=%.1f%%",
+                 i, atomic_load(&worker->connections), atomic_load(&worker->connections_peak),
+                 (unsigned long long)atomic_load(&worker->accepted),
+                 (unsigned long long)atomic_load(&worker->disconnected),
+                 (unsigned long long)atomic_load(&worker->packets),
+                 (unsigned long long)atomic_load(&worker->bytes_in),
+                 (unsigned long long)atomic_load(&worker->bytes_out),
+                 command_depth, atomic_load(&worker->commands_peak), task_depth,
+                 wait_count ? (double)atomic_load(&worker->task_wait_us) / (double)wait_count / 1000.0 : 0.0,
+                 (double)atomic_load(&worker->task_wait_max_us) / 1000.0,
+                 (unsigned long long)atomic_load(&worker->epoll_calls),
+                 (double)atomic_load(&worker->epoll_wait_us) / 1000.0, cpu_pct);
+    }
+}
+
+static void network_workers_destroy(mc_server_t *s) {
+    for (int i = 0; i < s->network_worker_count; i++) {
+        mc_network_worker_t *worker = &s->workers[i];
+        close(worker->wake_fd);
+        close(worker->epoll_fd);
+        pthread_mutex_destroy(&worker->command_lock);
+    }
+    s->network_worker_count = 0;
+}
+
+static int network_workers_init(mc_server_t *s, int count) {
+    for (int i = 0; i < count; i++) {
+        mc_network_worker_t *worker = &s->workers[i];
+        worker->server = s;
+        worker->index = (unsigned)i;
+        worker->epoll_fd = -1;
+        worker->wake_fd = -1;
+        if (pthread_mutex_init(&worker->command_lock, NULL) != 0) goto fail;
+        worker->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+        if (worker->epoll_fd < 0) goto fail_current;
+        worker->wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (worker->wake_fd < 0 ||
+            add_epoll(worker->epoll_fd, worker->wake_fd, EPOLLIN, worker) != 0) goto fail_current;
+        s->network_worker_count++;
+    }
+    return 0;
+
+fail_current:
+    if (s->workers[s->network_worker_count].wake_fd >= 0) close(s->workers[s->network_worker_count].wake_fd);
+    if (s->workers[s->network_worker_count].epoll_fd >= 0) close(s->workers[s->network_worker_count].epoll_fd);
+    pthread_mutex_destroy(&s->workers[s->network_worker_count].command_lock);
+fail:
+    network_workers_destroy(s);
+    return -1;
+}
+
 int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     if (!out || !cfg) return -1;
 
     mc_server_t *s = (mc_server_t *)calloc(1, sizeof(mc_server_t));
     if (!s) return -1;
     s->wake_fd = -1;
+    s->signal_fd = -1;
     s->cfg = *cfg;
-    if (cfg->max_connections <= 0 || (unsigned)cfg->max_connections > MC_MAX_CONNECTIONS) { free(s); return -1; }
+    if (cfg->max_connections <= 0 || (unsigned)cfg->max_connections > MC_MAX_CONNECTIONS ||
+        (cfg->network_workers != 0 && cfg->network_workers != 1 &&
+         cfg->network_workers != 2 && cfg->network_workers != 4)) { free(s); return -1; }
+    if (s->cfg.network_workers == 0) s->cfg.network_workers = 1;
     s->cfg.difficulty = normalize_difficulty(cfg->difficulty);
-    s->next_entity_id = 1;
+    atomic_init(&s->next_entity_id, 1);
     s->conns = NULL;
     atomic_init(&s->running, false);
+    atomic_init(&s->stop_requested, false);
+    atomic_init(&s->network_error, false);
     atomic_init(&s->difficulty, (int)s->cfg.difficulty);
     atomic_init(&s->network_write_us, 0);
     atomic_init(&s->network_flush_count, 0);
@@ -539,7 +681,8 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
         free(s);
         return -1;
     }
-    log_info("runtime threads: network_owners=1 tick_threads=1 chunk_workers=%d save_workers=0 simulation_workers=0",
+    log_info("runtime threads: acceptor=1 network_owners=%d tick_threads=1 chunk_workers=%d save_workers=0 simulation_workers=0",
+             s->cfg.network_workers,
              mc_world_worker_count(s->world));
 
     s->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -637,6 +780,18 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     if (s->wake_fd < 0 || add_epoll(s->epoll_fd, s->wake_fd, EPOLLIN, &s->wake_fd) != 0) {
         log_error("failed to initialize network wakeup (errno=%d %s)", errno, strerror(errno));
         if (s->wake_fd >= 0) close(s->wake_fd);
+        close(s->epoll_fd);
+        close(s->listen_fd);
+        mc_world_destroy(s->world);
+        mc_task_queue_destroy(&s->task_queue);
+        pthread_mutex_destroy(&s->conns_lock);
+        free(s);
+        return -1;
+    }
+
+    if (network_workers_init(s, s->cfg.network_workers) != 0) {
+        log_error("failed to initialize network workers (errno=%d %s)", errno, strerror(errno));
+        close(s->wake_fd);
         close(s->epoll_fd);
         close(s->listen_fd);
         mc_world_destroy(s->world);
@@ -1216,6 +1371,7 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
 }
 
 static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
+    mc_network_worker_t *worker = &s->workers[c->network_worker_index];
     uint8_t buf[4096];
     for (;;) {
         ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
@@ -1225,6 +1381,7 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
             return -1;
         }
+        atomic_fetch_add(&worker->bytes_in, (uint64_t)n);
         buf_compact(&c->in);
         c->in.limit = MC_MAX_INPUT_BUFFER;
         if (buf_write(&c->in, buf, (size_t)n) != 0) return -1;
@@ -1276,6 +1433,7 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
             free(task);
             return -1;
         }
+        atomic_fetch_add(&worker->packets, 1);
         frame.payload.data = NULL;
         frame.payload.len = 0;
         memset(&frame, 0, sizeof(frame));
@@ -1308,6 +1466,7 @@ static int handle_client_write(mc_conn_t *c) {
         if (n == 0) { pthread_mutex_unlock(&c->out_lock); return -1; }
         c->out.rpos += (size_t)n;
         flushed += (size_t)n;
+        atomic_fetch_add(&c->server->workers[c->network_worker_index].bytes_out, (uint64_t)n);
     }
     buf_compact(&c->out);
     size_t remaining = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
@@ -1320,7 +1479,7 @@ static int handle_client_write(mc_conn_t *c) {
         struct epoll_event ev = {0};
         ev.data.ptr = c;
         ev.events = EPOLLIN | EPOLLET | (remaining ? EPOLLOUT : 0);
-        if (epoll_ctl(c->server->epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) != 0) {
+        if (epoll_ctl(c->server->workers[c->network_worker_index].epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) != 0) {
             pthread_mutex_unlock(&c->out_lock);
             return -1;
         }
@@ -1466,23 +1625,13 @@ static size_t server_sync_remote_players_snapshot(mc_conn_snapshot_t *snapshot, 
     return attempts;
 }
 
-static size_t network_flush_pending(mc_server_t *s) {
-    if (!s) return 0;
+static size_t network_flush_pending(mc_network_worker_t *worker) {
+    if (!worker) return 0;
+    mc_server_t *s = worker->server;
     size_t flushed_conns = 0;
-    mc_conn_t *pending[MC_MAX_CONNECTIONS];
-    size_t pending_len = 0;
-    pthread_mutex_lock(&s->conns_lock);
-    for (mc_conn_t *c = s->conns; c && pending_len < MC_MAX_CONNECTIONS; c = c->next) {
-        conn_acquire(c);
-        pending[pending_len++] = c;
-    }
-    pthread_mutex_unlock(&s->conns_lock);
-    for (size_t i = 0; i < pending_len; i++) {
-        mc_conn_t *c = pending[i];
-        if (atomic_load(&c->detached)) {
-            conn_release(c);
-            continue;
-        }
+    mc_conn_t *c = worker->owned;
+    while (c) {
+        mc_conn_t *next = c->owner_next;
         pthread_mutex_lock(&c->out_lock);
         bool had_pending = c->out.len > c->out.rpos;
         pthread_mutex_unlock(&c->out_lock);
@@ -1490,7 +1639,7 @@ static size_t network_flush_pending(mc_server_t *s) {
             flushed_conns++;
             if (handle_client_write(c) != 0) server_close_conn(s, c);
         }
-        conn_release(c);
+        c = next;
     }
     return flushed_conns;
 }
@@ -1503,6 +1652,7 @@ static size_t server_process_queued_tasks(mc_server_t *s, int64_t now, const cha
     while (task) {
         mc_task_t *next = task->next;
         task_count++;
+        network_worker_record_task_wait(s, task, now);
         if (debug_net_latency_enabled()) {
             int64_t wait_ms = task->enqueue_ms > 0 ? now - task->enqueue_ms : 0;
             if (wait_ms < 0) wait_ms = 0;
@@ -1645,6 +1795,7 @@ static void *tick_thread_main(void *arg) {
         while (task) {
             mc_task_t *next = task->next;
             task_count++;
+            network_worker_record_task_wait(s, task, now);
             if (perf && task->enqueue_ms > 0) {
                 int64_t wait_us = (now - task->enqueue_ms) * 1000;
                 if (wait_us < 0) wait_us = 0;
@@ -1889,6 +2040,7 @@ static void *tick_thread_main(void *arg) {
                              (unsigned long long)summary_proto_ticks,
                              (unsigned long long)summary_remote_syncs,
                              (unsigned long long)summary_resyncs);
+                    log_network_workers_stats(s);
                     summary_total = (perf_accum_t){0};
                     summary_late = (perf_accum_t){0};
                     summary_task = (perf_accum_t){0};
@@ -1931,44 +2083,165 @@ static void *tick_thread_main(void *arg) {
     return NULL;
 }
 
-static void server_cleanup(mc_server_t *s) {
-    mc_conn_t *to_close[MC_MAX_CONNECTIONS];
-    size_t to_close_len = 0;
-    pthread_mutex_lock(&s->conns_lock);
-    for (mc_conn_t *c = s->conns; c && to_close_len < MC_MAX_CONNECTIONS; c = c->next) {
-        if (!c->closing) continue;
-        pthread_mutex_lock(&c->out_lock);
-        bool can_close = c->abort_io || (c->out.len == 0);
-        pthread_mutex_unlock(&c->out_lock);
-        if (can_close) to_close[to_close_len++] = c;
-    }
-    pthread_mutex_unlock(&s->conns_lock);
+static void worker_update_peak(atomic_size_t *peak, size_t value) {
+    size_t old = atomic_load(peak);
+    while (value > old && !atomic_compare_exchange_weak(peak, &old, value)) {}
+}
 
-    for (size_t i = 0; i < to_close_len; i++) {
-        server_close_conn(s, to_close[i]);
+static void network_worker_enqueue(mc_network_worker_t *worker, mc_conn_t *c) {
+    pthread_mutex_lock(&worker->command_lock);
+    c->pending_next = NULL;
+    if (worker->command_tail) worker->command_tail->pending_next = c;
+    else worker->command_head = c;
+    worker->command_tail = c;
+    worker->command_len++;
+    worker_update_peak(&worker->commands_peak, worker->command_len);
+    pthread_mutex_unlock(&worker->command_lock);
+    wake_eventfd(worker->wake_fd);
+}
+
+static void network_worker_drain_commands(mc_network_worker_t *worker, bool stop) {
+    pthread_mutex_lock(&worker->command_lock);
+    mc_conn_t *list = worker->command_head;
+    worker->command_head = NULL;
+    worker->command_tail = NULL;
+    worker->command_len = 0;
+    pthread_mutex_unlock(&worker->command_lock);
+    while (list) {
+        mc_conn_t *c = list;
+        list = c->pending_next;
+        c->pending_next = NULL;
+        if (stop || add_epoll(worker->epoll_fd, c->fd, EPOLLIN | EPOLLET | EPOLLRDHUP, c) != 0) {
+            server_close_conn(worker->server, c);
+            continue;
+        }
+        c->owner_registered = true;
+        c->owner_next = worker->owned;
+        worker->owned = c;
+        size_t current = atomic_fetch_add(&worker->connections, 1) + 1;
+        worker_update_peak(&worker->connections_peak, current);
+        atomic_fetch_add(&worker->accepted, 1);
     }
+}
+
+static void server_cleanup(mc_network_worker_t *worker, bool force) {
+    mc_server_t *s = worker->server;
+    for (mc_conn_t *c = worker->owned; c;) {
+        mc_conn_t *next = c->owner_next;
+        if (!force && !atomic_load(&c->closing)) {
+            c = next;
+            continue;
+        }
+        pthread_mutex_lock(&c->out_lock);
+        bool can_close = force || c->abort_io || (c->out.len == 0);
+        pthread_mutex_unlock(&c->out_lock);
+        if (can_close) server_close_conn(s, c);
+        c = next;
+    }
+}
+
+static void *network_worker_main(void *arg) {
+    mc_network_worker_t *worker = (mc_network_worker_t *)arg;
+    mc_server_t *s = worker->server;
+    struct epoll_event events[MAX_EVENTS];
+    while (!atomic_load(&s->stop_requested)) {
+        int64_t wait_start_us = mc_now_us();
+        int n = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, 1000);
+        atomic_fetch_add(&worker->epoll_wait_us, (uint64_t)(mc_now_us() - wait_start_us));
+        atomic_fetch_add(&worker->epoll_calls, 1);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            log_error("network worker %u epoll_wait failed (errno=%d %s)", worker->index, errno, strerror(errno));
+            atomic_store(&s->network_error, true);
+            atomic_store(&s->stop_requested, true);
+            wake_eventfd(s->wake_fd);
+            break;
+        }
+        for (int i = 0; i < n; i++) {
+            if (events[i].data.ptr == worker) {
+                uint64_t count;
+                while (read(worker->wake_fd, &count, sizeof(count)) > 0) {}
+                network_worker_drain_commands(worker, false);
+                int64_t start_us = mc_now_us();
+                size_t flushed = network_flush_pending(worker);
+                atomic_fetch_add(&s->network_flush_count, flushed);
+                atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
+                continue;
+            }
+            mc_conn_t *c = (mc_conn_t *)events[i].data.ptr;
+            if (atomic_load(&c->detached)) continue;
+            if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+                server_close_conn(s, c);
+                continue;
+            }
+            if (events[i].events & EPOLLOUT) {
+                int64_t start_us = mc_now_us();
+                int rc = handle_client_write(c);
+                atomic_fetch_add(&s->network_flush_count, 1);
+                atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
+                if (rc != 0) { server_close_conn(s, c); continue; }
+            }
+            if (events[i].events & EPOLLIN) {
+                if (handle_client_read(s, c) != 0) { server_close_conn(s, c); continue; }
+            }
+            if (events[i].events & EPOLLRDHUP) server_close_conn(s, c);
+        }
+        server_cleanup(worker, false);
+        server_release_retired(worker);
+    }
+    network_worker_drain_commands(worker, true);
+    server_cleanup(worker, true);
+    server_release_retired(worker);
+    return NULL;
 }
 
 int net_server_run(mc_server_t *s) {
     if (!s) return -1;
+    sigset_t shutdown_signals;
+    sigemptyset(&shutdown_signals);
+    sigaddset(&shutdown_signals, SIGINT);
+    sigaddset(&shutdown_signals, SIGTERM);
+    s->signal_fd = signalfd(-1, &shutdown_signals, SFD_NONBLOCK | SFD_CLOEXEC);
+    if (s->signal_fd < 0 || add_epoll(s->epoll_fd, s->signal_fd, EPOLLIN, &s->signal_fd) != 0) {
+        log_error("failed to initialize shutdown signalfd (errno=%d %s)", errno, strerror(errno));
+        return -1;
+    }
+    atomic_store(&s->stop_requested, false);
     atomic_store(&s->running, true);
     if (pthread_create(&s->tick_thread, NULL, tick_thread_main, s) != 0) {
         atomic_store(&s->running, false);
         return -1;
     }
+    int started = 0;
+    for (int i = 0; i < s->network_worker_count; i++) {
+        s->workers[i].started_us = mc_now_us();
+        if (pthread_create(&s->workers[i].thread, NULL, network_worker_main, &s->workers[i]) != 0) {
+            atomic_store(&s->stop_requested, true);
+            break;
+        }
+        started++;
+    }
+    if (started != s->network_worker_count) {
+        for (int i = 0; i < started; i++) wake_eventfd(s->workers[i].wake_fd);
+        for (int i = 0; i < started; i++) pthread_join(s->workers[i].thread, NULL);
+        atomic_store(&s->running, false);
+        pthread_join(s->tick_thread, NULL);
+        return -1;
+    }
     struct epoll_event events[MAX_EVENTS];
 
-    while (atomic_load(&s->running)) {
+    while (!atomic_load(&s->stop_requested)) {
         int n = epoll_wait(s->epoll_fd, events, MAX_EVENTS, 1000);
         if (n < 0) {
             if (errno == EINTR) continue;
-            atomic_store(&s->running, false);
+            atomic_store(&s->network_error, true);
+            atomic_store(&s->stop_requested, true);
             break;
         }
 
         for (int i = 0; i < n; i++) {
             if (events[i].data.ptr == s) {
-                for (;;) {
+                while (!atomic_load(&s->stop_requested)) {
                     struct sockaddr_in caddr;
                     socklen_t clen = sizeof(caddr);
                     int cfd = accept(s->listen_fd, (struct sockaddr *)&caddr, &clen);
@@ -1980,57 +2253,39 @@ int net_server_run(mc_server_t *s) {
                         close(cfd);
                         continue;
                     }
-                    mc_conn_t *c = conn_create(s, cfd);
+                    unsigned worker_index = s->next_worker++ % (unsigned)s->network_worker_count;
+                    mc_conn_t *c = conn_create(s, cfd, worker_index);
                     if (!c) {
                         close(cfd);
                         continue;
                     }
-                    if (add_epoll(s->epoll_fd, cfd, EPOLLIN | EPOLLET, c) != 0) server_close_conn(s, c);
+                    network_worker_enqueue(&s->workers[worker_index], c);
                 }
             } else if (events[i].data.ptr == &s->wake_fd) {
                 uint64_t count;
                 while (read(s->wake_fd, &count, sizeof(count)) > 0) {}
-                int64_t start_us = mc_now_us();
-                size_t flushed = network_flush_pending(s);
-                atomic_fetch_add(&s->network_flush_count, flushed);
-                atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
-            } else {
-                mc_conn_t *c = (mc_conn_t *)events[i].data.ptr;
-                if (atomic_load(&c->detached)) continue;
-                if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-                    server_close_conn(s, c);
-                    continue;
+            } else if (events[i].data.ptr == &s->signal_fd) {
+                struct signalfd_siginfo signal_info;
+                while (read(s->signal_fd, &signal_info, sizeof(signal_info)) == sizeof(signal_info)) {
+                    net_server_stop(s);
                 }
-                if (events[i].events & EPOLLOUT) {
-                    int64_t start_us = mc_now_us();
-                    int rc = handle_client_write(c);
-                    atomic_fetch_add(&s->network_flush_count, 1);
-                    atomic_fetch_add(&s->network_write_us, (uint64_t)(mc_now_us() - start_us));
-                    if (rc != 0) { server_close_conn(s, c); continue; }
-                }
-                if (events[i].events & EPOLLIN) {
-                    if (handle_client_read(s, c) != 0) {
-                        server_close_conn(s, c);
-                        continue;
-                    }
-                }
-                if (events[i].events & EPOLLRDHUP) server_close_conn(s, c);
             }
         }
-
-        server_cleanup(s);
-        server_release_retired(s);
     }
 
+    atomic_store(&s->stop_requested, true);
+    for (int i = 0; i < s->network_worker_count; i++) wake_eventfd(s->workers[i].wake_fd);
+    for (int i = 0; i < s->network_worker_count; i++) pthread_join(s->workers[i].thread, NULL);
     atomic_store(&s->running, false);
     pthread_join(s->tick_thread, NULL);
-    return 0;
+    return atomic_load(&s->network_error) ? -1 : 0;
 }
 
 void net_server_stop(mc_server_t *s) {
     if (!s) return;
-    atomic_store(&s->running, false);
-    server_wake_network(s);
+    atomic_store(&s->stop_requested, true);
+    wake_eventfd(s->wake_fd);
+    for (int i = 0; i < s->network_worker_count; i++) wake_eventfd(s->workers[i].wake_fd);
 }
 
 void net_server_destroy(mc_server_t *s) {
@@ -2047,7 +2302,7 @@ void net_server_destroy(mc_server_t *s) {
         conn_destroy(c);
         c = next;
     }
-    server_release_retired(s);
+    for (int i = 0; i < s->network_worker_count; i++) server_release_retired(&s->workers[i]);
     c = s->departures;
     while (c) {
         mc_conn_t *next = c->departure_next;
@@ -2057,7 +2312,9 @@ void net_server_destroy(mc_server_t *s) {
     }
     close(s->epoll_fd);
     close(s->wake_fd);
+    if (s->signal_fd >= 0) close(s->signal_fd);
     close(s->listen_fd);
+    network_workers_destroy(s);
     for (size_t i = 0; i < s->item_entities_len; i++) {
         mc_slot_clear(&s->item_entities[i].slot);
     }

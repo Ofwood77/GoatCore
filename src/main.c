@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #define SERVER_CONFIG_PATH "server.config"
@@ -266,14 +268,15 @@ int main(void) {
         log_error("CPU setup: %s", setup_error);
         return 1;
     }
-    log_info("CPU setup: file=%s Linux_online=%d Linux_cpuset=%d allowed=%d CPUs=%s network_workers=1 chunk_workers=%d save_workers=0 simulation_workers=0 tick_rate=20",
+    log_info("CPU setup: file=%s Linux_online=%d Linux_cpuset=%d allowed=%d CPUs=%s network_workers=%d chunk_workers=%d save_workers=0 simulation_workers=0 tick_rate=20",
              setup_path, setup.linux_online_cpus, setup.linux_available_cpus, setup.allowed_cpus, setup.allowed_cpu_list,
-             mc_setup_resolve_chunk_workers(&setup));
+             setup.network_workers, mc_setup_resolve_chunk_workers(&setup));
 
     mc_server_config_t cfg = {0};
     cfg.bind_ip = NULL;
     cfg.bind_port = 25565;
     cfg.max_connections = 128;
+    cfg.network_workers = setup.network_workers;
     cfg.chunk_workers = mc_setup_resolve_chunk_workers(&setup);
     cfg.compression_threshold = -1;
     cfg.online_mode = false;
@@ -346,6 +349,16 @@ int main(void) {
     }
 
     mc_server_t *srv = NULL;
+    /* Block process-directed shutdown signals before the world and network
+     * threads exist; the acceptor consumes them through signalfd. */
+    sigset_t shutdown_signals;
+    sigemptyset(&shutdown_signals);
+    sigaddset(&shutdown_signals, SIGINT);
+    sigaddset(&shutdown_signals, SIGTERM);
+    if (pthread_sigmask(SIG_BLOCK, &shutdown_signals, NULL) != 0) {
+        log_error("failed to block shutdown signals");
+        return 1;
+    }
     if (net_server_init(&srv, &cfg) != 0) {
         log_error("failed to init server");
         return 1;

@@ -656,7 +656,8 @@ async def run(args):
             args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(summary, end="")
         print(f"Reports: {result_dir}")
-        return 1 if (report["bots_not_started"] or report["connections_failed"] or
+        return 1 if (report["connected_successfully"] != args.bots or
+                     report["bots_not_started"] or report["connections_failed"] or
                      report["unexpected_disconnects"] or report["actions_failed"]) else 0
 
 

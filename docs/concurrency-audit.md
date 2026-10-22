@@ -143,10 +143,78 @@ profile service under a 25-bot mixed load completed cleanly; the bot harness
 correctly reported 25 expected disconnects because the server was stopped.
 The new setup and world consistency tests passed under ASan/UBSan and TSan.
 
-Network-worker sharding remains a separate architecture change: it needs
-one epoll instance and eventfd per owner, stable fd-to-owner assignment,
-per-owner queues and backpressure, and a cross-owner broadcast path that
-cannot acquire connection locks in reverse order. A simulation pool would
-also need region ownership and ordered cross-region commits; merely starting
-threads would race the tick-owned world and player state. Neither feature is
-exposed in the setup file until those invariants and full E2E tests exist.
+At this stage, network-worker sharding was deferred until the ownership
+changes and E2E tests described below. A simulation pool still needs region
+ownership and ordered cross-region commits; merely starting threads would
+race the tick-owned world and player state.
+
+## Multi-epoll socket ownership (2026-10-19)
+
+The previous network design had one thread that accepted clients, performed
+all `epoll_wait`/`epoll_ctl`, and sent/received every socket. The tick thread
+already owned gameplay and world mutation. The new design retains that tick
+ownership but splits networking into an acceptor and 1, 2, or 4 independent
+epoll workers. The acceptor assigns each accepted fd round-robin and hands it
+off through that worker's mutex-protected, globally bounded command queue and
+eventfd. Only the assigned worker adds/modifies/deletes that fd in its epoll,
+calls `recv`/`send`, and closes the socket. A connection never migrates.
+Outbound packet construction still occurs on the tick thread under each
+connection's `out_lock`; the empty-to-nonempty transition wakes its owner.
+Each owner keeps its own live list and retired list so pointers from a closed
+connection remain valid until the entire `epoll_wait` batch is processed.
+The global connection list remains for tick-side snapshots, but no global
+mutex is held during socket I/O. Entity IDs are now allocated atomically.
+The existing 8192-task and 32 MiB/connection output limits remain in force;
+the accept handoff queue cannot exceed the configured connection cap.
+
+Shutdown signals are blocked before world/thread creation and consumed by
+the acceptor through `signalfd`. It stops accepting, wakes and joins every
+network worker, lets the tick drain departure cleanup, then joins the tick.
+The 20 TPS tick is not parallelized. All workers inherit the process CPU
+affinity, without pinning a worker to a dedicated CPU.
+
+Integration tests used 81 short TCP clients per configuration, with status,
+ping/pong, early disconnect, incomplete frames, and rapid reconnection. The
+observed accept counts were 81 (one worker), 41/40 (two), and 21/20/20/20
+(four); every connection was detached at shutdown. Four workers also passed
+with only one logical CPU allowed. A separate 100-socket incomplete-frame
+shutdown test verified all sockets closed. The bounded task queue has a new
+unit test. The integration test passed under ASan/UBSan and TSan on this
+host; sanitizer coverage does not prove absence of all races.
+
+A reproducible local comparison is in
+`tests/stress/benchmark_network.py`. It used fresh seed-0 flat worlds,
+the same chunk-worker count (2), and 50 connect bots for 12 requested
+seconds, sequentially on the same 8-CPU laptop. Each run connected all
+50 bots without an unexpected disconnect and received 22,050 chunks.
+The most active 100-tick `MC_PERF` window in each run was:
+
+| Network workers | TPS | P95/P99 MSPT | Ticks >50 ms | Mean first chunk |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 18.41 | 66.5/88.0 ms | 7 | 0.095 s |
+| 2 | 18.14 | 70.6/82.5 ms | 7 | 0.112 s |
+| 4 | 18.38 | 58.0/83.2 ms | 6 | 0.119 s |
+
+The network workers consumed roughly 1.28 GB of outgoing data per run,
+about 105 MB/s over the bot session, spread across 1/2/4 owners; their
+per-worker packet, byte, task-wait, epoll-wait, and CPU counters are in the
+benchmark logs. These short, fresh-world runs show no demonstrated TPS or
+first-chunk improvement from extra network workers. The tick's chunk and
+player processing remains the likely bottleneck; isolating network work may
+matter at other traffic patterns, but that has not been established here.
+
+Additional local gameplay checks passed without unexpected disconnects:
+25 moving bots on both 2 and 4 workers sent 1,695 movement packets each;
+10 block bots verified 57 placements and 57 breaks on both 2 and 4 workers.
+The one-worker regression sent 563 movement packets with 10 bots and
+verified 43 placements and 43 breaks in a separate run. The four-worker
+configuration also connected all 100 bots over a 15-second run. Movement
+packet counts are not client-side visual confirmation.
+
+Remaining risks: player-state reads outside the tick thread and some
+tick-side broadcasts under `conns_lock` predate this change and need a
+separate ownership audit. The shared inbound task queue can still make a
+tick overrun under burst load. Before parallel simulation, partition world
+state into regions, give each region one writer, define ordered cross-region
+messages/commits, and test deterministic results and persistence. Starting
+simulation threads without those rules would be unsafe.
