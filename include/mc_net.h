@@ -73,6 +73,7 @@ struct mc_conn {
     bool owner_registered; /* network owner only */
     void (*notify_output)(struct mc_conn *c);
     atomic_int refcount;
+    int64_t accepted_ms; /* monotonic; all pre-PLAY states have a finite deadline */
 
     /* Login/config/play identity and lifecycle flags. */
     char username[17];
@@ -170,6 +171,7 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold);
 void conn_close(mc_conn_t *c);
 mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name);
+bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]);
 void net_server_release_conn(mc_conn_t *conn);
 mc_world_t *net_server_world(mc_server_t *server);
 

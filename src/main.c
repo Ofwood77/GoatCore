@@ -21,6 +21,7 @@
 #define DEFAULT_DIFFICULTY MC_DIFFICULTY_NORMAL
 #define DEFAULT_PVP_ENABLED true
 #define DEFAULT_KEEP_INVENTORY false
+#define DEFAULT_ONLINE_MODE false
 
 typedef struct {
     int64_t level_seed;
@@ -29,6 +30,7 @@ typedef struct {
     mc_difficulty_t difficulty;
     bool pvp_enabled;
     bool keep_inventory;
+    bool online_mode;
 } server_disk_config_t;
 
 static void trim_ws(char *s) {
@@ -58,6 +60,7 @@ static int write_default_server_config(const char *path) {
     fprintf(f, "difficulty=%s\n", mc_difficulty_name(DEFAULT_DIFFICULTY));
     fprintf(f, "pvp=%s\n", DEFAULT_PVP_ENABLED ? "true" : "false");
     fprintf(f, "keep_inventory=%s\n", DEFAULT_KEEP_INVENTORY ? "true" : "false");
+    fprintf(f, "online-mode=%s\n", DEFAULT_ONLINE_MODE ? "true" : "false");
     if (fclose(f) != 0) {
         int e = errno;
         log_error("failed to write %s (errno=%d %s)", path, e, strerror(e));
@@ -122,6 +125,7 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     out->difficulty = DEFAULT_DIFFICULTY;
     out->pvp_enabled = DEFAULT_PVP_ENABLED;
     out->keep_inventory = DEFAULT_KEEP_INVENTORY;
+    out->online_mode = DEFAULT_ONLINE_MODE;
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -184,6 +188,14 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
         if (strcmp(key, "keep_inventory") == 0 || strcmp(key, "keep-inventory") == 0) {
             if (parse_bool_value(val, &out->keep_inventory) != 0) {
                 log_error("invalid keep_inventory in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
+                return -1;
+            }
+            continue;
+        }
+
+        if (strcmp(key, "online-mode") == 0) {
+            if (parse_bool_value(val, &out->online_mode) != 0) {
+                log_error("invalid online-mode in %s: '%s' (expected true/false)", SERVER_CONFIG_PATH, val);
                 return -1;
             }
             continue;
@@ -279,7 +291,11 @@ int main(void) {
     cfg.network_workers = setup.network_workers;
     cfg.chunk_workers = mc_setup_resolve_chunk_workers(&setup);
     cfg.compression_threshold = -1;
-    cfg.online_mode = false;
+    cfg.online_mode = disk_cfg.online_mode;
+    if (cfg.online_mode) {
+        log_error("online-mode=true is not yet supported: encrypted login and Mojang session verification are missing; refusing to start");
+        return 1;
+    }
     cfg.debug_packets = false;
     cfg.admin_commands = getenv("MC_ADMIN_COMMANDS") && strcmp(getenv("MC_ADMIN_COMMANDS"), "1") == 0;
     cfg.admin_username = getenv("MC_ADMIN_USERNAME");
