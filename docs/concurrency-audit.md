@@ -218,3 +218,108 @@ tick overrun under burst load. Before parallel simulation, partition world
 state into regions, give each region one writer, define ordered cross-region
 messages/commits, and test deterministic results and persistence. Starting
 simulation threads without those rules would be unsafe.
+
+## Tick-path audit and chunk-refresh optimization (2026-10-22)
+
+The network architecture remains acceptor + 1/2/4 epoll owners + one
+authoritative 20 TPS tick + chunk workers. No save or simulation worker has
+been enabled. The tick drains the shared FIFO both at fixed ticks and in fast
+packet passes between them; chunk integration, bounded periodic persistence,
+furnaces, player protocol ticks, item entities and broadcasts remain serial.
+`MC_PERF` now separates handler/fast-pass time, per-PLAY-packet cost, periodic
+chunk saves, explicit `mc_world_flush_block` calls, world integration, tick
+CPU and selected mutex waits. The queue records peak depth and producer/
+consumer lock time only while profiling is enabled. The previous lazy
+initialization of `MC_PERF` options raced when chunk and tick threads called
+it concurrently; it now uses `pthread_once`. UBSan on a block workload also
+found undefined behavior in the tick's keep-set key for negative chunk X
+coordinates (`int64_t` left shift). It now packs two unsigned 32-bit
+coordinates, matching the world chunk-map key.
+
+On a fresh flat world with 50 `fastblocks` bots, the pre-change instrumented
+run had a fully populated 100-tick window at TPS 19.55, P95/P99 54.9/62.7 ms
+and 7 ticks >50 ms. Its queue peaked at 142/8192, rejected no task, and
+recorded only 0.86 ms total producer mutex wait over 15,898 packets. The
+handler total includes fast passes, so its 36.6 ms/tick-window average must
+*not* be added to the scheduled tick's 14.6 ms average. Periodic saves took
+0.52 ms/tick on average; explicit block flushes another 3.9 ms/tick; item
+entities 3.9 ms/tick. During the busy window, 3,001
+`SERVERBOUND_PONG` handlers consumed 2,121 ms cumulatively. A PONG rescanned
+the player's entire sent-chunk set to refresh container block entities,
+although most flat chunks contain none. This—not the task-queue mutex—was a
+measured critical-path cost. Block placement and break handlers, item physics,
+and outbound buffering remain substantial costs.
+
+`send_chunk_ready` now sends the post-stream refresh ping only if the chunk
+actually serialized one or more block entities. Chunks without containers
+still send their full chunk data, and ordinary block changes still use the
+existing update path. The ping/PONG refresh path remains for container chunks;
+it has not been removed or replaced with an unverified client-side assumption.
+
+The benchmark helper now accepts the same executable, worker count, mode,
+duration, bot count, and optional copied world template for paired tests.
+It reports the worst *fully populated* 100-tick P95 window as well as the
+previous maximum-player window, because a late idle window can hide an
+earlier spike. The following paired 15-second 50-bot runs used one network
+worker, two chunk workers, the same CPU mask, seed-0 disposable flat worlds,
+the same stress client, and a 400/s aggregate place/break cap. “Warm” means
+each binary received an identical copy of a previously generated world, not
+that it reused the other's mutated world.
+
+| Initial world / binary | Verified place+break | TPS, worst active 100 ticks | P95/P99 MSPT | Ticks >50 ms | Unexpected disconnects |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fresh / `28c8f827` | 2302+2302 (1 action failure) | 19.60 | 57.5/68.0 ms | 9 | 0 |
+| Fresh / optimized | 2019+2019 | 19.98 | 22.0/27.6 ms | 0 | 0 |
+| Copied world / `28c8f827` | 2085+2085 | 18.24 | 63.3/96.8 ms | 11 | 0 |
+| Copied world / optimized | 1907+1907 | 19.91 | 24.6/50.1 ms | 2 | 0 |
+
+All four runs delivered 22,050 chunks. The completed block-operation counts
+differ by about 9–12%; these are short end-to-end samples, **not** a
+same-number-of-actions throughput proof. They support a reduction in the
+specific ping/PONG scan cost and in measured tick tails, but do not establish
+scaling under arbitrary gameplay. The Python bot and network output (~1.4 GB
+per run) can influence the results. Per-run reports and server logs are in
+`tests/stress/results/network-benchmark-20261022T061930Z` (reference copied
+world) and `network-benchmark-20261022T061949Z` (optimized copied world),
+with fresh-world runs at `...T061835Z` and `...T061556Z` respectively.
+
+Async saves are deferred: measured periodic saves are below 1 ms/tick here,
+and the current persistence path writes individual `chunks/c_x_z.bin` files
+with `fopen("wb")` after NBT encoding/compression. A correct save worker needs
+immutable versioned snapshots, same-chunk read/write exclusion, atomic file
+replacement, bounded queue/backpressure, eviction gating, and a shutdown
+barrier; simply sending the live chunk to another thread would race the tick
+and could lose data. `save_workers` remains rejected by setup validation.
+The first candidate for parallel simulation is item physics, but it currently
+reads live chunks and combines collision, pickup, inventory changes and
+broadcasts inside one pass. It needs a stable snapshot and deterministic
+single-threaded commit before `simulation_workers` can safely be accepted.
+
+Remaining lock risks: `conns_lock` still protects item-entity broadcasts and
+some administrative/container operations while outbound packet buffers are
+filled. The item list and player gameplay fields are tick-owned, whereas the
+connection list, lifetime and outbound buffers are cross-thread resources.
+The task queue is globally shared but its observed contention did not justify
+an MPSC or lock-free rewrite; fairness under one malicious high-rate player
+is not yet proven. `out_lock` and the world job/completion queues deserve
+targeted contention measurements under different workloads. No tick-region
+threads or parallel item physics are introduced by this change.
+
+Validation on this step: `make -B precommit-check` passed, including the
+new concurrent performance-config test, task queue test, world consistency
+tests, chunk codec tests and the 1/2/4-worker epoll integration/shutdown
+cases. ASan+UBSan unit tests for these changed paths and multi-epoll
+integration passed. The first ASan+UBSan 10-bot block run stopped at the
+negative-shift UBSan finding above; after the fix, 10 bots verified 30 places
+and 30 breaks with no sanitizer report, action error or disconnect. TSan
+unit tests and multi-epoll integration passed; a separate 10-bot movement
+run sent 750 movements with no TSan report or unexpected disconnect. Its
+11 TPS is sanitizer overhead, not a production benchmark. A normal 4-worker
+100-bot movement run sent 6,933 movements, received 42,557 chunks, had no
+unexpected disconnect, and reported TPS 19.95 with P95/P99 23.9/27.0 ms in
+the fully populated window. A one-bot connect run received 441 chunks with
+no error at TPS 19.96. A 2-worker 25-bot mixed run verified 84 places
+and breaks without error, but sent no movement packets, so it does not
+validate mixed-mode movement. The sanitizer and stress runs cover sampled
+interleavings, not a proof of race freedom or durable shutdown under active
+world writes.

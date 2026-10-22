@@ -6450,7 +6450,10 @@ static int send_chunk_ready(mc_conn_t *c, mc_world_t *world, int32_t cx, int32_t
     if (hm_owned) free(hm);
     buf_free(&payload);
     buf_free(&chunkdata);
-    if (rc == 0) {
+    /* The post-stream ping exists only to refresh container block entities.
+     * Flat chunks contain none; pinging for each one made every PONG scan the
+     * viewer's entire sent-chunk set and dominated busy join windows. */
+    if (rc == 0 && block_entity_count > 0) {
         span_start_us = perf ? mc_now_us() : 0;
         rc = maybe_send_chunk_refresh_ping(c);
         if (perf) refresh_ping_us = mc_now_us() - span_start_us;
