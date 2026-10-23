@@ -210,6 +210,9 @@ int main(void) {
     original.pos_z = -12.3;
     original.yaw = 90.0f;
     original.pitch = 0.0f;
+    original.experience_progress = 0.4f;
+    original.experience_level = 7;
+    original.experience_total = 120;
     original.inventory.selected_hotbar_slot = 2;
     original.inventory.state_id = 7;
     original.ender_state_id = 3;
@@ -276,6 +279,9 @@ int main(void) {
         check(same_f64(loaded.pos_z, original.pos_z), "position z") != 0 ||
         check(same_f32(loaded.yaw, original.yaw), "yaw") != 0 ||
         check(same_f32(loaded.pitch, original.pitch), "pitch") != 0 ||
+        check(same_f32(loaded.experience_progress, original.experience_progress), "experience progress") != 0 ||
+        check(loaded.experience_level == original.experience_level, "experience level") != 0 ||
+        check(loaded.experience_total == original.experience_total, "experience total") != 0 ||
         check(loaded.inventory.selected_hotbar_slot == original.inventory.selected_hotbar_slot, "selected slot") != 0 ||
         check(same_slot(&loaded.inventory.slots[0], &original.inventory.slots[0]), "inventory slot 0") != 0 ||
         check(same_slot(&loaded.inventory.slots[10], &original.inventory.slots[10]), "inventory slot 10") != 0 ||

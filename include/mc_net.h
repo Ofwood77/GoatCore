@@ -51,6 +51,10 @@ typedef struct {
     float yaw;
     float pitch;
     float head_yaw;
+    bool has_last_base_flags;
+    uint8_t base_flags;
+    bool has_last_pose;
+    bool crouching;
     bool has_last_living_flags;
     uint8_t living_flags;
     bool has_last_equipment;
@@ -106,6 +110,8 @@ struct mc_conn {
     float food_saturation;
     float food_exhaustion;
     bool is_using_item;
+    bool sneaking;
+    bool sprinting;
     bool use_item_input_held;
     int32_t using_hand;
     int32_t using_slot;

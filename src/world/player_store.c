@@ -438,6 +438,9 @@ static int player_build_nbt(const mc_player_data_t *player, mc_nbt_tag_t **out_r
         compound_add(root, nbt_new_int("foodLevel", player->food_level)) != 0 ||
         compound_add(root, nbt_new_float("foodSaturationLevel", player->food_saturation)) != 0 ||
         compound_add(root, nbt_new_float("foodExhaustionLevel", player->food_exhaustion)) != 0 ||
+        compound_add(root, nbt_new_float("XpP", player->experience_progress)) != 0 ||
+        compound_add(root, nbt_new_int("XpLevel", player->experience_level)) != 0 ||
+        compound_add(root, nbt_new_int("XpTotal", player->experience_total)) != 0 ||
         compound_add(root, nbt_new_int("SelectedItemSlot", player->inventory.selected_hotbar_slot)) != 0 ||
         compound_add(root, nbt_new_int("mcInventoryStateId", player->inventory.state_id)) != 0 ||
         compound_add(root, nbt_new_int("mcEnderStateId", player->ender_state_id)) != 0 ||
@@ -469,6 +472,9 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
     const mc_nbt_tag_t *food_level;
     const mc_nbt_tag_t *food_saturation;
     const mc_nbt_tag_t *food_exhaustion;
+    const mc_nbt_tag_t *xp_progress;
+    const mc_nbt_tag_t *xp_level;
+    const mc_nbt_tag_t *xp_total;
     const mc_nbt_tag_t *selected;
     const mc_nbt_tag_t *inventory_state;
     const mc_nbt_tag_t *ender_state;
@@ -516,6 +522,13 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
 
     food_exhaustion = mc_nbt_compound_get(root, "foodExhaustionLevel");
     if (food_exhaustion) (void)nbt_num_to_f32(food_exhaustion, &out->food_exhaustion);
+
+    xp_progress = mc_nbt_compound_get(root, "XpP");
+    if (xp_progress) (void)nbt_num_to_f32(xp_progress, &out->experience_progress);
+    xp_level = mc_nbt_compound_get(root, "XpLevel");
+    if (xp_level) (void)nbt_num_to_i32(xp_level, &out->experience_level);
+    xp_total = mc_nbt_compound_get(root, "XpTotal");
+    if (xp_total) (void)nbt_num_to_i32(xp_total, &out->experience_total);
 
     selected = mc_nbt_compound_get(root, "SelectedItemSlot");
     if (selected) (void)nbt_num_to_i32(selected, &out->inventory.selected_hotbar_slot);

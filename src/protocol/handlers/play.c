@@ -49,6 +49,7 @@
 #define PKT_PLAY_CHUNK_DATA MC_PKT_PLAY_CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT
 #define PKT_PLAY_KEEPALIVE MC_PKT_PLAY_CLIENTBOUND_KEEP_ALIVE
 #define PKT_PLAY_SET_HEALTH MC_PKT_PLAY_CLIENTBOUND_SET_HEALTH
+#define PKT_PLAY_SET_EXPERIENCE MC_PKT_PLAY_CLIENTBOUND_SET_EXPERIENCE
 #define PKT_PLAY_ENTITY_METADATA MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_DATA
 #define PKT_PLAY_SYNC_POS MC_PKT_PLAY_CLIENTBOUND_PLAYER_POSITION
 #define PKT_PLAY_PLAYER_ABILITIES MC_PKT_PLAY_CLIENTBOUND_PLAYER_ABILITIES
@@ -100,6 +101,10 @@
 #define PKT_PLAY_CHANGE_DIFFICULTY MC_PKT_PLAY_CLIENTBOUND_CHANGE_DIFFICULTY
 #define PKT_PLAY_SYSTEM_CHAT MC_PKT_PLAY_CLIENTBOUND_SYSTEM_CHAT
 #define PKT_PLAY_SET_EQUIPMENT MC_PKT_PLAY_CLIENTBOUND_SET_EQUIPMENT
+#define PKT_PLAY_ANIMATE MC_PKT_PLAY_CLIENTBOUND_ANIMATE
+#define PKT_PLAY_SWING_SB MC_PKT_PLAY_SERVERBOUND_SWING
+#define PKT_PLAY_PLAYER_INPUT_SB MC_PKT_PLAY_SERVERBOUND_PLAYER_INPUT
+#define PKT_PLAY_PLAYER_COMMAND_SB MC_PKT_PLAY_SERVERBOUND_PLAYER_COMMAND
 #define PKT_PLAY_INTERACT_SB MC_PKT_PLAY_SERVERBOUND_INTERACT
 #define PKT_PLAY_CHUNK_BATCH_RECEIVED_SB MC_PKT_PLAY_SERVERBOUND_CHUNK_BATCH_RECEIVED
 
@@ -172,6 +177,16 @@
 #define WORLD_SPAWN_PITCH 0.0f
 
 #define PLAYER_METADATA_LIVING_FLAGS_INDEX 8
+#define PLAYER_METADATA_BASE_FLAGS_INDEX 0
+#define PLAYER_METADATA_POSE_INDEX 6
+#define ENTITY_METADATA_TYPE_POSE 20
+#define ENTITY_POSE_STANDING 0
+#define ENTITY_POSE_CROUCHING 5
+#define ENTITY_FLAG_SHIFT_KEY_DOWN 0x02
+#define ENTITY_FLAG_SPRINTING 0x08
+#define PLAYER_INPUT_SHIFT 0x20
+#define PLAYER_COMMAND_START_SPRINTING 1
+#define PLAYER_COMMAND_STOP_SPRINTING 2
 /* Avatar.MODE_CUSTOMISATION precedes Player.ABSORPTION (index 17, Float)
  * in the official 26.1 classes; protocol 775 uses index 16 for this Byte. */
 #define PLAYER_METADATA_SKIN_PARTS_INDEX 16
@@ -666,12 +681,19 @@ static int ensure_player_loaded(mc_conn_t *c) {
     player->food_level = clamp_food_level(player->food_level);
     player->food_saturation = clamp_food_saturation(player->food_level, player->food_saturation);
     player->food_exhaustion = clamp_food_exhaustion(player->food_exhaustion);
+    if (!isfinite(player->experience_progress) || player->experience_progress < 0.0f)
+        player->experience_progress = 0.0f;
+    if (player->experience_progress > 1.0f) player->experience_progress = 1.0f;
+    if (player->experience_level < 0) player->experience_level = 0;
+    if (player->experience_total < 0) player->experience_total = 0;
     c->gamemode = player->gamemode;
     c->health = player->health;
     c->food = player->food_level;
     c->food_saturation = player->food_saturation;
     c->food_exhaustion = player->food_exhaustion;
     c->dead = false;
+    c->sneaking = false;
+    c->sprinting = false;
     c->on_ground = false;
     c->fall_tracking = false;
     c->fall_start_y = player->pos_y;
@@ -713,6 +735,8 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     c->food_saturation = 0.0f;
     c->food_exhaustion = 0.0f;
     c->dead = false;
+    c->sneaking = false;
+    c->sprinting = false;
     c->on_ground = false;
     c->fall_tracking = false;
     c->fall_start_y = 0.0;
@@ -2590,6 +2614,16 @@ static int send_set_health_packet(mc_conn_t *c) {
     return conn_write_packet(c, PKT_PLAY_SET_HEALTH, buf, pos, -1);
 }
 
+static int send_experience_packet(mc_conn_t *c) {
+    if (!c || !c->player) return -1;
+    uint8_t buf[16];
+    size_t pos = 0;
+    if (w_f32(buf, sizeof(buf), &pos, c->player->experience_progress) != 0 ||
+        w_varint(buf, sizeof(buf), &pos, c->player->experience_level) != 0 ||
+        w_varint(buf, sizeof(buf), &pos, c->player->experience_total) != 0) return -1;
+    return conn_write_packet(c, PKT_PLAY_SET_EXPERIENCE, buf, pos, -1);
+}
+
 static int send_combat_kill_packet(mc_conn_t *c, const char *message) {
     if (!c) return -1;
     uint8_t *msg = NULL;
@@ -3172,6 +3206,8 @@ static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spaw
     if (!c || !c->player) return;
     cancel_item_use(c);
     c->dead = false;
+    c->sneaking = false;
+    c->sprinting = false;
     c->health = PLAYER_MAX_HEALTH;
     c->food = PLAYER_DEFAULT_FOOD_LEVEL;
     c->food_saturation = PLAYER_DEFAULT_FOOD_SATURATION;
@@ -3808,6 +3844,41 @@ static uint8_t player_living_flags(const mc_conn_t *subject) {
     return flags;
 }
 
+static int send_player_motion_metadata(mc_conn_t *viewer, mc_conn_t *subject, mc_remote_player_t *entry) {
+    uint8_t flags = (subject->sneaking ? ENTITY_FLAG_SHIFT_KEY_DOWN : 0) |
+                    (subject->sprinting ? ENTITY_FLAG_SPRINTING : 0);
+    if (!entry->has_last_base_flags || entry->base_flags != flags) {
+        /* Vanilla omits the default flags on spawn, but sends each transition. */
+        if (flags != 0 || entry->has_last_base_flags) {
+            uint8_t buf[16];
+            size_t pos = 0;
+            if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+                w_ubyte(buf, sizeof(buf), &pos, PLAYER_METADATA_BASE_FLAGS_INDEX) != 0 ||
+                w_varint(buf, sizeof(buf), &pos, ENTITY_METADATA_TYPE_BYTE) != 0 ||
+                w_ubyte(buf, sizeof(buf), &pos, flags) != 0 ||
+                w_ubyte(buf, sizeof(buf), &pos, 0xff) != 0 ||
+                conn_write_packet(viewer, PKT_PLAY_ENTITY_METADATA, buf, pos, -1) != 0) return -1;
+        }
+        entry->has_last_base_flags = true;
+        entry->base_flags = flags;
+    }
+    if (!entry->has_last_pose || entry->crouching != subject->sneaking) {
+        if (subject->sneaking || entry->has_last_pose) {
+            uint8_t buf[16];
+            size_t pos = 0;
+            if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+                w_ubyte(buf, sizeof(buf), &pos, PLAYER_METADATA_POSE_INDEX) != 0 ||
+                w_varint(buf, sizeof(buf), &pos, ENTITY_METADATA_TYPE_POSE) != 0 ||
+                w_varint(buf, sizeof(buf), &pos, subject->sneaking ? ENTITY_POSE_CROUCHING : ENTITY_POSE_STANDING) != 0 ||
+                w_ubyte(buf, sizeof(buf), &pos, 0xff) != 0 ||
+                conn_write_packet(viewer, PKT_PLAY_ENTITY_METADATA, buf, pos, -1) != 0) return -1;
+        }
+        entry->has_last_pose = true;
+        entry->crouching = subject->sneaking;
+    }
+    return 0;
+}
+
 static int send_player_living_metadata(mc_conn_t *viewer, mc_conn_t *subject, mc_remote_player_t *entry, bool force) {
     if (!viewer || !subject || !entry) return -1;
     uint8_t flags = player_living_flags(subject);
@@ -3913,6 +3984,8 @@ static int hide_remote_player_entity(mc_conn_t *viewer, mc_conn_t *subject) {
     entry->has_last_pos = false;
     entry->has_last_living_flags = false;
     entry->has_last_equipment = false;
+    entry->has_last_base_flags = false;
+    entry->has_last_pose = false;
     return 0;
 }
 
@@ -4025,6 +4098,7 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
             return -1;
         }
         if (send_player_living_metadata(viewer, subject, entry, true) != 0 ||
+            send_player_motion_metadata(viewer, subject, entry) != 0 ||
             send_player_skin_parts_metadata(viewer, subject) != 0 ||
             send_player_equipment(viewer, subject, entry, true) != 0) {
             return -1;
@@ -4055,6 +4129,7 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
             }
         }
         if (send_player_living_metadata(viewer, subject, entry, false) != 0 ||
+            send_player_motion_metadata(viewer, subject, entry) != 0 ||
             send_player_equipment(viewer, subject, entry, false) != 0) {
             return -1;
         }
@@ -4082,6 +4157,17 @@ int proto_play_remove_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
     }
     remote_player_remove_local(viewer, subject->entity_id);
     return 0;
+}
+
+int proto_play_send_remote_animation(mc_conn_t *viewer, mc_conn_t *subject, uint8_t animation) {
+    if (!viewer || !subject || viewer == subject || viewer->closing || !viewer->play_ready) return 0;
+    mc_remote_player_t *entry = remote_player_get(viewer, subject->entity_id);
+    if (!entry || !entry->spawned) return 0;
+    uint8_t buf[8];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+        w_ubyte(buf, sizeof(buf), &pos, animation) != 0) return -1;
+    return conn_write_packet(viewer, PKT_PLAY_ANIMATE, buf, pos, -1);
 }
 
 static const mc_slot_t *selected_mainhand_slot(const mc_conn_t *c) {
@@ -6806,6 +6892,7 @@ static int respawn_player(mc_conn_t *c) {
     if (chunk_stream_tick(c) != 0) return -1;
     if (send_player_abilities(c) != 0) return -1;
     if (send_set_health_packet(c) != 0) return -1;
+    if (send_experience_packet(c) != 0) return -1;
     if (sync_inventory_full(c) != 0) return -1;
     if (c->server && net_server_sync_item_entities_to_conn(c->server, c) != 0) return -1;
     return save_player_data(c);
@@ -6909,6 +6996,7 @@ int proto_play_send_initial(mc_conn_t *c) {
 
     if (send_player_abilities(c) != 0) return -1;
     if (send_set_health_packet(c) != 0) return -1;
+    if (send_experience_packet(c) != 0) return -1;
     if (sync_inventory_full(c) != 0) return -1;
     if (send_entity_event(c, ENTITY_STATUS_OP_LEVEL_4) != 0) return -1;
     if (send_commands(c) != 0) return -1;
@@ -7051,6 +7139,33 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 
     if (c->dead) {
         return 0;
+    }
+
+    if (frame->packet_id == PKT_PLAY_PLAYER_INPUT_SB) {
+        /* 26.1.1 Input.STREAM_CODEC is one byte; bit 5 is the shift key. */
+        if (frame->payload.len != 1) return -1;
+        c->sneaking = (frame->payload.data[0] & PLAYER_INPUT_SHIFT) != 0;
+        return 0;
+    }
+
+    if (frame->packet_id == PKT_PLAY_PLAYER_COMMAND_SB) {
+        mc_reader_t r = {frame->payload.data, frame->payload.len, 0};
+        int32_t entity_id = 0, action = 0, data = 0;
+        if (r_varint(&r, &entity_id) != 0 || r_varint(&r, &action) != 0 ||
+            r_varint(&r, &data) != 0 || r.pos != r.len) return -1;
+        if (entity_id != c->entity_id) return 0;
+        if (action == PLAYER_COMMAND_START_SPRINTING) c->sprinting = true;
+        if (action == PLAYER_COMMAND_STOP_SPRINTING) c->sprinting = false;
+        (void)data;
+        return 0;
+    }
+
+    if (frame->packet_id == PKT_PLAY_SWING_SB) {
+        mc_reader_t r = {frame->payload.data, frame->payload.len, 0};
+        int32_t hand = -1;
+        if (r_varint(&r, &hand) != 0 || r.pos != r.len || (hand != 0 && hand != 1)) return -1;
+        if (!c->play_ready || !c->server) return 0;
+        return net_server_broadcast_player_animation(c->server, c, hand == 0 ? 0 : 3);
     }
 
     if (frame->packet_id == PKT_PLAY_INTERACT_SB) {

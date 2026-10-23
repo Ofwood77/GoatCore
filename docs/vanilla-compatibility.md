@@ -146,8 +146,54 @@ Java 26.1.1 officiels,
 déconnexions explicites pendant Login, validation complète
 de Configuration, cycle de vie/reconnexion/sauvegarde du joueur, spawn,
 mouvements, visibilité multijoueur, mort/respawn, propriétés du profil. Les
-tests Python ne couvrent que l'API protocolaire partielle de GoatCore. Les
-Les mondes de test restent jetables.
+tests Python ne couvrent que l'API protocolaire partielle de GoatCore. Les mondes de test restent jetables.
 
 Références externes primaires : [Minecraft Java 26.1.1](https://www.minecraft.net/ja-jp/article/minecraft-java-edition-26-1-1),
 [Java `UUID.nameUUIDFromBytes`](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/UUID.html).
+
+
+## Phase 1C — finalisation du cycle de vie des joueurs
+
+La comparaison des paquets a été faite contre le serveur officiel Java 26.1.1
+(protocole 775), lancé dans un monde plat isolé sur le port temporaire 25590.
+GoatCore relaie maintenant les animations de bras principal et secondaire
+(identifiants 0 et 3) aux seuls joueurs qui voient déjà l'entité. Le paquet
+`Player Input` pilote la pose accroupie et le drapeau de décalage ; les
+commandes de sprint pilotent son drapeau. Pour ces transitions, les paquets
+`Animate` et `Set Entity Data` observés ont le même contenu que ceux du
+serveur officiel, hormis l'identifiant de l'entité. La synchronisation
+existante de position, rotation tête/corps et équipement visible reste active.
+La marche, la course et le saut sont reproduits par les déplacements et la
+pose du client ; leur rendu avec deux clients Java officiels reste à vérifier.
+Le minage et l'attaque émettent l'animation de bras ; la progression visuelle
+des fissures et l'ensemble des effets de combat ne sont pas validés ici.
+
+La sauvegarde NBT conserve maintenant `XpP`, `XpLevel` et `XpTotal`, puis envoie
+`Set Experience` à la connexion. Sur l'instance de test 25589, un arrêt et un
+redémarrage ont conservé l'UUID offline, la position, le lacet et le tangage,
+le mode de jeu, les objets en inventaire, l'armure et la main secondaire, la
+santé, la faim et les trois valeurs d'expérience. La dimension n'a pas été
+validée : son changement n'est pas encore pris en charge par ce chantier.
+
+Validation automatisée sur 10.0.4.66 : `make -B precommit-check` avec un
+export de sources sans Git sur la machine distante ; comparaison des animations
+sur le serveur officiel et GoatCore ; visibilité avec 50 joueurs (chacun voit
+les 49 autres) ; 50 bots de déplacement pendant 15 s (50 connexions, aucune
+déconnexion inattendue) ; déconnexions brutales pendant le déplacement et le
+chargement des chunks, suppression des entités visibles et reconnexion, avec
+1, 2 et 4 workers réseau ; persistance avant et après redémarrage ; ASan et
+UBSan sans signalement dans ces scénarios. TSan a compilé, mais son runtime
+s'arrête avant l'ouverture du port avec `unexpected memory mapping`, y compris
+sur un test C minimal. Ce résultat ne permet pas de conclure sur l'absence de
+courses entre threads.
+
+La validation manuelle avec deux vrais clients Java 26.1.1 reste à faire sur
+une instance temporaire de ce binaire : connecter deux comptes distincts au
+même monde, vérifier mutuellement marche, course, accroupissement, saut,
+rotation tête/corps, coups de bras, minage, attaque et équipement, puis fermer
+brutalement un client et le reconnecter. Pour le mode online, utiliser 25588
+avec des comptes Microsoft/Mojang réellement authentifiés et vérifier un login
+positif avant tout redémarrage de 25565. Un rejet `hasJoined` ne prouve pas le
+chemin positif. Le port 25587 reste réservé aux bots.
+
+Phase 1D prévue : physique des joueurs, collisions, dégâts, mort et respawn.

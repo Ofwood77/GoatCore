@@ -2677,6 +2677,22 @@ int net_server_broadcast_system_message(mc_server_t *server, const char *text) {
     return rc;
 }
 
+int net_server_broadcast_player_animation(mc_server_t *server, mc_conn_t *subject, uint8_t animation) {
+    if (!server || !subject) return -1;
+    mc_conn_snapshot_t snapshot;
+    if (server_snapshot_conns(server, &snapshot) != 0) return -1;
+    int rc = 0;
+    for (size_t i = 0; i < snapshot.len; i++) {
+        mc_conn_t *viewer = snapshot.items[i];
+        if (proto_play_send_remote_animation(viewer, subject, animation) != 0) {
+            conn_close(viewer);
+            rc = -1;
+        }
+    }
+    conn_snapshot_clear(&snapshot);
+    return rc;
+}
+
 static int spawn_item_drop_locked_full(mc_server_t *server, double x, double y, double z, double vx, double vy, double vz,
                                        const mc_slot_t *slot, int32_t pickup_delay_ticks) {
     if (!server || !slot || !slot->present || slot->count <= 0) return -1;

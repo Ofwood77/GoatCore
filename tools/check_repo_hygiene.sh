@@ -5,6 +5,18 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 
 bad=0
+
+# Deployment source exports deliberately contain no .git directory. Their
+# tracked-file hygiene was checked in the local repository before transfer.
+# Avoid invoking Git on the remote test host while retaining an artifact check.
+if [ "${GOATCORE_SOURCE_EXPORT:-0}" = 1 ]; then
+    if find src include tests tools -type f \( -name '*.o' -o -name '*.d' \) -print -quit | grep -q .; then
+        echo "[hygiene-check] source export contains object/dependency artifacts" >&2
+        exit 1
+    fi
+    echo "[hygiene-check] source export artifacts ok; local Git hygiene checked separately"
+    exit 0
+fi
 allowed_asset() {
     case "$1" in
         assets/README.txt|assets/registry_packets_26_1_1.bin|assets/tags_packet_26_1_1.bin|assets/chunk_0_0_26_1_1.bin)
