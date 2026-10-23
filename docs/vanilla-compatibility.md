@@ -69,6 +69,9 @@ avec le client Java officiel.
   les commandes administrateur uniquement à l'UUID vérifié par `hasJoined` ;
   `MC_ADMIN_USERNAME` ne confère des droits que sur une instance offline.
   Un pseudo offline peut être usurpé par tout client ayant accès au port.
+- Le paquet `Player Info Update` inclut désormais l'entrée du joueur lui-même,
+  avec ses propriétés de profil signées. Le skin d'Ofwood_ a été vérifié
+  visuellement en vue F5 avec le client Java officiel sur 25588.
 - Les signatures de texture sont exigées au décodage d'une propriété présente
   et relayées telles que reçues sur HTTPS depuis Mojang ; GoatCore ne vérifie
   pas lui-même la signature cryptographique du contenu de la texture. Le

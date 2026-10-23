@@ -139,6 +139,7 @@ def main():
                 if time.monotonic() >= deadline:
                     raise AssertionError("reconnect after disconnect rejected")
                 time.sleep(0.05)
+            assert mc_ping.run_login("127.0.0.1", port, "SelfInfoTest", 8) == 0
         finally:
             if first is not None:
                 first.close()
@@ -148,7 +149,7 @@ def main():
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
-    print("login integration: offline UUID, duplicate, malformed, reconnect and online fail-closed ok")
+    print("login integration: offline UUID, duplicate, malformed, reconnect, self player info and online fail-closed ok")
 
 
 if __name__ == "__main__":
