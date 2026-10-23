@@ -12,6 +12,7 @@ Environment=MC_BIND_PORT=25588
 Environment=MC_SETUP_FILE=/etc/goatcore/server2.setup.conf
 Environment=MC_ADMIN_USERNAME=Ofwood_
 Environment=MC_ADMIN_UUID=c01c7df6c8fd4bb7b99ac6287e058de3
+Environment=MC_DEBUG_AUTH_TEXTURE=1
 ExecStart=/usr/bin/stdbuf -oL -eL /opt/goatcore/auth-stage/mc_server
 Restart=no
 LimitNOFILE=65536

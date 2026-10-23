@@ -140,7 +140,7 @@ static int handle_encryption_response(mc_conn_t *c, const mc_frame_t *frame) {
     c->auth_ticket = mc_auth_submit(auth, c->username, hash);
     if (!c->auth_ticket) return -1;
     c->auth_pending = true;
-    c->auth_deadline_ms = mc_now_us() / 1000 + 15000;
+    c->auth_deadline_ms = mc_now_us() / 1000 + 30000;
     log_info("online crypto established: name=%s; checking Mojang session", c->username);
     memset(secret, 0, sizeof(secret));
     memset(token, 0, sizeof(token));
