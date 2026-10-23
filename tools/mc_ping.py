@@ -15,6 +15,7 @@ PLAY_CLIENTBOUND_KEEP_ALIVE = 0x2C
 PLAY_CLIENTBOUND_LOGIN = 0x31
 PLAY_CLIENTBOUND_PING = 0x3D
 PLAY_CLIENTBOUND_PLAYER_POSITION = 0x48
+PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE = 0x46
 PLAY_SERVERBOUND_ACCEPT_TELEPORTATION = 0x00
 PLAY_SERVERBOUND_KEEP_ALIVE = 0x1C
 PLAY_SERVERBOUND_PONG = 0x2D
@@ -174,6 +175,8 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
 
     got_join_game = False
     got_sync_pos = False
+    got_self_info = False
+    self_uuid = None
 
     try:
         send_handshake(sock, host, port, next_state=2)
@@ -200,6 +203,9 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     print(f"set compression threshold={compression_threshold}")
                     continue
                 if pid == 0x02:
+                    if len(payload) < 16:
+                        raise ValueError("Login Success missing player UUID")
+                    self_uuid = payload[:16]
                     send_packet(sock, 0x03, b"", compression_threshold=compression_threshold)  # Login Acknowledge
                     state = "CONFIG"
                     continue
@@ -227,6 +233,11 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     raise RuntimeError(f"play disconnect: {reason}")
                 if pid == PLAY_CLIENTBOUND_LOGIN:
                     got_join_game = True
+                if pid == PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE:
+                    actions, pos = decode_varint_from_bytes(payload, 0)
+                    count, pos = decode_varint_from_bytes(payload, pos)
+                    if actions & 1 and count == 1 and payload[pos:pos + 16] == self_uuid:
+                        got_self_info = True
                 if pid == PLAY_CLIENTBOUND_KEEP_ALIVE and len(payload) == 8:
                     send_packet(sock, PLAY_SERVERBOUND_KEEP_ALIVE, payload, compression_threshold=compression_threshold)
                 if pid == PLAY_CLIENTBOUND_PING and len(payload) == 4:
@@ -238,11 +249,11 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     send_packet(sock, PLAY_SERVERBOUND_ACCEPT_TELEPORTATION, encode_varint(teleport_id), compression_threshold=compression_threshold)
                     got_sync_pos = True
 
-                if got_join_game and got_sync_pos:
-                    print("play ok (join game + sync pos)")
+                if got_join_game and got_sync_pos and got_self_info:
+                    print("play ok (join game + self player info + sync pos)")
                     return 0
 
-        raise TimeoutError("timeout waiting for PLAY (join game + sync pos)")
+        raise TimeoutError("timeout waiting for PLAY (join game + self player info + sync pos)")
     finally:
         sock.close()
 

@@ -6807,6 +6807,8 @@ int proto_send_play_disconnect(mc_conn_t *c, const char *reason_json) {
     return 0;
 }
 
+static int send_player_info_add(mc_conn_t *viewer, mc_conn_t *subject);
+
 int proto_play_send_initial(mc_conn_t *c) {
     if (!c || c->play_init_sent) return 0;
     if (!get_world(c)) return -1;
@@ -6844,6 +6846,9 @@ int proto_play_send_initial(mc_conn_t *c) {
     if (w_bool(buf, sizeof(buf), &pos, false) != 0) return -1; /* enforces secure chat */
 
     if (conn_write_packet(c, PKT_PLAY_LOGIN, buf, pos, -1) != 0) return -1;
+    /* The client's own profile must be present in Player Info as well: its
+     * signed textures are used for the local player skin and tab entry. */
+    if (send_player_info_add(c, c) != 0) return -1;
     if (proto_play_send_difficulty(c) != 0) return -1;
 
     if (send_waiting_for_level_chunks_event(c) != 0) return -1;
