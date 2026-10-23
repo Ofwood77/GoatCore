@@ -2,13 +2,14 @@ CC ?= gcc
 CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Iinclude -Isrc/generated -Isrc/world -Isrc/util -D_POSIX_C_SOURCE=200809L -MMD -MP -pthread
 LDFLAGS ?= -lz -lm -pthread -lcurl
 
-USE_OPENSSL ?= 0
+USE_OPENSSL ?= 1
 ifeq ($(USE_OPENSSL),1)
-    CFLAGS += -DMC_USE_OPENSSL
     LDFLAGS += -lssl -lcrypto
     CRYPTO_SRC = src/protocol/crypto_openssl.c
+    AUTH_SRC = src/protocol/auth_service.c
 else
     CRYPTO_SRC = src/protocol/crypto_stub.c
+    AUTH_SRC = src/protocol/auth_stub.c
 endif
 
 SRC = \
@@ -28,6 +29,7 @@ SRC = \
     src/protocol/profile_service.c \
     src/protocol/profile_wire.c \
     $(CRYPTO_SRC) \
+    $(AUTH_SRC) \
     src/protocol/handlers/handshake.c \
     src/protocol/handlers/login.c \
     src/protocol/handlers/configuration.c \
@@ -65,7 +67,10 @@ TEST_BINS = \
     test_varint \
     test_login \
     test_profile \
+    test_auth \
+    test_login_online \
     test_framing_compression \
+    test_framing_crypto \
     test_pvp \
     test_nbt \
     test_nbt_arena \
@@ -196,14 +201,23 @@ mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/world/chunk_store.c src
 test_varint: tests/test_varint.c src/protocol/varint.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_login: tests/test_login.c src/protocol/handlers/login.c src/protocol/offline_uuid.c src/protocol/profile_wire.c src/protocol/varint.c src/util/mc_util.c
+test_login: tests/test_login.c src/protocol/handlers/login.c src/protocol/offline_uuid.c src/protocol/profile_wire.c src/protocol/varint.c src/protocol/auth_stub.c src/protocol/crypto_stub.c src/net/buffer.c src/util/mc_util.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_profile: tests/test_profile.c src/protocol/profile_json.c src/protocol/profile_service.c src/protocol/profile_wire.c src/protocol/varint.c src/util/mc_util.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+test_auth: tests/test_auth.c src/protocol/auth_service.c src/protocol/profile_json.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lcrypto
+
+test_login_online: tests/test_login_online.c src/protocol/handlers/login.c src/protocol/offline_uuid.c src/protocol/profile_wire.c src/protocol/varint.c src/protocol/auth_service.c src/protocol/profile_json.c src/protocol/crypto_openssl.c src/net/buffer.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lcrypto
+
 test_framing_compression: tests/test_framing_compression.c src/net/buffer.c src/protocol/varint.c src/protocol/framing.c src/protocol/crypto_stub.c src/util/mc_util.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test_framing_crypto: tests/test_framing_crypto.c src/net/buffer.c src/protocol/varint.c src/protocol/framing.c src/protocol/crypto_openssl.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lcrypto
 
 test_pvp: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 

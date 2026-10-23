@@ -16,6 +16,7 @@ bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, c
 }
 
 mc_profile_service_t *net_server_profiles(mc_server_t *server) { (void)server; return NULL; }
+mc_auth_service_t *net_server_auth(mc_server_t *server) { (void)server; return NULL; }
 int mc_profile_service_lookup(mc_profile_service_t *service, const char *name, mc_public_profile_t *out) {
     (void)service; (void)name; (void)out; return -1;
 }

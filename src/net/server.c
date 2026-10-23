@@ -135,6 +135,7 @@ struct mc_server {
     pthread_mutex_t conns_lock;
     mc_task_queue_t task_queue;
     mc_profile_service_t *profiles;
+    mc_auth_service_t *auth;
     pthread_t tick_thread;
     atomic_uint_fast64_t network_write_us;
     atomic_uint_fast64_t network_flush_count;
@@ -261,6 +262,7 @@ static mc_conn_t *conn_create(mc_server_t *s, int fd, unsigned worker_index) {
     c->block_ack_sequence = -1;
     atomic_init(&c->refcount, 1);
     atomic_init(&c->detached, false);
+    atomic_init(&c->crypto_phase, 0);
     if (pthread_mutex_init(&c->out_lock, NULL) != 0) {
         free(c);
         return NULL;
@@ -300,6 +302,7 @@ static void conn_destroy(mc_conn_t *c) {
     free(c->remote_players);
     free(c->skin_value);
     free(c->skin_signature);
+    mc_crypto_free(c);
     free(c);
 }
 
@@ -824,10 +827,27 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
         return -1;
     }
 
-    if (s->cfg.offline_skins) {
+    if (s->cfg.offline_skins && !s->cfg.online_mode) {
         s->profiles = mc_profile_service_create();
         if (!s->profiles) {
             log_error("failed to initialize offline skin lookup service");
+            network_workers_destroy(s);
+            close(s->wake_fd);
+            close(s->epoll_fd);
+            close(s->listen_fd);
+            mc_world_destroy(s->world);
+            mc_task_queue_destroy(&s->task_queue);
+            pthread_mutex_destroy(&s->conns_lock);
+            free(s);
+            return -1;
+        }
+    }
+
+    if (s->cfg.online_mode) {
+        s->auth = mc_auth_service_create();
+        if (!s->auth) {
+            log_error("failed to initialize Mojang authentication service (check OpenSSL build and resources)");
+            mc_profile_service_destroy(s->profiles);
             network_workers_destroy(s);
             close(s->wake_fd);
             close(s->epoll_fd);
@@ -1436,18 +1456,24 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
 static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
     mc_network_worker_t *worker = &s->workers[c->network_worker_index];
     uint8_t buf[4096];
+    bool first_pass = true;
     for (;;) {
-        ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
-        if (n == 0) return -1;
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-            return -1;
+        if (atomic_load_explicit(&c->crypto_phase, memory_order_acquire) == 1) return 0;
+        if (!first_pass || c->in.len == c->in.rpos) {
+            ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
+            if (n == 0) return -1;
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+                return -1;
+            }
+            atomic_fetch_add(&worker->bytes_in, (uint64_t)n);
+            if (mc_crypto_read(c, buf, (size_t)n) != 0) return -1;
+            buf_compact(&c->in);
+            c->in.limit = MC_MAX_INPUT_BUFFER;
+            if (buf_write(&c->in, buf, (size_t)n) != 0) return -1;
         }
-        atomic_fetch_add(&worker->bytes_in, (uint64_t)n);
-        buf_compact(&c->in);
-        c->in.limit = MC_MAX_INPUT_BUFFER;
-        if (buf_write(&c->in, buf, (size_t)n) != 0) return -1;
+        first_pass = false;
 
     mc_frame_t frame;
     memset(&frame, 0, sizeof(frame));
@@ -1478,6 +1504,13 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
         task->payload = frame.payload.data;
         task->payload_len = frame.payload.len;
         task->enqueue_ms = now_ms();
+        bool pause_for_key = s->cfg.online_mode && c->state == MC_STATE_LOGIN &&
+            frame.packet_id == MC_PKT_LOGIN_SERVERBOUND_KEY;
+        if (pause_for_key) {
+            c->pending_ciphertext = c->in.len - c->in.rpos;
+            c->crypto_needs_resume = true;
+            atomic_store_explicit(&c->crypto_phase, 1, memory_order_release);
+        }
         if (debug_net_latency_enabled()) {
             const char *packet_name = serverbound_packet_name(c->state, frame.packet_id);
             pthread_mutex_lock(&c->out_lock);
@@ -1500,6 +1533,7 @@ static int handle_client_read(mc_server_t *s, mc_conn_t *c) {
         frame.payload.data = NULL;
         frame.payload.len = 0;
         memset(&frame, 0, sizeof(frame));
+        if (pause_for_key) return 0;
     }
 
     }
@@ -1719,6 +1753,23 @@ static size_t network_flush_pending(mc_network_worker_t *worker) {
         c = next;
     }
     return flushed_conns;
+}
+
+static void network_resume_encryption(mc_network_worker_t *worker) {
+    mc_conn_t *c = worker->owned;
+    while (c) {
+        mc_conn_t *next = c->owner_next;
+        if (c->crypto_needs_resume && !atomic_load(&c->detached) &&
+            atomic_load_explicit(&c->crypto_phase, memory_order_acquire) == 2) {
+            c->crypto_needs_resume = false;
+            size_t pending = c->pending_ciphertext;
+            c->pending_ciphertext = 0;
+            if (pending > c->in.len - c->in.rpos ||
+                mc_crypto_read(c, c->in.data + c->in.rpos, pending) != 0 ||
+                handle_client_read(worker->server, c) != 0) server_close_conn(worker->server, c);
+        }
+        c = next;
+    }
 }
 
 static size_t server_process_queued_tasks(mc_server_t *s, int64_t now, const char *phase) {
@@ -2002,7 +2053,7 @@ static void *tick_thread_main(void *arg) {
                 }
                 if (perf) proto_tick_us += mc_now_us() - span_start_us;
             }
-            if (state == MC_STATE_LOGIN && !closing && c->skin_lookup_pending &&
+            if (state == MC_STATE_LOGIN && !closing && (c->skin_lookup_pending || c->auth_pending) &&
                 proto_login_tick(c, now) != 0) conn_close(c);
         }
 
@@ -2323,6 +2374,7 @@ static void *network_worker_main(void *arg) {
                 uint64_t count;
                 while (read(worker->wake_fd, &count, sizeof(count)) > 0) {}
                 network_worker_drain_commands(worker, false);
+                network_resume_encryption(worker);
                 int64_t start_us = mc_now_us();
                 size_t flushed = network_flush_pending(worker);
                 atomic_fetch_add(&s->network_flush_count, flushed);
@@ -2452,6 +2504,7 @@ void net_server_stop(mc_server_t *s) {
 void net_server_destroy(mc_server_t *s) {
     if (!s) return;
     mc_profile_service_destroy(s->profiles);
+    mc_auth_service_destroy(s->auth);
     pthread_mutex_lock(&s->conns_lock);
     mc_conn_t *c = s->conns;
     s->conns = NULL;
@@ -2505,6 +2558,10 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
 
 mc_profile_service_t *net_server_profiles(mc_server_t *server) {
     return server ? server->profiles : NULL;
+}
+
+mc_auth_service_t *net_server_auth(mc_server_t *server) {
+    return server ? server->auth : NULL;
 }
 
 bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]) {

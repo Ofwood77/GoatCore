@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 1)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 1B)
 
 Référence des identifiants : `data/26.1.1/reports/packets.json` et les en-têtes
 générés du dépôt (protocole 775). Les formats binaires ci-dessous ne sont pas
@@ -12,8 +12,8 @@ avec le client Java officiel.
 | Status request/response `0x00` | Status | Oui | Partiel : réponse JSON minimale | Test epoll |
 | Ping/Pong `0x01` | Status | Oui | Oui pour l'écho des 8 octets | Test epoll |
 | Hello C→S `0x00` | Login | Oui | Offline : nom 3–16 ASCII alphanumérique/`_`, UUID client ignoré | Unitaire + intégration |
-| Hello S→C `0x01`, Key C→S `0x01` | Login | Non | Non : chiffrement/authentification online absents | Non |
-| Login finished S→C `0x02` | Login | Oui | Propriété `textures` signée facultative en mode offline ; rendu client Java non vérifié | Unitaire + intégration + API réelle |
+| Hello S→C `0x01`, Key C→S `0x01` | Login | Oui | RSA 2048, challenge et AES-128-CFB8 sur le flux entier ; authentification Mojang requise | Unitaire, API réelle et connexion officielle Ofwood_ sur 25588 |
+| Login finished S→C `0x02` | Login | Oui | UUID officiel après `hasJoined` en online ; UUID offline et `textures` cosmétiques facultatives en offline | Unitaire, intégration et client Java officiel sur 25588 ; rendu des skins non vérifié |
 | Login acknowledged C→S `0x03` | Login | Oui | Oui pour paquet vide et transition unique | Unitaire |
 | Login compression S→C `0x03` | Login | Non émis | Non testé avec clients officiels ; compression désactivée | Test de framing seul |
 | Select known packs S→C `0x0e`, C→S `0x07` | Configuration | Oui | Partiel : liste fixe, réponse bornée et non répétable | Client Python |
@@ -21,7 +21,7 @@ avec le client Java officiel.
 | Update tags S→C `0x0d` | Configuration | Oui, blob 26.1.1 | Non validé contre capture Vanilla | Client Python |
 | Finish configuration `0x03` dans les deux sens | Configuration | Oui | Partiel : ordre contrôlé, payload C→S vide | Client Python |
 | Autres paquets Configuration | Configuration | Partiel/ignorés | Non validé | Non |
-| Join game et synchronisation initiale | Play | Partiel | Non validé avec client officiel | Stress Python |
+| Join game et synchronisation initiale | Play | Partiel | Monde visible avec client officiel ; parité Vanilla non établie | Stress Python et client Java sur 25588 |
 
 ## Authentification et données joueur
 
@@ -50,23 +50,59 @@ avec le client Java officiel.
   sauvegardes créées sous un UUID arbitraire fourni par un client (notamment
   tout-zéro pour les bots) ne peuvent pas être attribuées sûrement à un joueur
   et ne sont **pas** migrées automatiquement.
-- `online-mode=true` est reconnu dans `server.config`, mais **refusé au
-  démarrage**. Le mode online n'est donc pas implémenté ; il n'y a aucun repli
-  offline. `USE_OPENSSL=1` ne suffit pas : le flux doit être déchiffré avant
-  le décodage des trames, et la session Mojang doit être vérifiée avant Login
-  Success. L'implémentation crypto actuelle chiffre seulement des portions de
-  paquet et appelle `EVP_*Final_ex` à chaque paquet ; elle n'est pas utilisable
-  pour le flux CFB8 Minecraft.
+- `online-mode=true` active l'échange RSA/challenge, AES-128-CFB8 continu
+  (longueur des trames comprise) puis `hasJoined` sur un pool de quatre
+  threads HTTPS. Une session absente, invalide ou indisponible est refusée,
+  sans repli offline ; les requêtes vérifient TLS, ont un délai réseau borné à
+  10 s et un délai de login de 15 s. Sur 10.0.4.66, la résolution DNS de
+  `sessionserver.mojang.com` prend régulièrement environ 5 s à cause d'un
+  premier résolveur injoignable ; l'ancien délai réseau de 3,5 s rejetait
+  donc une session avant toute réponse HTTP. La correction laisse le tick et
+  les workers epoll non bloquants, mais la configuration DNS du serveur reste
+  à réparer pour retrouver un login rapide.
+  L'UUID, le nom et les textures de Login Success proviennent seulement de la
+  réponse Mojang. Les UUID annoncés par le client sont ignorés. Les jobs
+  d'authentification sont bornés à 32. `USE_OPENSSL=1` est la compilation par
+  défaut ; `USE_OPENSSL=0` conserve le serveur offline mais refuse le démarrage
+  en online. `offline-skins` ne s'applique qu'au mode offline.
+- Sur l'instance online, `MC_ADMIN_UUID` (32 caractères hexadécimaux) accorde
+  les commandes administrateur uniquement à l'UUID vérifié par `hasJoined` ;
+  `MC_ADMIN_USERNAME` ne confère des droits que sur une instance offline.
+  Un pseudo offline peut être usurpé par tout client ayant accès au port.
+- Les signatures de texture sont exigées au décodage d'une propriété présente
+  et relayées telles que reçues sur HTTPS depuis Mojang ; GoatCore ne vérifie
+  pas lui-même la signature cryptographique du contenu de la texture. Le
+  rendu final des skins, en particulier avec UUID offline, doit être testé
+  visuellement avec deux clients Java officiels.
+- Tests obtenus : RSA et hash signé Java (vecteurs positifs/négatifs),
+  challenge erroné, profil simulé accepté, compte sans session refusé par
+  `hasJoined` réel, trames chiffrées fragmentées, login offline, multi-epoll.
+  Le client Java officiel Ofwood_ a rejoint le monde sur le port temporaire
+  25588 et exécuté `/gamemode creative`. Ce test valide le chemin positif
+  d'authentification et les permissions sur cette instance, pas encore
+  l'ensemble du gameplay ni la parité Vanilla.
+
+Mesure locale ponctuelle (`tests/stress/benchmark_network.py`, 100 bots,
+connexion seule, 16 s, un worker réseau, mondes plats jetables) : avec
+`offline-skins=false`, 100/100 connectés, 0 déconnexion inattendue, 19,99 TPS,
+MSPT P95/P99 6,6/7,4 ms et réception initiale du chunk central moyenne
+0,011 s. Avec `offline-skins=true`, 100/100 connectés, 0 déconnexion
+inattendue, 19,99 TPS, MSPT P95/P99 7,1/8,1 ms et réception initiale
+0,749 s. Le cache a mis 21 recherches en file, rejeté 79 demandes saturées
+et réalisé 18 recherches pendant l'essai. L'attente cosmétique ralentit donc
+les premiers logins sans améliorer le tick ; désactiver les skins publics
+pour les benchmarks de bots reste recommandé. Cette mesure unique ne permet
+pas d'attribuer un gain ou une régression stable.
 
 ## Restes de la phase 1
 
 À valider/corriger par étapes : comparaison binaire avec serveur et client
-Java 26.1.1 officiels, authentification online (RSA/AES CFB8, contrôle de
-session et profil), déconnexions explicites pendant Login, validation complète
+Java 26.1.1 officiels,
+déconnexions explicites pendant Login, validation complète
 de Configuration, cycle de vie/reconnexion/sauvegarde du joueur, spawn,
 mouvements, visibilité multijoueur, mort/respawn, propriétés du profil. Les
 tests Python ne couvrent que l'API protocolaire partielle de GoatCore. Les
-mondes actifs 25565/25587 ne sont pas redéployés par cette phase.
+Les mondes de test restent jetables.
 
 Références externes primaires : [Minecraft Java 26.1.1](https://www.minecraft.net/ja-jp/article/minecraft-java-edition-26-1-1),
 [Java `UUID.nameUUIDFromBytes`](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/util/UUID.html).

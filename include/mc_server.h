@@ -37,6 +37,8 @@ typedef struct {
     bool debug_packets;
     bool admin_commands; /* explicit development authorization for all connections */
     const char *admin_username; /* offline-mode name allowlist; spoofable without authentication */
+    bool has_admin_uuid; /* online-mode administrator, matched only after hasJoined */
+    uint8_t admin_uuid[16];
     bool qa_enabled;
     const char *registry_blob_path;
     const char *tags_blob_path;

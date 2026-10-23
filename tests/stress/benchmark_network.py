@@ -40,7 +40,7 @@ def free_port():
 
 def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1000,
               server_binary=None, world_template=None, cycles_per_bot=None,
-              block_cooldown=0.01):
+              block_cooldown=0.01, offline_skins=False):
     name = {1: "one", 2: "two", 4: "four"}[count]
     port = free_port()
     world = result_dir / f"world-{name}"
@@ -50,6 +50,13 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
         world.mkdir()
     report_path = result_dir / f"report-{name}.json"
     log_path = result_dir / f"server-{name}.log"
+    server_cwd = ROOT
+    if offline_skins:
+        server_cwd = result_dir / f"runtime-{name}"
+        server_cwd.mkdir()
+        (server_cwd / "server.config").write_text(
+            "online-mode=false\noffline-skins=true\n", encoding="ascii")
+        (server_cwd / "assets").symlink_to(ROOT / "assets", target_is_directory=True)
     env = os.environ.copy()
     env.update({
         "MC_SETUP_FILE": str(ROOT / f"tests/stress/network/{name}.conf"),
@@ -60,7 +67,7 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
         "MC_PERF_SUMMARY_TICKS": "100",
     })
     with log_path.open("w", encoding="utf-8") as log_file:
-        proc = subprocess.Popen([str(server_binary or ROOT / "mc_server")], cwd=ROOT, env=env,
+        proc = subprocess.Popen([str(server_binary or ROOT / "mc_server")], cwd=server_cwd, env=env,
                                 stdout=log_file, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 10
@@ -122,6 +129,7 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     peak_item_tick = max(item_samples, key=lambda row: row[1]) if item_samples else None
     return {
         "network_workers": count,
+        "offline_skins": offline_skins,
         "initial_world": "copied" if world_template else "fresh",
         "mode": mode,
         "requested_bots": bots,
@@ -193,6 +201,8 @@ def main():
     parser.add_argument("--server-binary", type=Path, default=ROOT / "mc_server")
     parser.add_argument("--world-template", type=Path,
                         help="copy this disposable world before every server run")
+    parser.add_argument("--offline-skins", action="store_true",
+                        help="enable asynchronous public skins in an isolated runtime directory")
     args = parser.parse_args()
     if not 1 <= args.bots <= (50 if args.mode in ("blocks", "mixed", "fastblocks") else 1000):
         parser.error("bots outside the supported range for this mode")
@@ -214,7 +224,7 @@ def main():
     for count in args.workers:
         row = benchmark(count, result_dir, args.bots, args.duration, args.mode,
                         args.slow_ms, args.server_binary.resolve(), args.world_template,
-                        args.cycles_per_bot, args.block_cooldown)
+                        args.cycles_per_bot, args.block_cooldown, args.offline_skins)
         rows.append(row)
         print(json.dumps(row), flush=True)
     (result_dir / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
