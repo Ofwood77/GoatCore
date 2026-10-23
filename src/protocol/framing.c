@@ -5,13 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
-#ifdef MC_USE_OPENSSL
-int mc_crypto_read(mc_conn_t *c, uint8_t *data, size_t len);
-int mc_crypto_write(mc_conn_t *c, const uint8_t *data, size_t len, mc_buf_t *out);
-#else
-int mc_crypto_read(mc_conn_t *c, uint8_t *data, size_t len);
-int mc_crypto_write(mc_conn_t *c, const uint8_t *data, size_t len, mc_buf_t *out);
-#endif
 
 static bool debug_net_latency_enabled(void) {
     const char *env = getenv("MC_DEBUG_NET_LATENCY");
@@ -144,11 +137,6 @@ int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_thresho
         }
     }
 
-    if (mc_crypto_read(c, (uint8_t *)payload_src, payload_src_len) != 0) {
-        free(payload);
-        return -1;
-    }
-
     int32_t packet_id = 0;
     size_t id_bytes = 0;
     if (varint_read(payload_src, payload_src_len, &packet_id, &id_bytes) != 0) {
@@ -235,7 +223,7 @@ int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, s
         return -1;
     }
     out_before = c->out.len > c->out.rpos ? c->out.len - c->out.rpos : 0;
-    if (buf_write(&c->out, len_buf, len_bytes) != 0) {
+    if (mc_crypto_write(c, len_buf, len_bytes, &c->out) != 0) {
         c->abort_io = true;
         c->closing = true;
         pthread_mutex_unlock(&c->out_lock);

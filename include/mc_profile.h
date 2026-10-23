@@ -27,5 +27,6 @@ void mc_profile_service_destroy(mc_profile_service_t *service);
 /* Strict parsers for the two public Mojang responses; useful with mock JSON. */
 int mc_profile_parse_name(const char *json, uint8_t uuid[16], char name[17]);
 int mc_profile_parse_signed(const char *json, const uint8_t expected_uuid[16], mc_public_profile_t *out);
+int mc_profile_parse_auth(const char *json, const char *expected_name, mc_public_profile_t *out);
 
 #endif

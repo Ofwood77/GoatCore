@@ -11,6 +11,7 @@
 #include "mc_mining.h"
 #include "mc_world.h"
 #include "mc_profile.h"
+#include "mc_auth.h"
 
 #define MC_BUF_CAP 8192
 /* Current chunks (24 sections + light) fit well below 2 MiB. */
@@ -83,6 +84,11 @@ struct mc_conn {
     bool login_success_sent;
     bool skin_lookup_pending;
     int64_t skin_lookup_deadline_ms;
+    bool auth_pending;
+    uint64_t auth_ticket;
+    int64_t auth_deadline_ms;
+    uint8_t verify_token[16];
+    bool verify_token_sent;
     char *skin_value;
     char *skin_signature;
     bool config_known_packs_sent;
@@ -128,7 +134,9 @@ struct mc_conn {
     int64_t next_natural_regen_ms;
     int64_t next_starvation_damage_ms;
 
-    bool encryption_enabled;
+    atomic_int crypto_phase; /* 0 plaintext, 1 key packet queued, 2 encrypted */
+    bool crypto_needs_resume; /* network owner only */
+    size_t pending_ciphertext; /* network owner only; bytes left after key frame */
     void *ssl_read;  /* EVP_CIPHER_CTX* */
     void *ssl_write; /* EVP_CIPHER_CTX* */
 
@@ -175,8 +183,13 @@ typedef struct {
 int conn_read_frame(mc_conn_t *c, mc_frame_t *out_frame, int compression_threshold);
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold);
 void conn_close(mc_conn_t *c);
+int mc_crypto_read(mc_conn_t *c, uint8_t *data, size_t len);
+int mc_crypto_write(mc_conn_t *c, const uint8_t *data, size_t len, mc_buf_t *out);
+int mc_crypto_enable(mc_conn_t *c, const uint8_t secret[16]);
+void mc_crypto_free(mc_conn_t *c);
 mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name);
 mc_profile_service_t *net_server_profiles(mc_server_t *server);
+mc_auth_service_t *net_server_auth(mc_server_t *server);
 bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]);
 void net_server_release_conn(mc_conn_t *conn);
 mc_world_t *net_server_world(mc_server_t *server);

@@ -1,0 +1,17 @@
+[Unit]
+Description=GoatCore temporary Mojang authentication test (port 25588)
+After=network.target
+
+[Service]
+Type=simple
+User=goatcore
+Group=goatcore
+WorkingDirectory=/opt/goatcore/auth-stage
+Environment=MC_WORLD_PATH=/var/lib/goatcore/auth-stage-world
+Environment=MC_BIND_PORT=25588
+Environment=MC_SETUP_FILE=/etc/goatcore/server2.setup.conf
+Environment=MC_ADMIN_USERNAME=Ofwood_
+Environment=MC_ADMIN_UUID=c01c7df6c8fd4bb7b99ac6287e058de3
+ExecStart=/usr/bin/stdbuf -oL -eL /opt/goatcore/auth-stage/mc_server
+Restart=no
+LimitNOFILE=65536

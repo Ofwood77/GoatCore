@@ -119,6 +119,22 @@ static int parse_bool_value(const char *val, bool *out) {
     return -1;
 }
 
+static int parse_uuid_hex(const char *value, uint8_t out[16]) {
+    if (!value || strlen(value) != 32 || !out) return -1;
+    for (size_t i = 0; i < 16; i++) {
+        int hi = value[i * 2], lo = value[i * 2 + 1];
+        hi = (hi >= '0' && hi <= '9') ? hi - '0' :
+             (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 :
+             (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10 : -1;
+        lo = (lo >= '0' && lo <= '9') ? lo - '0' :
+             (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 :
+             (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10 : -1;
+        if (hi < 0 || lo < 0) return -1;
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return 0;
+}
+
 static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     if (!f || !out) return -1;
     *out = (server_disk_config_t){0};
@@ -304,10 +320,6 @@ int main(void) {
     cfg.compression_threshold = -1;
     cfg.online_mode = disk_cfg.online_mode;
     cfg.offline_skins = disk_cfg.offline_skins;
-    if (cfg.online_mode) {
-        log_error("online-mode=true is not yet supported: encrypted login and Mojang session verification are missing; refusing to start");
-        return 1;
-    }
     cfg.debug_packets = false;
     cfg.admin_commands = getenv("MC_ADMIN_COMMANDS") && strcmp(getenv("MC_ADMIN_COMMANDS"), "1") == 0;
     cfg.admin_username = getenv("MC_ADMIN_USERNAME");
@@ -316,7 +328,16 @@ int main(void) {
             log_error("invalid MC_ADMIN_USERNAME: maximum 16 characters");
             return 1;
         }
-        log_info("admin username enabled (offline mode: names are not authenticated)");
+        if (!cfg.online_mode) log_info("offline admin username enabled (names are not authenticated)");
+    }
+    const char *admin_uuid = getenv("MC_ADMIN_UUID");
+    if (admin_uuid && *admin_uuid) {
+        if (parse_uuid_hex(admin_uuid, cfg.admin_uuid) != 0) {
+            log_error("invalid MC_ADMIN_UUID: expected 32 hexadecimal characters");
+            return 1;
+        }
+        cfg.has_admin_uuid = true;
+        if (cfg.online_mode) log_info("online admin UUID enabled");
     }
     cfg.qa_enabled = getenv("MC_QA_MODE") && strcmp(getenv("MC_QA_MODE"), "1") == 0;
     cfg.registry_blob_path = "assets/registry_packets_26_1_1.bin";

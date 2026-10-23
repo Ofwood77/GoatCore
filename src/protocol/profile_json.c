@@ -165,13 +165,10 @@ int mc_profile_parse_name(const char *json, uint8_t uuid[16], char name[17]) {
     return root_object(json, &root) == 0 ? parse_identity(root, uuid, name) : -1;
 }
 
-int mc_profile_parse_signed(const char *json, const uint8_t expected_uuid[16], mc_public_profile_t *out) {
-    if (!expected_uuid || !out) return -1;
-    json_span_t root, properties;
-    mc_public_profile_t result = {0};
-    if (root_object(json, &root) != 0 || parse_identity(root, result.public_uuid, result.name) != 0 ||
-        memcmp(result.public_uuid, expected_uuid, 16) != 0 ||
-        object_field(root, "properties", &properties) != 0 || properties.type != '[') return -1;
+static int parse_properties(json_span_t root, mc_public_profile_t *result, bool required) {
+    json_span_t properties;
+    if (object_field(root, "properties", &properties) != 0) return required ? -1 : 0;
+    if (properties.type != '[') return -1;
     json_reader_t r = {properties.start + 1, properties.end - 1};
     int count = 0;
     while (r.cur < r.end) {
@@ -181,17 +178,36 @@ int mc_profile_parse_signed(const char *json, const uint8_t expected_uuid[16], m
             object_field(property, "name", &name_span) != 0 ||
             copy_string(name_span, property_name, sizeof(property_name)) != 0) return -1;
         if (strcmp(property_name, "textures") == 0) {
+            if (result->found) return -1;
             if (object_field(property, "value", &value_span) != 0 ||
                 object_field(property, "signature", &signature_span) != 0 ||
-                copy_string(value_span, result.texture_value, sizeof(result.texture_value)) != 0 ||
-                copy_string(signature_span, result.texture_signature, sizeof(result.texture_signature)) != 0 ||
-                valid_base64(result.texture_value) != 0 || valid_base64(result.texture_signature) != 0) return -1;
-            result.found = true;
+                copy_string(value_span, result->texture_value, sizeof(result->texture_value)) != 0 ||
+                copy_string(signature_span, result->texture_signature, sizeof(result->texture_signature)) != 0 ||
+                valid_base64(result->texture_value) != 0 || valid_base64(result->texture_signature) != 0) return -1;
+            result->found = true;
         }
         skip_ws(&r);
         if (r.cur < r.end && *r.cur++ != ',') return -1;
     }
-    if (!result.found) return -1;
+    return required && !result->found ? -1 : 0;
+}
+
+int mc_profile_parse_signed(const char *json, const uint8_t expected_uuid[16], mc_public_profile_t *out) {
+    if (!expected_uuid || !out) return -1;
+    json_span_t root;
+    mc_public_profile_t result = {0};
+    if (root_object(json, &root) != 0 || parse_identity(root, result.public_uuid, result.name) != 0 ||
+        memcmp(result.public_uuid, expected_uuid, 16) != 0 || parse_properties(root, &result, true) != 0) return -1;
+    *out = result;
+    return 0;
+}
+
+int mc_profile_parse_auth(const char *json, const char *expected_name, mc_public_profile_t *out) {
+    if (!expected_name || !out) return -1;
+    json_span_t root;
+    mc_public_profile_t result = {0};
+    if (root_object(json, &root) != 0 || parse_identity(root, result.public_uuid, result.name) != 0 ||
+        strcasecmp(expected_name, result.name) != 0 || parse_properties(root, &result, false) != 0) return -1;
     *out = result;
     return 0;
 }

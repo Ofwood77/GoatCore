@@ -46,6 +46,9 @@ int main(void) {
     assert(strcmp(name, "Notch") == 0);
     assert(mc_profile_parse_signed(signed_json, uuid, &profile) == 0);
     assert(profile.found && strcmp(profile.texture_value, "QUJDRA==") == 0);
+    assert(mc_profile_parse_auth(signed_json, "notch", &profile) == 0);
+    assert(mc_profile_parse_auth(name_json, "Notch", &profile) == 0 && !profile.found);
+    assert(mc_profile_parse_auth(name_json, "SomebodyElse", &profile) == -1);
     assert(mc_profile_parse_name("{\"id\":\"bogus\",\"name\":\"Notch\"}", uuid, name) == -1);
     assert(mc_profile_parse_signed("{\"id\":\"069a79f444e94726a5befca90e38aaf5\","
         "\"name\":\"Notch\",\"properties\":[{\"name\":\"textures\",\"value\":\"AAAA\"}]}", uuid, &profile) == -1);

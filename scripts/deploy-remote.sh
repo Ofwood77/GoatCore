@@ -10,6 +10,7 @@ ssh -o BatchMode=yes "$remote" 'install -d -m 0755 /opt/goatcore/app/assets /opt
 # Transfer the current working tree, including uncommitted source changes, but
 # never a local world, build output, virtual environment, or stress reports.
 tar -cf - --exclude='*.o' --exclude='*.d' --exclude='__pycache__' \
+    --exclude='src/main.py' \
     --exclude='results' src include Makefile \
     assets/registry_packets_26_1_1.bin assets/tags_packet_26_1_1.bin \
     assets/chunk_0_0_26_1_1.bin assets/block_states.json tests/stress \

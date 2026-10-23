@@ -11,6 +11,7 @@ Environment=MC_WORLD_PATH=/var/lib/goatcore/world
 Environment=MC_BIND_PORT=25565
 Environment=MC_SETUP_FILE=/etc/goatcore/server1.setup.conf
 Environment=MC_ADMIN_USERNAME=Ofwood_
+Environment=MC_ADMIN_UUID=c01c7df6c8fd4bb7b99ac6287e058de3
 StateDirectory=goatcore
 ExecStart=/opt/goatcore/app/mc_server
 Restart=on-failure

@@ -49,22 +49,59 @@ def expect_rejected(sock):
 
 def main():
     with tempfile.TemporaryDirectory(prefix="goatcore-online-reject-") as config_dir:
-        Path(config_dir, "server.config").write_text("online-mode=true\n", encoding="ascii")
+        temp = Path(config_dir)
+        (temp / "server.config").write_text("online-mode=true\n", encoding="ascii")
+        (temp / "assets").symlink_to(ROOT / "assets", target_is_directory=True)
+        online_port = free_port()
         online_env = os.environ.copy()
-        online_env["MC_SETUP_FILE"] = str(ROOT / "tests/stress/network/one.conf")
-        denied = subprocess.run([str(ROOT / "mc_server")], cwd=config_dir, env=online_env,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=8)
-        assert denied.returncode != 0 and "refusing to start" in denied.stderr
+        online_env.update({"MC_SETUP_FILE": str(ROOT / "tests/stress/network/one.conf"),
+                           "MC_BIND_PORT": str(online_port), "MC_WORLD_PATH": str(temp / "world")})
+        online = subprocess.Popen([str(ROOT / "mc_server")], cwd=temp, env=online_env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 8
+            while True:
+                try:
+                    unauthenticated = login(online_port, "Notch")
+                    break
+                except OSError:
+                    if online.poll() is not None or time.monotonic() >= deadline:
+                        raise AssertionError("isolated online server did not start")
+                    time.sleep(0.05)
+            packet_id, payload = mc_ping.read_frame(unauthenticated, -1)
+            assert packet_id == 1, "online login must request encryption"
+            length, pos = mc_ping.decode_varint_from_bytes(payload, 0)
+            assert length == 0, "server ID must be empty"
+            key_len, pos = mc_ping.decode_varint_from_bytes(payload, pos)
+            assert 200 <= key_len <= 4096
+            pos += key_len
+            token_len, pos = mc_ping.decode_varint_from_bytes(payload, pos)
+            assert token_len == 16
+            pos += token_len
+            assert payload[pos:] == b"\x01", "Mojang authentication must be required"
+            expect_rejected(login(online_port, "notch"))
+            mc_ping.send_packet(unauthenticated, 1, b"\x00", -1)
+            expect_rejected(unauthenticated)
+        finally:
+            online.terminate()
+            try:
+                online.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                online.kill()
+                online.wait()
 
     port = free_port()
     with tempfile.TemporaryDirectory(prefix="goatcore-login-") as world:
+        offline_temp = Path(world)
+        (offline_temp / "server.config").write_text("online-mode=false\n", encoding="ascii")
+        (offline_temp / "assets").symlink_to(ROOT / "assets", target_is_directory=True)
         env = os.environ.copy()
         env.update({
             "MC_BIND_PORT": str(port),
-            "MC_WORLD_PATH": world,
+            "MC_WORLD_PATH": str(offline_temp / "world"),
             "MC_SETUP_FILE": str(ROOT / "tests/stress/network/one.conf"),
         })
-        proc = subprocess.Popen([str(ROOT / "mc_server")], cwd=ROOT, env=env,
+        proc = subprocess.Popen([str(ROOT / "mc_server")], cwd=offline_temp, env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         first = None
         try:
