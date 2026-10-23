@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=goatcore
 Group=goatcore
-WorkingDirectory=/opt/goatcore/app
+WorkingDirectory=/opt/goatcore/app/instances/online
 Environment=MC_WORLD_PATH=/var/lib/goatcore/world
 Environment=MC_BIND_PORT=25565
 Environment=MC_SETUP_FILE=/etc/goatcore/server1.setup.conf

@@ -1,6 +1,6 @@
 # Serveurs GoatCore sur 10.0.4.66
 
-Depuis la racine du dépôt local :
+Depuis la racine du dépôt local, **uniquement après une connexion réussie avec un client Java officiel sur le port temporaire 25588** :
 
 ```sh
 ./scripts/deploy-remote.sh
@@ -10,11 +10,12 @@ Depuis la racine du dépôt local :
 ```
 
 Le déploiement compile sur la machine distante et relance le serveur normal
-`10.0.4.66:25565`. Son monde persistant est dans `/var/lib/goatcore/world`.
+`10.0.4.66:25565` en `online-mode=true`. Son monde est dans
+`/var/lib/goatcore/world`.
 Il installe aussi le service de test, mais ne le démarre pas. Si celui-ci était
 déjà actif, il est redémarré avec le nouveau binaire.
 
-Le serveur de test utilise `10.0.4.66:25587` et un monde séparé, persistant
+Le serveur de test utilise `10.0.4.66:25587` en `online-mode=false` et un monde séparé, persistant
 dans `/var/lib/goatcore/test-world`. `start` ne détruit pas ce monde ; `stop`
 ne touche pas au serveur normal. Voir son état ou ses logs :
 
@@ -33,6 +34,16 @@ actuel de cette machine. Modifier un fichier puis redémarrer le service voulu :
 ```sh
 ssh root@10.0.4.66 'systemctl restart goatcore-test.service'
 ```
+
+Les deux processus utilisent le même binaire compilé, mais des répertoires de
+travail distincts (`/opt/goatcore/app/instances/online` et `offline`) et donc
+des `server.config` distincts. Le déploiement initialise ces fichiers depuis
+l'ancienne configuration si elle existe, force le mode voulu lors de cette
+initialisation, puis préserve les réglages des déploiements suivants. Les
+modèles sont dans `config/server-online.config` et `config/server-offline.config`.
+Les journaux restent séparés par unité systemd. Il faut vérifier les deux
+services et les commandes d'Ofwood_ après une bascule ; la présence de
+`MC_ADMIN_USERNAME` ne prouve pas à elle seule le fonctionnement des droits.
 
 Les bots tournent sur la machine distante et ciblent uniquement `127.0.0.1:25587`.
 Leur lancement est toujours manuel. Arguments : nombre (1 à 1000), mode
@@ -54,11 +65,12 @@ pas une capacité validée : surveiller les erreurs et la mémoire, et monter
 progressivement. Les modes mouvement et blocs à forte charge coûtent bien
 plus que les simples connexions.
 
-Les deux services autorisent les commandes d'administration **implémentées par
+Les deux services configurent les commandes d'administration **implémentées par
 GoatCore** pour le pseudo exact `Ofwood_` via `MC_ADMIN_USERNAME`. Ce n'est pas
 un OP vanilla complet : seules les commandes présentes dans GoatCore existent.
-Le serveur reste en mode hors ligne : n'importe qui pouvant s'y connecter peut
-usurper ce pseudo et recevoir les mêmes droits. `MC_ADMIN_COMMANDS=1`, qui
+Sur 25565, cette attribution n'est sûre qu'après vérification réelle de la
+session Mojang et de l'UUID officiel. Sur 25587, le pseudo peut être usurpé
+par tout client ayant accès au port offline. `MC_ADMIN_COMMANDS=1`, qui
 accorderait ces droits à tous, reste désactivé.
 
 Pour le test rapide de blocs, le mode `fastblocks` n'attend pas une confirmation
