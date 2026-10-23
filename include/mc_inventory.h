@@ -93,6 +93,9 @@ typedef struct mc_player_data {
     int32_t food_level;
     float food_saturation;
     float food_exhaustion;
+    float experience_progress;
+    int32_t experience_level;
+    int32_t experience_total;
     double pos_x;
     double pos_y;
     double pos_z;

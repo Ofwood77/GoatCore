@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import struct
 import time
 
-from protocol import read_varint
+from protocol import read_varint, varint
 from stress import Bot
 
 
@@ -20,9 +20,12 @@ class Viewer(Bot):
     def __init__(self, index, args):
         super().__init__(index, args, lambda _: None)
         self.events = defaultdict(list)
+        self.entity_id = None
 
     async def play_packet(self, packet_id, payload):
-        if packet_id in (1, 53, 54, 56, 69, 70, 77, 83, 125):
+        if packet_id == 49:
+            self.entity_id = struct.unpack_from(">i", payload)[0]
+        if packet_id in (1, 2, 5, 53, 54, 56, 69, 70, 77, 83, 99, 102, 125):
             self.events[packet_id].append((time.monotonic(), payload))
         await super().play_packet(packet_id, payload)
 
@@ -51,6 +54,40 @@ def offline_uuid(name):
 def has_profile(bot, packet_id, name):
     identity = offline_uuid(name)
     return any(identity in payload for _, payload in bot.events[packet_id])
+
+
+def animations(bot, entity_id):
+    values = []
+    for _, payload in bot.events[2]:
+        found, offset = read_varint(payload)
+        if found == entity_id and len(payload) == offset + 1:
+            values.append(payload[offset])
+    return values
+
+
+def base_flags(bot, entity_id):
+    values = []
+    for _, payload in bot.events[99]:
+        found, offset = read_varint(payload)
+        if found != entity_id or offset + 3 > len(payload) or payload[offset] != 0:
+            continue
+        serializer, offset = read_varint(payload, offset + 1)
+        if serializer == 0 and offset < len(payload):
+            values.append(payload[offset])
+    return values
+
+
+def poses(bot, entity_id):
+    values = []
+    for _, payload in bot.events[99]:
+        found, offset = read_varint(payload)
+        if found != entity_id or offset + 3 > len(payload) or payload[offset] != 6:
+            continue
+        serializer, offset = read_varint(payload, offset + 1)
+        if serializer == 20:
+            value, _ = read_varint(payload, offset)
+            values.append(value)
+    return values
 
 
 async def until(predicate, label, timeout=12):
@@ -150,6 +187,44 @@ async def check_position(args):
             await close(bot)
 
 
+async def animation_checks(args):
+    settings = SimpleNamespace(host=args.host, port=args.port, timeout=25,
+                               run_id=args.run_id, shared_zone=False, mode="connect",
+                               qa_verify_movement=False)
+    watcher, actor = Viewer(0, settings), Viewer(1, settings)
+    try:
+        await watcher.connect()
+        await actor.connect()
+        await watcher.conn.send(44)
+        await actor.conn.send(44)
+        await until(lambda: actor.entity_id in entity_ids(watcher, 1), "actor spawn")
+        await actor.conn.send(63, varint(0))
+        await until(lambda: 0 in animations(watcher, actor.entity_id), "main-hand swing")
+        await asyncio.sleep(0.7)
+        await actor.conn.send(63, varint(1))
+        await until(lambda: 3 in animations(watcher, actor.entity_id), "off-hand swing")
+        await actor.conn.send(43, b"\x20")
+        await until(lambda: any(flags & 0x02 for flags in base_flags(watcher, actor.entity_id)) and
+                    5 in poses(watcher, actor.entity_id), "sneak metadata and pose")
+        await actor.conn.send(43, b"\x00")
+        await until(lambda: base_flags(watcher, actor.entity_id) and
+                    not base_flags(watcher, actor.entity_id)[-1] & 0x02 and
+                    poses(watcher, actor.entity_id)[-1] == 0, "stand metadata and pose")
+        await actor.conn.send(42, varint(actor.entity_id) + varint(1) + varint(0))
+        await until(lambda: any(flags & 0x08 for flags in base_flags(watcher, actor.entity_id)), "sprint metadata")
+        await actor.conn.send(42, varint(actor.entity_id) + varint(2) + varint(0))
+        await until(lambda: base_flags(watcher, actor.entity_id) and
+                    not base_flags(watcher, actor.entity_id)[-1] & 0x08, "walk metadata")
+        if not args.reference:
+            await actor.conn.send(56, struct.pack(">h", 36) + varint(1) + varint(1) + varint(0) + varint(0))
+            await until(lambda: len([p for _, p in watcher.events[102] if read_varint(p)[0] == actor.entity_id]) >= 2,
+                        "visible main-hand equipment")
+        print("PASS: arm swings, sneak, sprint" + ("" if args.reference else ", visible equipment"))
+    finally:
+        await asyncio.gather(*(close(bot) for bot in (watcher, actor) if bot.conn and
+                               not bot.conn.writer.is_closing()), return_exceptions=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
@@ -157,8 +232,11 @@ if __name__ == "__main__":
     parser.add_argument("--run-id", default="P1C")
     parser.add_argument("--fanout", type=int, choices=(2, 5, 10, 25, 50))
     parser.add_argument("--check-position", type=float)
+    parser.add_argument("--animations", action="store_true")
+    parser.add_argument("--reference", action="store_true", help="skip creative equipment on Vanilla survival")
     options = parser.parse_args()
     if options.fanout and options.check_position is not None:
         parser.error("choose only one test mode")
-    asyncio.run(check_position(options) if options.check_position is not None else
+    asyncio.run(animation_checks(options) if options.animations else
+                check_position(options) if options.check_position is not None else
                 fanout(options) if options.fanout else main(options))
