@@ -1,4 +1,46 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 1B)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 1C en cours)
+
+## Phase 1C : cycle de vie et visibilité des joueurs
+
+L'audit du chemin multijoueur a suivi l'entrée en Play, l'accusé de position,
+la mise en visibilité sur le tick, les transformations relatives, la
+téléportation, la sortie et le chargement de la position à la reconnexion.
+Les identifiants des paquets utilisés viennent des rapports générés 26.1.1 du
+dépôt : Player Info Update 70, Add Entity 1, Move Entity Pos 53,
+Move Entity Pos Rot 54, Move Entity Rot 56, Rotate Head 83,
+Teleport Entity 125, Remove Entities 77 et Player Info Remove 69.
+
+Le test de réception `tests/stress/test_player_visibility.py` a été exécuté
+sur le serveur distant, d'abord contre l'instance offline 25587 avant la
+correction, puis contre un serveur temporaire isolé sur 25589 après compilation.
+Deux bots ont reçu l'entrée de profil et l'entité de l'autre, un déplacement
+relatif et une rotation de tête. Un saut de position de 9 blocs a produit une
+téléportation ; la déconnexion a produit Remove Entities puis Player Info
+Remove. La reconnexion a créé une seule nouvelle entité et a restauré la
+position sauvegardée. Des groupes de 5, 10, 25 et 50 bots ont chacun reçu
+exactement une entité distincte pour chaque autre membre du groupe. Ce sont
+des observations du protocole côté bots, pas une validation visuelle par deux
+clients Java officiels. Après un arrêt propre et un nouveau démarrage de
+l'instance temporaire, le bot testé a retrouvé sa coordonnée X de 9,750.
+`make -B precommit-check` a réussi sur la copie distante isolée. La version
+ASan+UBSan a passé le scénario à deux joueurs et le groupe de dix joueurs,
+ainsi que le test de position après redémarrage, sans diagnostic dans le
+journal de cette instance. Ces passages ne couvrent pas tous les entrelacements
+des threads.
+
+L'audit a trouvé une conversion de delta en `int16_t` effectuée avant la
+décision de téléporter. Pour un déplacement supérieur à la plage relative,
+cette conversion était hors plage en C. La conversion se fait désormais
+seulement lorsque le paquet relatif est choisi. Le test à 9 blocs couvre ce
+chemin. Les sauvegardes existantes et l'identité online/offline n'ont pas été
+modifiées.
+
+Restent à vérifier : comparaison de captures binaires avec un serveur Vanilla
+26.1.1, visibilité réelle avec deux clients Java, synchronisation détaillée
+des animations et postures, filtrage des entités à longue distance, perte de
+connexion pendant l'envoi des chunks ou un broadcast, restauration complète
+après arrêt et redémarrage (inventaire, santé, faim, expérience et dimension),
+et absence de course sur tous les ordonnancements. La phase 1 n'est pas terminée.
 
 Référence des identifiants : `data/26.1.1/reports/packets.json` et les en-têtes
 générés du dépôt (protocole 775). Les formats binaires ci-dessous ne sont pas
