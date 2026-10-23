@@ -16,6 +16,7 @@ PLAY_CLIENTBOUND_LOGIN = 0x31
 PLAY_CLIENTBOUND_PING = 0x3D
 PLAY_CLIENTBOUND_PLAYER_POSITION = 0x48
 PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE = 0x46
+PLAY_CLIENTBOUND_SET_ENTITY_DATA = 0x63
 PLAY_SERVERBOUND_ACCEPT_TELEPORTATION = 0x00
 PLAY_SERVERBOUND_KEEP_ALIVE = 0x1C
 PLAY_SERVERBOUND_PONG = 0x2D
@@ -176,7 +177,9 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
     got_join_game = False
     got_sync_pos = False
     got_self_info = False
+    got_skin_parts = False
     self_uuid = None
+    self_entity_id = None
 
     try:
         send_handshake(sock, host, port, next_state=2)
@@ -233,11 +236,17 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     raise RuntimeError(f"play disconnect: {reason}")
                 if pid == PLAY_CLIENTBOUND_LOGIN:
                     got_join_game = True
+                    if len(payload) >= 4:
+                        self_entity_id = struct.unpack_from(">i", payload)[0]
                 if pid == PLAY_CLIENTBOUND_PLAYER_INFO_UPDATE:
                     actions, pos = decode_varint_from_bytes(payload, 0)
                     count, pos = decode_varint_from_bytes(payload, pos)
                     if actions & 1 and count == 1 and payload[pos:pos + 16] == self_uuid:
                         got_self_info = True
+                if pid == PLAY_CLIENTBOUND_SET_ENTITY_DATA:
+                    entity_id, pos = decode_varint_from_bytes(payload, 0)
+                    if entity_id == self_entity_id and payload[pos:] == bytes((16, 0, 0x7f, 0xff)):
+                        got_skin_parts = True
                 if pid == PLAY_CLIENTBOUND_KEEP_ALIVE and len(payload) == 8:
                     send_packet(sock, PLAY_SERVERBOUND_KEEP_ALIVE, payload, compression_threshold=compression_threshold)
                 if pid == PLAY_CLIENTBOUND_PING and len(payload) == 4:
@@ -249,11 +258,11 @@ def run_login(host: str, port: int, username: str, timeout_s: float) -> int:
                     send_packet(sock, PLAY_SERVERBOUND_ACCEPT_TELEPORTATION, encode_varint(teleport_id), compression_threshold=compression_threshold)
                     got_sync_pos = True
 
-                if got_join_game and got_sync_pos and got_self_info:
-                    print("play ok (join game + self player info + sync pos)")
+                if got_join_game and got_sync_pos and got_self_info and got_skin_parts:
+                    print("play ok (join game + self player info + skin parts + sync pos)")
                     return 0
 
-        raise TimeoutError("timeout waiting for PLAY (join game + self player info + sync pos)")
+        raise TimeoutError("timeout waiting for PLAY (join game + self player info + skin parts + sync pos)")
     finally:
         sock.close()
 

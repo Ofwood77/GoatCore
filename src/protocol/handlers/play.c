@@ -172,6 +172,10 @@
 #define WORLD_SPAWN_PITCH 0.0f
 
 #define PLAYER_METADATA_LIVING_FLAGS_INDEX 8
+/* Avatar.MODE_CUSTOMISATION precedes Player.ABSORPTION (index 17, Float)
+ * in the official 26.1 classes; protocol 775 uses index 16 for this Byte. */
+#define PLAYER_METADATA_SKIN_PARTS_INDEX 16
+#define PLAYER_METADATA_ALL_SKIN_PARTS 0x7f
 #define ENTITY_METADATA_TYPE_BYTE 0
 #define LIVING_ENTITY_FLAG_USING_ITEM 0x01
 #define LIVING_ENTITY_FLAG_USING_OFFHAND 0x02
@@ -3651,6 +3655,17 @@ static int send_player_info_add(mc_conn_t *viewer, mc_conn_t *subject) {
     return rc;
 }
 
+static int send_player_skin_parts_metadata(mc_conn_t *viewer, mc_conn_t *subject) {
+    uint8_t buf[16];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+        w_ubyte(buf, sizeof(buf), &pos, PLAYER_METADATA_SKIN_PARTS_INDEX) != 0 ||
+        w_varint(buf, sizeof(buf), &pos, ENTITY_METADATA_TYPE_BYTE) != 0 ||
+        w_ubyte(buf, sizeof(buf), &pos, PLAYER_METADATA_ALL_SKIN_PARTS) != 0 ||
+        w_ubyte(buf, sizeof(buf), &pos, 0xff) != 0) return -1;
+    return conn_write_packet(viewer, PKT_PLAY_ENTITY_METADATA, buf, pos, -1);
+}
+
 static int send_player_remove(mc_conn_t *viewer, mc_conn_t *subject) {
     uint8_t buf[32];
     size_t pos = 0;
@@ -4009,6 +4024,7 @@ int proto_play_sync_remote_player(mc_conn_t *viewer, mc_conn_t *subject) {
             return -1;
         }
         if (send_player_living_metadata(viewer, subject, entry, true) != 0 ||
+            send_player_skin_parts_metadata(viewer, subject) != 0 ||
             send_player_equipment(viewer, subject, entry, true) != 0) {
             return -1;
         }
@@ -6808,6 +6824,7 @@ int proto_send_play_disconnect(mc_conn_t *c, const char *reason_json) {
 }
 
 static int send_player_info_add(mc_conn_t *viewer, mc_conn_t *subject);
+static int send_player_skin_parts_metadata(mc_conn_t *viewer, mc_conn_t *subject);
 
 int proto_play_send_initial(mc_conn_t *c) {
     if (!c || c->play_init_sent) return 0;
@@ -6849,6 +6866,7 @@ int proto_play_send_initial(mc_conn_t *c) {
     /* The client's own profile must be present in Player Info as well: its
      * signed textures are used for the local player skin and tab entry. */
     if (send_player_info_add(c, c) != 0) return -1;
+    if (send_player_skin_parts_metadata(c, c) != 0) return -1;
     if (proto_play_send_difficulty(c) != 0) return -1;
 
     if (send_waiting_for_level_chunks_event(c) != 0) return -1;
