@@ -3925,11 +3925,6 @@ static int send_player_move_update(mc_conn_t *viewer, mc_conn_t *subject, mc_rem
     double dx = subject->x - entry->x;
     double dy = subject->y - entry->y;
     double dz = subject->z - entry->z;
-    int16_t mx = (int16_t)((dx >= 0.0) ? (dx * 4096.0 + 0.5) : (dx * 4096.0 - 0.5));
-    int16_t my = (int16_t)((dy >= 0.0) ? (dy * 4096.0 + 0.5) : (dy * 4096.0 - 0.5));
-    int16_t mz = (int16_t)((dz >= 0.0) ? (dz * 4096.0 + 0.5) : (dz * 4096.0 - 0.5));
-    bool pos_changed = mx != 0 || my != 0 || mz != 0;
-    bool look_changed = angle_byte(subject->yaw) != angle_byte(entry->yaw) || angle_byte(subject->pitch) != angle_byte(entry->pitch);
     bool need_teleport =
         (!entry->spawned) || abs_d(dx * 4096.0) > 32767.0 || abs_d(dy * 4096.0) > 32767.0 || abs_d(dz * 4096.0) > 32767.0;
     if (need_teleport) {
@@ -3950,6 +3945,12 @@ static int send_player_move_update(mc_conn_t *viewer, mc_conn_t *subject, mc_rem
         entry->pitch = subject->pitch;
         return 0;
     }
+    /* A teleport can exceed int16_t's range; only quantize after that case is handled. */
+    int16_t mx = (int16_t)((dx >= 0.0) ? (dx * 4096.0 + 0.5) : (dx * 4096.0 - 0.5));
+    int16_t my = (int16_t)((dy >= 0.0) ? (dy * 4096.0 + 0.5) : (dy * 4096.0 - 0.5));
+    int16_t mz = (int16_t)((dz >= 0.0) ? (dz * 4096.0 + 0.5) : (dz * 4096.0 - 0.5));
+    bool pos_changed = mx != 0 || my != 0 || mz != 0;
+    bool look_changed = angle_byte(subject->yaw) != angle_byte(entry->yaw) || angle_byte(subject->pitch) != angle_byte(entry->pitch);
     if (!pos_changed && !look_changed) return 0;
 
     uint8_t buf[32];
