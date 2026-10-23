@@ -74,10 +74,10 @@ static int auth_fetch_mojang(const char *name, const char *hash,
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
-    /* Some hosts spend ~5 s falling back from a dead primary DNS resolver.
-     * This call runs only in an auth worker; keep a bounded, but usable, window. */
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
+    /* A slow DNS fallback can consume several seconds before TCP starts.
+     * Keep the request bounded, but allow a usable session check window. */
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 18000L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 25000L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -98,6 +98,27 @@ static int auth_fetch_mojang(const char *name, const char *hash,
     }
     int parse_result = mc_profile_parse_auth(response, name, out);
     if (parse_result != 0) log_error("Mojang hasJoined returned an invalid profile for %s", name);
+    if (parse_result == 0 && out->found && getenv("MC_DEBUG_AUTH_TEXTURE")) {
+        unsigned char digest[EVP_MAX_MD_SIZE];
+        unsigned int digest_len = 0;
+        if (EVP_Digest(out->texture_value, strlen(out->texture_value), digest,
+                       &digest_len, EVP_sha256(), NULL) == 1 && digest_len == 32) {
+            char hex[65];
+            for (size_t i = 0; i < 32; i++)
+                snprintf(hex + i * 2, sizeof(hex) - i * 2, "%02x", digest[i]);
+            log_info("Mojang hasJoined texture SHA-256 for %s: %s", name, hex);
+        }
+        size_t encoded_len = strlen(out->texture_value);
+        unsigned char decoded[MC_PROFILE_TEXTURE_MAX];
+        if (encoded_len <= (sizeof(decoded) - 1) / 3 * 4) {
+            int decoded_len = EVP_DecodeBlock(decoded,
+                (const unsigned char *)out->texture_value, (int)encoded_len);
+            if (decoded_len > 0 && (size_t)decoded_len < sizeof(decoded)) {
+                decoded[decoded_len] = '\0';
+                log_info("Mojang hasJoined public texture JSON for %s: %s", name, (char *)decoded);
+            }
+        }
+    }
     return parse_result;
 }
 
