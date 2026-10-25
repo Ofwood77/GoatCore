@@ -767,6 +767,7 @@ static int mark_player_ready(mc_conn_t *c, const char *reason) {
     if (c->server && net_server_sync_item_entities_to_conn(c->server, c) != 0) {
         return -1;
     }
+    if (c->server && net_server_broadcast_player_presence(c->server, c) != 0) return -1;
     return 0;
 }
 
@@ -2608,6 +2609,58 @@ static int make_text_component(const char *text, uint8_t **out, size_t *out_len)
     }
     int rc = mc_nbt_write_unnamed_root(root, out, out_len);
     mc_nbt_free(root);
+    return rc;
+}
+
+static int make_presence_component(const char *name, bool joined, uint8_t **out, size_t *out_len) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    mc_nbt_tag_t *root = nbt_new_tag(MC_NBT_TAG_COMPOUND, NULL);
+    if (!root) return -1;
+    root->payload.compound.length = 3;
+    root->payload.compound.children = (mc_nbt_tag_t **)calloc(3, sizeof(*root->payload.compound.children));
+    if (!root->payload.compound.children) goto fail;
+    root->payload.compound.children[0] = nbt_new_string_tag("translate", joined ? "multiplayer.player.joined" :
+                                                                         "multiplayer.player.left");
+    root->payload.compound.children[1] = nbt_new_string_tag("color", "yellow");
+    mc_nbt_tag_t *with = nbt_new_tag(MC_NBT_TAG_LIST, "with");
+    root->payload.compound.children[2] = with;
+    if (!root->payload.compound.children[0] || !root->payload.compound.children[1] || !with) goto fail;
+    with->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    with->payload.list.length = 1;
+    with->payload.list.items = (mc_nbt_tag_t **)calloc(1, sizeof(*with->payload.list.items));
+    if (!with->payload.list.items) goto fail;
+    mc_nbt_tag_t *player = nbt_new_tag(MC_NBT_TAG_COMPOUND, NULL);
+    with->payload.list.items[0] = player;
+    if (!player) goto fail;
+    player->payload.compound.length = 1;
+    player->payload.compound.children = (mc_nbt_tag_t **)calloc(1, sizeof(*player->payload.compound.children));
+    if (!player->payload.compound.children) goto fail;
+    player->payload.compound.children[0] = nbt_new_string_tag("text", name);
+    if (!player->payload.compound.children[0]) goto fail;
+    int rc = mc_nbt_write_unnamed_root(root, out, out_len);
+    mc_nbt_free(root);
+    return rc;
+fail:
+    mc_nbt_free(root);
+    return -1;
+}
+
+int proto_play_send_presence_message(mc_conn_t *viewer, mc_conn_t *subject, bool joined) {
+    if (!viewer || !subject || viewer == subject) return 0;
+    uint8_t *component = NULL;
+    size_t component_len = 0;
+    if (make_presence_component(subject->username, joined, &component, &component_len) != 0) return -1;
+    mc_buf_t payload;
+    if (buf_init(&payload, component_len + 1) != 0) {
+        free(component);
+        return -1;
+    }
+    int rc = -1;
+    if (buf_write(&payload, component, component_len) == 0 && buf_w_u8(&payload, 0) == 0)
+        rc = conn_write_packet(viewer, PKT_PLAY_SYSTEM_CHAT, payload.data, payload.len, -1);
+    buf_free(&payload);
+    free(component);
     return rc;
 }
 

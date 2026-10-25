@@ -130,6 +130,10 @@ int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, u
     (void)server; (void)subject; (void)status;
     return 0;
 }
+int net_server_broadcast_player_presence(mc_server_t *server, mc_conn_t *subject) {
+    (void)server; (void)subject;
+    return 0;
+}
 
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
     (void)server;
