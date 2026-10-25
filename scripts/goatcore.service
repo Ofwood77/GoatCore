@@ -13,7 +13,7 @@ Environment=MC_SETUP_FILE=/etc/goatcore/server1.setup.conf
 Environment=MC_ADMIN_USERNAME=Ofwood_
 Environment=MC_ADMIN_UUID=c01c7df6c8fd4bb7b99ac6287e058de3
 StateDirectory=goatcore
-ExecStart=/opt/goatcore/app/mc_server
+ExecStart=/usr/bin/stdbuf -oL -eL /opt/goatcore/app/mc_server
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536

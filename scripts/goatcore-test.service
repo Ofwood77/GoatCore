@@ -13,6 +13,6 @@ Environment=MC_SETUP_FILE=/etc/goatcore/server2.setup.conf
 Environment=MC_ADMIN_USERNAME=Ofwood_
 Environment=MC_MAX_CONNECTIONS=1000
 StateDirectory=goatcore
-ExecStart=/opt/goatcore/app/mc_server
+ExecStart=/usr/bin/stdbuf -oL -eL /opt/goatcore/app/mc_server
 Restart=no
 LimitNOFILE=65536
