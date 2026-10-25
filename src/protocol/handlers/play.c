@@ -115,6 +115,7 @@
 
 #define ENTITY_STATUS_OP_LEVEL_4 28
 #define ENTITY_STATUS_HURT 2
+#define ENTITY_STATUS_DEATH 3
 
 #define GAMEMODE_SURVIVAL 0
 #define GAMEMODE_CREATIVE 1
@@ -130,15 +131,14 @@
 #define PLAYER_DEFAULT_FOOD_SATURATION 5.0f
 #define PLAYER_MAX_FOOD_EXHAUSTION 40.0f
 #define PLAYER_FOOD_EXHAUSTION_STEP 4.0f
-#define PLAYER_MOVE_EXHAUSTION_PER_BLOCK 0.05f
-#define PLAYER_SPRINT_EXHAUSTION_PER_BLOCK 0.15f
-#define PLAYER_JUMP_EXHAUSTION 0.2f
-#define PLAYER_SPRINT_DISTANCE_THRESHOLD 0.18
+#define PLAYER_SPRINT_EXHAUSTION_PER_BLOCK 0.1f
+#define PLAYER_JUMP_EXHAUSTION 0.05f
+#define PLAYER_SPRINT_JUMP_EXHAUSTION 0.2f
 #define PLAYER_MAX_HUNGER_SAMPLE_DISTANCE 2.0
 #define PLAYER_MIN_MOVEMENT_SAMPLE 0.001
-#define PLAYER_JUMP_MIN_ASCENT 0.2
 #define PLAYER_NATURAL_REGEN_FOOD_THRESHOLD 18
 #define PLAYER_NATURAL_REGEN_INTERVAL_MS 4000
+#define PLAYER_FAST_REGEN_INTERVAL_MS 500
 #define PLAYER_PEACEFUL_REGEN_INTERVAL_MS 1000
 #define PLAYER_NATURAL_REGEN_AMOUNT 1.0f
 #define PLAYER_NATURAL_REGEN_EXHAUSTION 6.0f
@@ -154,9 +154,10 @@
 #define PLAYER_COLLISION_HALF_WIDTH 0.3
 #define PLAYER_COLLISION_HEIGHT 1.8
 #define PLAYER_COLLISION_EPSILON 1.0e-7
-#define PLAYER_VOID_DAMAGE_Y ((double)MC_WORLD_MIN_Y - 0.5)
+#define PLAYER_VOID_DAMAGE_Y ((double)MC_WORLD_MIN_Y - 64.0)
 #define PLAYER_VOID_DAMAGE_AMOUNT 4.0f
 #define PLAYER_VOID_DAMAGE_INTERVAL_MS 500
+#define PLAYER_HURT_COOLDOWN_MS 500
 #define PLAYER_FALL_SAFE_DISTANCE 3.0
 #define PLAYER_PVP_BASE_DAMAGE 4.0f
 #define PLAYER_PVP_MAX_DISTANCE 4.5
@@ -692,6 +693,9 @@ static int ensure_player_loaded(mc_conn_t *c) {
     c->food_saturation = player->food_saturation;
     c->food_exhaustion = player->food_exhaustion;
     c->dead = false;
+    c->has_hurt = false;
+    c->last_hurt_ms = 0;
+    c->last_hurt_amount = 0.0f;
     c->sneaking = false;
     c->sprinting = false;
     c->on_ground = false;
@@ -699,6 +703,7 @@ static int ensure_player_loaded(mc_conn_t *c) {
     c->fall_start_y = player->pos_y;
     c->next_void_damage_ms = 0;
     c->next_natural_regen_ms = 0;
+    c->fast_regen_active = false;
     c->next_starvation_damage_ms = 0;
     c->player = player;
     return 0;
@@ -735,6 +740,9 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     c->food_saturation = 0.0f;
     c->food_exhaustion = 0.0f;
     c->dead = false;
+    c->has_hurt = false;
+    c->last_hurt_ms = 0;
+    c->last_hurt_amount = 0.0f;
     c->sneaking = false;
     c->sprinting = false;
     c->on_ground = false;
@@ -742,6 +750,7 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     c->fall_start_y = 0.0;
     c->next_void_damage_ms = 0;
     c->next_natural_regen_ms = 0;
+    c->fast_regen_active = false;
     c->next_starvation_damage_ms = 0;
     c->remote_players_len = 0;
     sent_chunks_clear(c);
@@ -2449,7 +2458,10 @@ int proto_play_apply_pvp_attack_for_test(mc_conn_t *attacker, mc_conn_t *target,
     float base_damage = pvp_weapon_base_damage(attacker);
     float final_damage = proto_play_pvp_damage_for_test(attacker, target, base_damage);
     if (!(final_damage > 0.0f)) return 1;
+    float previous_health = target->health;
     if (apply_player_damage(target, final_damage, "Killed in PvP", false, now_ms) != 0) return -1;
+    if (target->health == previous_health) return 0;
+    if (target->server) (void)net_server_broadcast_player_event(target->server, target, ENTITY_STATUS_HURT);
     (void)send_entity_event(target, ENTITY_STATUS_HURT);
     return 1;
 }
@@ -2527,6 +2539,7 @@ static void player_reset_food_debug_runtime(mc_conn_t *c) {
     c->food_saturation = clamp_food_saturation(c->food, c->food_saturation);
     c->food_exhaustion = 0.0f;
     c->next_natural_regen_ms = 0;
+    c->fast_regen_active = false;
     c->next_starvation_damage_ms = 0;
     c->player->food_level = c->food;
     c->player->food_saturation = c->food_saturation;
@@ -2541,15 +2554,13 @@ static int player_apply_exhaustion_thresholds(mc_conn_t *c, bool persist) {
     c->food_saturation = clamp_food_saturation(c->food, c->food_saturation);
     c->food_exhaustion = clamp_food_exhaustion(c->food_exhaustion);
 
-    while (c->food_exhaustion >= PLAYER_FOOD_EXHAUSTION_STEP) {
+    if (c->food_exhaustion > PLAYER_FOOD_EXHAUSTION_STEP) {
         c->food_exhaustion -= PLAYER_FOOD_EXHAUSTION_STEP;
         if (c->food_saturation > 0.0f) {
             c->food_saturation -= 1.0f;
             if (c->food_saturation < 0.0f) c->food_saturation = 0.0f;
             changed = true;
-            continue;
-        }
-        if (c->food > 0) {
+        } else if (c->food > 0) {
             c->food -= 1;
             changed = true;
         }
@@ -2575,7 +2586,8 @@ static int player_add_exhaustion(mc_conn_t *c, float amount, bool persist) {
     }
     c->food_exhaustion = clamp_food_exhaustion(c->food_exhaustion + amount);
     c->player->food_exhaustion = c->food_exhaustion;
-    return player_apply_exhaustion_thresholds(c, persist);
+    /* FoodData.tick consumes accumulated exhaustion on the next food tick. */
+    return persist ? save_player_data(c) : 0;
 }
 
 static int make_text_component(const char *text, uint8_t **out, size_t *out_len) {
@@ -3158,6 +3170,7 @@ static int handle_player_death(mc_conn_t *c, const char *death_message, bool ser
     c->player->health = 0.0f;
     c->dead = true;
     c->next_natural_regen_ms = 0;
+    c->fast_regen_active = false;
     c->next_starvation_damage_ms = 0;
     c->next_void_damage_ms = 0;
     cancel_item_use(c);
@@ -3166,16 +3179,38 @@ static int handle_player_death(mc_conn_t *c, const char *death_message, bool ser
     close_active_window(c, true);
     bool keep_inventory = c->cfg && c->cfg->keep_inventory;
     if (!keep_inventory && drop_player_inventory(c, server_locked) < 0) return -1;
+    if (!keep_inventory) {
+        /* Vanilla transfers inventory and XP to the respawned player only
+         * when keepInventory is enabled. Experience orbs need an entity
+         * implementation and are tracked separately from player XP. */
+        c->player->experience_progress = 0.0f;
+        c->player->experience_level = 0;
+        c->player->experience_total = 0;
+    }
     if (sync_inventory_full(c) != 0) return -1;
     if (send_set_health_packet(c) != 0) return -1;
     if (send_combat_kill_packet(c, death_message) != 0) return -1;
+    if (c->server && net_server_broadcast_player_event(c->server, c, ENTITY_STATUS_DEATH) != 0) return -1;
     return save_player_data(c);
 }
 
 static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms) {
-    (void)now_ms;
     if (!player_can_take_damage(c)) return 0;
-    if (!(amount > 0.0f)) return 0;
+    if (!(amount > 0.0f) || !isfinite(amount)) return 0;
+
+    /* LivingEntity keeps 20 ticks of hurt immunity. During the first ten
+     * ticks only the excess over the strongest previous hit is applied. */
+    if (c->has_hurt && now_ms >= c->last_hurt_ms &&
+        now_ms - c->last_hurt_ms < PLAYER_HURT_COOLDOWN_MS) {
+        if (amount <= c->last_hurt_amount) return 0;
+        float excess = amount - c->last_hurt_amount;
+        c->last_hurt_amount = amount;
+        amount = excess;
+    } else {
+        c->has_hurt = true;
+        c->last_hurt_ms = now_ms;
+        c->last_hurt_amount = amount;
+    }
 
     c->health -= amount;
     if (c->health < 0.0f) c->health = 0.0f;
@@ -3206,6 +3241,9 @@ static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spaw
     if (!c || !c->player) return;
     cancel_item_use(c);
     c->dead = false;
+    c->has_hurt = false;
+    c->last_hurt_ms = 0;
+    c->last_hurt_amount = 0.0f;
     c->sneaking = false;
     c->sprinting = false;
     c->health = PLAYER_MAX_HEALTH;
@@ -3233,6 +3271,7 @@ static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spaw
     c->chunk_refresh_ping_id = 0;
     c->next_void_damage_ms = 0;
     c->next_natural_regen_ms = 0;
+    c->fast_regen_active = false;
     c->next_starvation_damage_ms = 0;
     reset_fall_tracking(c);
     reset_remote_player_tracking(c);
@@ -3301,6 +3340,7 @@ static int tick_natural_regen_and_starvation(mc_conn_t *c, int64_t now_ms) {
     if (!player_can_use_hunger_system(c)) {
         if (c) {
             c->next_natural_regen_ms = 0;
+            c->fast_regen_active = false;
             c->next_starvation_damage_ms = 0;
         }
         return 0;
@@ -3315,6 +3355,7 @@ static int tick_natural_regen_and_starvation(mc_conn_t *c, int64_t now_ms) {
         c->food_exhaustion = 0.0f;
         c->player->food_exhaustion = 0.0f;
         c->next_starvation_damage_ms = 0;
+        c->fast_regen_active = false;
 
         if (c->health < PLAYER_MAX_HEALTH) {
             if (c->next_natural_regen_ms == 0) c->next_natural_regen_ms = now_ms + PLAYER_PEACEFUL_REGEN_INTERVAL_MS;
@@ -3331,14 +3372,23 @@ static int tick_natural_regen_and_starvation(mc_conn_t *c, int64_t now_ms) {
     if (player_apply_exhaustion_thresholds(c, false) != 0) return -1;
 
     if (c->health < PLAYER_MAX_HEALTH && c->food >= PLAYER_NATURAL_REGEN_FOOD_THRESHOLD) {
-        if (c->next_natural_regen_ms == 0) c->next_natural_regen_ms = now_ms + PLAYER_NATURAL_REGEN_INTERVAL_MS;
+        bool fast = c->food == PLAYER_MAX_FOOD_LEVEL && c->food_saturation > 0.0f;
+        int64_t interval = fast ? PLAYER_FAST_REGEN_INTERVAL_MS : PLAYER_NATURAL_REGEN_INTERVAL_MS;
+        if (c->next_natural_regen_ms == 0 || c->fast_regen_active != fast) {
+            c->next_natural_regen_ms = now_ms + interval;
+        }
+        c->fast_regen_active = fast;
         if (now_ms >= c->next_natural_regen_ms) {
-            c->next_natural_regen_ms = now_ms + PLAYER_NATURAL_REGEN_INTERVAL_MS;
-            if (player_heal(c, PLAYER_NATURAL_REGEN_AMOUNT) != 0) return -1;
-            if (player_add_exhaustion(c, PLAYER_NATURAL_REGEN_EXHAUSTION, false) != 0) return -1;
+            c->next_natural_regen_ms = now_ms + interval;
+            float amount = fast ? fminf(c->food_saturation, PLAYER_NATURAL_REGEN_EXHAUSTION) :
+                                  PLAYER_NATURAL_REGEN_EXHAUSTION;
+            float heal = fast ? amount / PLAYER_NATURAL_REGEN_EXHAUSTION : PLAYER_NATURAL_REGEN_AMOUNT;
+            if (player_heal(c, heal) != 0) return -1;
+            if (player_add_exhaustion(c, amount, false) != 0) return -1;
         }
     } else {
         c->next_natural_regen_ms = 0;
+        c->fast_regen_active = false;
     }
 
     if (c->food <= 0 && difficulty != MC_DIFFICULTY_PEACEFUL) {
@@ -4168,6 +4218,17 @@ int proto_play_send_remote_animation(mc_conn_t *viewer, mc_conn_t *subject, uint
     if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
         w_ubyte(buf, sizeof(buf), &pos, animation) != 0) return -1;
     return conn_write_packet(viewer, PKT_PLAY_ANIMATE, buf, pos, -1);
+}
+
+int proto_play_send_remote_entity_event(mc_conn_t *viewer, mc_conn_t *subject, uint8_t status) {
+    if (!viewer || !subject || viewer == subject || viewer->closing || !viewer->play_ready) return 0;
+    mc_remote_player_t *entry = remote_player_get(viewer, subject->entity_id);
+    if (!entry || !entry->spawned) return 0;
+    uint8_t buf[5];
+    size_t pos = 0;
+    if (w_i32(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+        w_ubyte(buf, sizeof(buf), &pos, status) != 0) return -1;
+    return conn_write_packet(viewer, PKT_PLAY_ENTITY_EVENT, buf, pos, -1);
 }
 
 static const mc_slot_t *selected_mainhand_slot(const mc_conn_t *c) {
@@ -7010,6 +7071,16 @@ int proto_play_send_initial(mc_conn_t *c) {
 static int handle_player_movement_update(mc_conn_t *c, bool has_pos, double x, double y, double z, bool has_rot, float yaw, float pitch,
                                          bool on_ground, int64_t now_ms) {
     if (!c) return -1;
+    /* ServerGamePacketListenerImpl rejects NaN coordinates and non-finite
+     * angles, then clamps coordinates to the Vanilla world packet bounds. */
+    if ((has_pos && (isnan(x) || isnan(y) || isnan(z))) ||
+        (has_rot && (!isfinite(yaw) || !isfinite(pitch)))) return -1;
+    if (has_pos) {
+        x = fmin(fmax(x, -30000000.0), 30000000.0);
+        y = fmin(fmax(y, -20000000.0), 20000000.0);
+        z = fmin(fmax(z, -30000000.0), 30000000.0);
+    }
+    if (c->dead) return 0;
 
     bool prev_on_ground = c->on_ground;
     bool prev_has_pos = c->has_pos;
@@ -7041,18 +7112,20 @@ static int handle_player_movement_update(mc_conn_t *c, bool has_pos, double x, d
         double dx = x - prev_x;
         double dz = z - prev_z;
         double horizontal_distance = sqrt(dx * dx + dz * dz);
-        if (horizontal_distance > PLAYER_MIN_MOVEMENT_SAMPLE && horizontal_distance <= PLAYER_MAX_HUNGER_SAMPLE_DISTANCE) {
-            float multiplier = horizontal_distance >= PLAYER_SPRINT_DISTANCE_THRESHOLD ? PLAYER_SPRINT_EXHAUSTION_PER_BLOCK
-                                                                                       : PLAYER_MOVE_EXHAUSTION_PER_BLOCK;
-            if (player_add_exhaustion(c, (float)(horizontal_distance * multiplier), false) != 0) return -1;
+        if (on_ground && c->sprinting && horizontal_distance > PLAYER_MIN_MOVEMENT_SAMPLE &&
+            horizontal_distance <= PLAYER_MAX_HUNGER_SAMPLE_DISTANCE) {
+            int centimeters = (int)lround(horizontal_distance * 100.0);
+            if (player_add_exhaustion(c, (float)centimeters * 0.01f * PLAYER_SPRINT_EXHAUSTION_PER_BLOCK,
+                                      false) != 0) return -1;
         }
-        if (prev_on_ground && !on_ground && y > prev_y + PLAYER_JUMP_MIN_ASCENT) {
+        if (prev_on_ground && !on_ground && y > prev_y) {
             jump_started = true;
         }
     }
 
     if (jump_started) {
-        if (player_add_exhaustion(c, PLAYER_JUMP_EXHAUSTION, false) != 0) return -1;
+        if (player_add_exhaustion(c, c->sprinting ? PLAYER_SPRINT_JUMP_EXHAUSTION : PLAYER_JUMP_EXHAUSTION,
+                                  false) != 0) return -1;
     }
     if (!player_can_take_damage(c)) {
         c->fall_tracking = false;
@@ -7072,16 +7145,23 @@ static int handle_player_movement_update(mc_conn_t *c, bool has_pos, double x, d
     if (c->fall_tracking && !prev_on_ground) {
         double fall_distance = c->fall_start_y - c->y;
         c->fall_tracking = false;
-        if (fall_distance > PLAYER_FALL_SAFE_DISTANCE) {
-            float damage = (float)((int)(fall_distance - PLAYER_FALL_SAFE_DISTANCE));
-            if (damage < 1.0f) damage = 1.0f;
-            return apply_player_damage(c, damage, "You fell from a high place", false, now_ms);
-        }
+        /* LivingEntity.calculateFallDamage floors distance + 1e-6 minus
+         * the safe fall distance. A 3.1-block fall still deals no damage. */
+        int damage = (int)floor(fall_distance + 1.0e-6 - PLAYER_FALL_SAFE_DISTANCE);
+        if (damage > 0) return apply_player_damage(c, (float)damage, "You fell from a high place", false, now_ms);
         return 0;
     }
 
     c->fall_tracking = false;
     return 0;
+}
+
+int proto_play_movement_for_test(mc_conn_t *c, double x, double y, double z, bool on_ground, int64_t now_ms) {
+    return handle_player_movement_update(c, true, x, y, z, false, 0.0f, 0.0f, on_ground, now_ms);
+}
+
+int proto_play_food_tick_for_test(mc_conn_t *c, int64_t now_ms) {
+    return tick_natural_regen_and_starvation(c, now_ms);
 }
 
 int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
