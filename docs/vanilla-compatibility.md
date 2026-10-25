@@ -260,3 +260,8 @@ utilisé : son runtime échoue sur un programme C minimal avant tout test avec
 Vanilla 25590, le test des paquets de mouvement de bras, d'accroupissement et
 de sprint a réussi ; il sert de référence à ce sous-ensemble de la phase 1C,
 pas de validation des autres scénarios physiques 1D.
+
+Le journal de l'instance inscrit maintenant le pseudo, la commande reçue,
+l'autorisation et tout changement effectif de gamemode (ancien et nouveau).
+Cette trace permet de constater côté serveur l'exécution des commandes de
+validation, sans déduire de la seule connexion que les permissions marchent.
