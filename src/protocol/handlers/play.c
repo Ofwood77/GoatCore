@@ -5263,10 +5263,24 @@ static bool command_allowed(const mc_conn_t *c, const char *name) {
     return false;
 }
 
+static const char *player_gamemode_name(int gamemode) {
+    static const char *names[] = {"survival", "creative", "adventure", "spectator"};
+    return gamemode >= 0 && gamemode < 4 ? names[gamemode] : "unknown";
+}
+
 static int handle_command(mc_conn_t *c, char *cmdline) {
     if (!c || !cmdline) return 0;
     while (*cmdline && isspace((unsigned char)*cmdline)) cmdline++;
     if (*cmdline == '/') cmdline++;
+    char logged_command[256];
+    size_t logged_len = 0;
+    while (cmdline[logged_len] && logged_len < sizeof(logged_command) - 1) {
+        unsigned char ch = (unsigned char)cmdline[logged_len];
+        logged_command[logged_len] = isprint(ch) ? (char)ch : '?';
+        logged_len++;
+    }
+    bool truncated = cmdline[logged_len] != '\0';
+    logged_command[logged_len] = '\0';
     char *save = NULL;
     char *cmd = strtok_r(cmdline, " ", &save);
     if (!cmd) return 0;
@@ -5277,7 +5291,11 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
     for (size_t i = 0; i < cmd_len; i++) cmd_lower[i] = (char)tolower((unsigned char)cmd[i]);
     cmd_lower[cmd_len] = '\0';
 
-    if (!command_allowed(c, cmd_lower))
+    bool allowed = command_allowed(c, cmd_lower);
+    log_info("command player=%s admin=%d allowed=%d text=/%s%s",
+             c->username[0] ? c->username : "(unknown)", c->command_authorized ? 1 : 0,
+             allowed ? 1 : 0, logged_command, truncated ? "..." : "");
+    if (!allowed)
         return proto_play_send_system_message(c, "Command denied (authorization or QA mode required).");
 
     if (strcmp(cmd_lower, "gamemode") == 0) {
@@ -5287,12 +5305,16 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             return proto_play_send_system_message(c, "Invalid gamemode. Use survival, creative, adventure, or spectator.");
         }
         if (gm >= 0 && gm != c->gamemode) {
+            int old_gamemode = c->gamemode;
             c->gamemode = gm;
             if (c->player) c->player->gamemode = gm;
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
             if (sync_inventory_full(c) != 0) return -1;
             (void)save_player_data(c);
+            log_info("gamemode player=%s from=%s to=%s command=gamemode",
+                     c->username[0] ? c->username : "(unknown)",
+                     player_gamemode_name(old_gamemode), player_gamemode_name(gm));
         }
         return 0;
     }
@@ -5607,12 +5629,17 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
 
         if (strcmp(sub, "survival") == 0 || strcmp(sub, "creative") == 0) {
             int gm = strcmp(sub, "creative") == 0 ? GAMEMODE_CREATIVE : GAMEMODE_SURVIVAL;
+            int old_gamemode = c->gamemode;
             c->gamemode = gm;
             c->player->gamemode = gm;
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
             if (sync_inventory_full(c) != 0) return -1;
             (void)save_player_data(c);
+            if (old_gamemode != gm)
+                log_info("gamemode player=%s from=%s to=%s command=qa",
+                         c->username[0] ? c->username : "(unknown)",
+                         player_gamemode_name(old_gamemode), player_gamemode_name(gm));
             return proto_play_send_system_message(c, gm == GAMEMODE_CREATIVE ? "QA gamemode creative" : "QA gamemode survival");
         }
 
