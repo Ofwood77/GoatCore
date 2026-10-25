@@ -453,8 +453,11 @@ static void server_process_departures(mc_server_t *s) {
         if (have_viewers && atomic_load(&departed->state) == MC_STATE_PLAY) {
             for (size_t i = 0; i < viewers.len; i++) {
                 mc_conn_t *viewer = viewers.items[i];
-                if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY) continue;
+                if (atomic_load(&viewer->closing) || atomic_load(&viewer->state) != MC_STATE_PLAY ||
+                    !viewer->play_ready) continue;
                 if (proto_play_remove_remote_player(viewer, departed) != 0) conn_close(viewer);
+                if (departed->play_ready && !atomic_load(&viewer->closing) &&
+                    proto_play_send_presence_message(viewer, departed, false) != 0) conn_close(viewer);
             }
         }
         proto_play_conn_cleanup(departed);
@@ -466,6 +469,17 @@ static void server_process_departures(mc_server_t *s) {
 
 static int64_t now_ms(void) {
     return mc_now_us() / 1000;
+}
+
+static int32_t server_status_online_players(mc_server_t *s) {
+    int32_t online = 0;
+    pthread_mutex_lock(&s->conns_lock);
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (!atomic_load(&c->closing) && atomic_load(&c->state) == MC_STATE_PLAY && c->play_init_sent)
+            online++;
+    }
+    pthread_mutex_unlock(&s->conns_lock);
+    return online;
 }
 
 static int32_t floor_i32_from_f64(double v) {
@@ -1628,7 +1642,8 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
             rc = -1;
         }
     } else if (c->state == MC_STATE_STATUS) {
-        if (proto_handle_status(c, &frame, "GoatCore 26.1.1", 0, 100) != 0) {
+        if (proto_handle_status(c, &frame, "GoatCore 26.1.1", server_status_online_players(s),
+                                s->cfg.max_connections) != 0) {
             log_error("handler error (state=STATUS id=0x%02X)", frame.packet_id);
             conn_close(c);
             rc = -1;
@@ -2673,6 +2688,24 @@ int net_server_broadcast_system_message(mc_server_t *server, const char *text) {
         }
     }
 
+    conn_snapshot_clear(&snapshot);
+    return rc;
+}
+
+int net_server_broadcast_player_presence(mc_server_t *server, mc_conn_t *subject) {
+    if (!server || !subject) return -1;
+    mc_conn_snapshot_t snapshot;
+    if (server_snapshot_conns(server, &snapshot) != 0) return -1;
+    int rc = 0;
+    for (size_t i = 0; i < snapshot.len; i++) {
+        mc_conn_t *viewer = snapshot.items[i];
+        if (viewer == subject || atomic_load(&viewer->closing) ||
+            atomic_load(&viewer->state) != MC_STATE_PLAY || !viewer->play_ready) continue;
+        if (proto_play_send_presence_message(viewer, subject, true) != 0) {
+            conn_close(viewer);
+            rc = -1;
+        }
+    }
     conn_snapshot_clear(&snapshot);
     return rc;
 }

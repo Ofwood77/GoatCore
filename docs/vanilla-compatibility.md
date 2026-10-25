@@ -265,3 +265,31 @@ Le journal de l'instance inscrit maintenant le pseudo, la commande reçue,
 l'autorisation et tout changement effectif de gamemode (ancien et nouveau).
 Cette trace permet de constater côté serveur l'exécution des commandes de
 validation, sans déduire de la seule connexion que les permissions marchent.
+
+## Présence des joueurs dans la liste multijoueur et le chat
+
+Le ping Status annonce désormais le nombre de connexions entrées en Play et
+la capacité configurée, au lieu de toujours annoncer `0/100`. Une connexion
+encore en Login ou Configuration n'est pas comptée, et une connexion fermée
+disparaît immédiatement du compteur.
+
+Lorsqu'un joueur devient prêt, les autres joueurs prêts reçoivent un paquet
+System Chat avec le composant traduit `multiplayer.player.joined`. Lorsqu'il
+quitte, ils reçoivent `multiplayer.player.left` une seule fois, après le retrait
+de son entité et de son profil. Le joueur concerné ne reçoit pas son propre
+message. Les composants contiennent le pseudo comme argument et la couleur
+jaune ; les métadonnées interactives de profil (clic et survol) présentes dans
+le message Vanilla restent à reproduire.
+
+Comparaison sur 10.0.4.66 : serveur officiel 26.1.1 sur 25590 et GoatCore
+isolé sur 25589. Le même scénario à deux bots a observé sur les deux serveurs
+les compteurs `0 → 1 → 2 → 1 → 0`, un seul message traduit d'arrivée et un seul
+de départ chez le premier joueur, aucun message d'arrivée propre au second.
+Sur GoatCore, la visibilité à 50 joueurs, les déconnexions brutales et les
+interruptions de chargement de chunks ont réussi ; le scénario de présence et
+les déconnexions ont aussi réussi avec 2 et 4 workers réseau. `make -B
+precommit-check` a réussi sur l'export distant. ASan/UBSan n'a signalé aucune
+erreur pendant présence et visibilité à dix joueurs. Le paquet Player Info
+Update et la liste Tab existaient déjà ; l'utilisateur a confirmé que Tab
+fonctionne. Le rendu des nouveaux messages par deux clients Java officiels
+simultanés reste à confirmer visuellement.

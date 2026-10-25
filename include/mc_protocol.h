@@ -51,6 +51,7 @@ void proto_play_respawn_state_reset_for_test(mc_conn_t *c);
 int proto_play_movement_for_test(mc_conn_t *c, double x, double y, double z, bool on_ground, int64_t now_ms);
 int proto_play_food_tick_for_test(mc_conn_t *c, int64_t now_ms);
 int proto_play_send_remote_entity_event(mc_conn_t *viewer, mc_conn_t *subject, uint8_t status);
+int proto_play_send_presence_message(mc_conn_t *viewer, mc_conn_t *subject, bool joined);
 int proto_play_drop_selected_for_test(mc_conn_t *c, int32_t requested_count);
 int proto_play_set_creative_slot_for_test(mc_conn_t *c, int16_t slot_id, const mc_slot_t *slot);
 int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot);
