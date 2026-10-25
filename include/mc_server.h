@@ -80,5 +80,6 @@ mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity
 int net_server_broadcast_difficulty(mc_server_t *server);
 int net_server_broadcast_system_message(mc_server_t *server, const char *text);
 int net_server_broadcast_player_animation(mc_server_t *server, mc_conn_t *subject, uint8_t animation);
+int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, uint8_t status);
 
 #endif /* MC_SERVER_H */

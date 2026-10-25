@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 1C en cours)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 1D en cours)
 
 ## Phase 1C : cycle de vie et visibilité des joueurs
 
@@ -196,4 +196,67 @@ avec des comptes Microsoft/Mojang réellement authentifiés et vérifier un logi
 positif avant tout redémarrage de 25565. Un rejet `hasJoined` ne prouve pas le
 chemin positif. Le port 25587 reste réservé aux bots.
 
-Phase 1D prévue : physique des joueurs, collisions, dégâts, mort et respawn.
+## Phase 1D — physique, besoins et mort (validation partielle)
+
+Référence : serveur officiel Java 26.1.1, protocole 775, installé dans un
+monde plat isolé sur 10.0.4.66:25590. Les règles numériques ci-dessous ont
+été vérifiées dans les classes `ServerPlayer`, `FoodData`, `LivingEntity` et
+`ServerGamePacketListenerImpl` du JAR officiel. La comparaison du code établit
+la formule attendue ; elle ne remplace pas un test de comportement bout en bout.
+
+| Scénario | Vanilla 26.1.1 | GoatCore après correction | Preuve et réserve |
+|---|---|---|---|
+| Marche ordinaire, sprint, saut | Marche au sol sans épuisement ; sprint 0,1/bloc ; saut 0,05 ou 0,2 en sprint | Même accumulation pour ces cas | Bytecode officiel et `test_pvp` ; eau/échelle non couverts |
+| Nourriture et régénération | Épuisement consommé une fois par tick si >4 ; à nourriture 20 avec saturation, soin `min(saturation,6)/6` toutes les 10 ticks ; sinon nourriture ≥18, 1 point toutes les 80 ticks | Même seuil, cadence et formule ; épuisement consommé au tick suivant | Bytecode et `test_pvp` ; état visible avec client officiel non vérifié |
+| Famine | Dégât toutes les 80 ticks ; santé minimale 10 en Easy, 1 en Normal, 0 en Hard | Seuils présents | Audit du code ; comparaison dynamique des trois difficultés à faire |
+| Chute et vide | Chute : `floor(distance + 10⁻⁶ − 3)` ; vide sous `minY − 64` | Ces seuils appliqués | Bytecode et tests de frontière C ; détection de chute dépend du drapeau sol du client |
+| Position reçue | Rejet des coordonnées NaN et angles non finis ; bornage X/Z à ±30 millions et Y à ±20 millions | Ces contrôles appliqués | Bytecode et `test_pvp` ; validation des collisions absente |
+| Dégât répété | Pendant la fenêtre de protection, seul l'excédent d'un coup plus fort s'applique | Fenêtre temporelle et excédent pris en charge | Bytecode et `test_pvp` ; autres modificateurs de dégâts absents |
+| Mort et réapparition | Événement de mort visible aux observateurs ; inventaire et XP conservés avec `keepInventory` | Événement 3 relayé ; sans `keepInventory`, inventaire lâché et XP remis à zéro ; respawn accepté | Tests distants `death`, `death-abort`, `death --expect-xp` sur 25589 ; orbes XP absents |
+
+Le serveur relaie essentiellement les positions simulées par le client. Il
+n'applique pas encore les volumes de collision Vanilla ni la vérification de
+déplacement contre les formes des blocs. En particulier, mur, plafond, dalle,
+escalier, passage accroupi, trou, bloc partiel et frontière de chunk ne sont
+pas déclarés conformes. Le moteur doit d'abord disposer des formes de
+collision de chaque block state, y compris les formes partielles, pour
+valider la boîte du joueur et corriger les mouvements. Cette dépendance relève
+de la phase 2 de la roadmap. Le vol Creative et la traversée Spectator sont
+pilotés surtout par le client ; leur validation de sécurité côté serveur reste
+à faire. La gravité, la nage, l'eau, les échelles et le knockback n'ont pas
+encore de comparaison différentielle complète.
+
+Les dégâts de suffocation, feu, lave et noyade ne disposent pas du traitement
+Vanilla complet. La mortalité par chute et vide est partielle car la position
+et `onGround` du client sont encore acceptés sans preuve de collision. Les
+drops d'orbes XP, les règles exactes du point de réapparition (lit/ancre), les
+effets de statut, les enchantements, les attributs et les détails des règles
+de jeu après mort restent hors validation. Aucun résultat de bot ne doit être
+interprété comme une preuve de conformité de ces mécanismes.
+
+Sur l'instance temporaire offline 25589, les bots ont vérifié la notification
+de mort d'un autre joueur, les drops d'objet, le retour à 20 points de vie,
+la remise à zéro de l'XP sans `keepInventory`, la reconnexion après interruption
+du respawn, la disparition/réapparition de l'entité et l'absence de duplication
+constatée dans ce scénario. Les tests de visibilité à dix joueurs, de
+déconnexion et d'interruption de chargement des chunks ont réussi. Le test de
+visibilité filtre désormais explicitement le type `player` dans `Add Entity` :
+un objet lâché à la mort n'est pas un joueur fantôme. Ces tests ne couvrent pas
+la totalité des entrelacements de threads. Les deux vrais clients Java
+nécessaires au contrôle visuel simultané de collision, dégâts et respawn
+restent à tester.
+
+Validation technique sur 10.0.4.66 : `make -B precommit-check` a réussi sur
+l'export de sources final (tests C, démarrage de contrôle, login et réseau avec
+1, 2 et 4 workers). Sur 25589, le scénario mort/respawn, l'interruption du
+respawn, la visibilité à 50 joueurs (49 entités distinctes vues par chacun),
+les déconnexions concurrentes, les interruptions pendant l'envoi initial des
+chunks et les animations ont réussi. Mort/reconnexion et visibilité à dix
+joueurs ont aussi réussi avec 2 puis 4 workers réseau. Le binaire compilé avec
+ASan et UBSan a passé mort/respawn, interruption de respawn et visibilité à dix
+joueurs sans diagnostic dans le journal de l'instance. TSan n'a pas pu être
+utilisé : son runtime échoue sur un programme C minimal avant tout test avec
+`FATAL: ThreadSanitizer: unexpected memory mapping` (code 66). Sur le serveur
+Vanilla 25590, le test des paquets de mouvement de bras, d'accroupissement et
+de sprint a réussi ; il sert de référence à ce sous-ensemble de la phase 1C,
+pas de validation des autres scénarios physiques 1D.

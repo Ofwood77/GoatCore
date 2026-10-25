@@ -127,6 +127,11 @@ int net_server_broadcast_player_animation(mc_server_t *server, mc_conn_t *subjec
     return 0;
 }
 
+int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, uint8_t status) {
+    (void)server; (void)subject; (void)status;
+    return 0;
+}
+
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
     (void)server;
     (void)kind;
@@ -348,6 +353,9 @@ static void test_lifecycle_death_drops_once_and_clears_inventory(void) {
     put_item_count(&player_conn, 36, "minecraft:stone", 3);
     put_item(&player_conn, 5, "minecraft:diamond_helmet");
     put_item(&player_conn, 45, "minecraft:shield");
+    player.experience_progress = 0.5f;
+    player.experience_level = 10;
+    player.experience_total = 160;
     assert(mc_slot_set_simple(&player_conn.player->inventory.cursor_slot, mc_minecraft_item_id("minecraft:dirt"), 2) == 0);
     assert(proto_play_inventory_stack_count_for_test(&player_conn) == 4);
 
@@ -357,6 +365,8 @@ static void test_lifecycle_death_drops_once_and_clears_inventory(void) {
     assert(g_drop_calls == 4);
     assert(g_drop_items == 7);
     assert(proto_play_inventory_stack_count_for_test(&player_conn) == 0);
+    assert(player.experience_progress == 0.0f);
+    assert(player.experience_level == 0 && player.experience_total == 0);
 
     assert(proto_play_apply_damage_for_test(&player_conn, 25.0f, false, 0) == 0);
     assert(g_drop_calls == 4);
@@ -376,12 +386,17 @@ static void test_lifecycle_keep_inventory(void) {
 
     put_item_count(&player_conn, 36, "minecraft:stone", 3);
     put_item(&player_conn, 45, "minecraft:shield");
+    player.experience_progress = 0.5f;
+    player.experience_level = 10;
+    player.experience_total = 160;
     reset_drop_counters();
     assert(proto_play_apply_damage_for_test(&player_conn, 25.0f, false, 0) == 0);
     assert(player_conn.dead);
     assert(g_drop_calls == 0);
     assert(g_drop_items == 0);
     assert(proto_play_inventory_stack_count_for_test(&player_conn) == 2);
+    assert(player.experience_progress == 0.5f);
+    assert(player.experience_level == 10 && player.experience_total == 160);
 
     test_conn_clear(&player_conn, &player);
 }
@@ -522,6 +537,94 @@ static void test_creative_set_slot_gate(void) {
     test_conn_clear(&player_conn, &player);
 }
 
+static void test_vanilla_movement_exhaustion_and_invalid_position(void) {
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 30);
+    c.on_ground = true;
+    assert(proto_play_movement_for_test(&c, 1.0, 64.0, 0.0, true, 100) == 0);
+    assert(fabsf(c.food_exhaustion) < 0.0001f); /* ordinary walking is free */
+
+    c.sprinting = true;
+    assert(proto_play_movement_for_test(&c, 2.0, 64.0, 0.0, true, 150) == 0);
+    assert(fabsf(c.food_exhaustion - 0.1f) < 0.0001f);
+    assert(proto_play_movement_for_test(&c, 2.0, 64.42, 0.0, false, 200) == 0);
+    assert(fabsf(c.food_exhaustion - 0.3f) < 0.0001f);
+    assert(proto_play_movement_for_test(&c, 2.0, 64.0, 0.0, true, 250) == 0);
+
+    c.sprinting = false;
+    assert(proto_play_movement_for_test(&c, 3.0, 64.0, 0.0, true, 300) == 0);
+    assert(fabsf(c.food_exhaustion - 0.3f) < 0.0001f);
+    assert(proto_play_movement_for_test(&c, 3.0, 64.42, 0.0, false, 350) == 0);
+    assert(fabsf(c.food_exhaustion - 0.35f) < 0.0001f);
+
+    double old_x = c.x;
+    assert(proto_play_movement_for_test(&c, NAN, 64.0, 0.0, true, 400) == -1);
+    assert(c.x == old_x);
+    assert(proto_play_movement_for_test(&c, INFINITY, 64.0, 0.0, true, 450) == 0);
+    assert(c.x == 30000000.0);
+    test_conn_clear(&c, &player);
+}
+
+static void test_vanilla_food_threshold_and_regeneration(void) {
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 31);
+    c.food_exhaustion = 4.0f;
+    assert(proto_play_food_tick_for_test(&c, 100) == 0);
+    assert(c.food_exhaustion == 4.0f && c.food_saturation == 5.0f);
+
+    c.food_exhaustion = 0.0f;
+    c.health = player.health = 18.0f;
+    assert(proto_play_food_tick_for_test(&c, 200) == 0);
+    assert(c.health == 18.0f);
+    assert(proto_play_food_tick_for_test(&c, 699) == 0);
+    assert(c.health == 18.0f);
+    assert(proto_play_food_tick_for_test(&c, 700) == 0);
+    assert(fabsf(c.health - (18.0f + 5.0f / 6.0f)) < 0.0001f);
+    assert(fabsf(c.food_saturation - 5.0f) < 0.0001f);
+    assert(fabsf(c.food_exhaustion - 5.0f) < 0.0001f);
+    assert(proto_play_food_tick_for_test(&c, 750) == 0);
+    assert(fabsf(c.food_saturation - 4.0f) < 0.0001f);
+    assert(fabsf(c.food_exhaustion - 1.0f) < 0.0001f);
+    c.food_exhaustion = 9.0f;
+    assert(proto_play_food_tick_for_test(&c, 800) == 0);
+    assert(fabsf(c.food_saturation - 3.0f) < 0.0001f);
+    assert(fabsf(c.food_exhaustion - 5.0f) < 0.0001f);
+    test_conn_clear(&c, &player);
+}
+
+static void test_vanilla_fall_damage_boundaries(void) {
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 32);
+    c.on_ground = true;
+    assert(proto_play_movement_for_test(&c, 0.0, 64.0, 0.0, false, 100) == 0);
+    assert(proto_play_movement_for_test(&c, 0.0, 60.9, 0.0, true, 200) == 0);
+    assert(c.health == 20.0f);
+
+    c.on_ground = true;
+    assert(proto_play_movement_for_test(&c, 0.0, 64.0, 0.0, false, 300) == 0);
+    assert(proto_play_movement_for_test(&c, 0.0, 59.9, 0.0, true, 400) == 0);
+    assert(c.health == 19.0f);
+    test_conn_clear(&c, &player);
+}
+
+static void test_vanilla_hurt_cooldown(void) {
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 33);
+    assert(proto_play_apply_damage_for_test(&c, 4.0f, false, 100) == 0);
+    assert(c.health == 16.0f);
+    assert(proto_play_apply_damage_for_test(&c, 4.0f, false, 200) == 0);
+    assert(c.health == 16.0f);
+    assert(proto_play_apply_damage_for_test(&c, 6.0f, false, 250) == 0);
+    assert(c.health == 14.0f); /* only the two-point excess applies */
+    assert(proto_play_apply_damage_for_test(&c, 4.0f, false, 600) == 0);
+    assert(c.health == 10.0f);
+    test_conn_clear(&c, &player);
+}
+
 int main(void) {
     test_serverbound_play_packet_ids();
     test_interact_parse();
@@ -535,5 +638,9 @@ int main(void) {
     test_pickup_inventory_empty_merge_full_and_spectator();
     test_manual_drop_selected_item_stack_empty_and_dead();
     test_creative_set_slot_gate();
+    test_vanilla_movement_exhaustion_and_invalid_position();
+    test_vanilla_food_threshold_and_regeneration();
+    test_vanilla_fall_damage_boundaries();
+    test_vanilla_hurt_cooldown();
     return 0;
 }

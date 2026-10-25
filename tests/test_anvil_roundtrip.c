@@ -139,6 +139,11 @@ int net_server_broadcast_player_animation(mc_server_t *server, mc_conn_t *subjec
     return 0;
 }
 
+int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, uint8_t status) {
+    (void)server; (void)subject; (void)status;
+    return 0;
+}
+
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z) {
     (void)server;
     (void)kind;

@@ -39,7 +39,13 @@ def entity_ids(bot, packet_id):
                 entity_id, offset = read_varint(payload, offset)
                 result.append(entity_id)
         else:
-            entity_id, _ = read_varint(payload)
+            entity_id, offset = read_varint(payload)
+            if packet_id == 1:
+                # Add Entity also carries item drops and other entities.
+                # The player type id in the 26.1.1 registry is 155.
+                entity_type, _ = read_varint(payload, offset + 16)
+                if entity_type != 155:
+                    continue
             result.append(entity_id)
     return result
 

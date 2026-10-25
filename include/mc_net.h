@@ -118,6 +118,9 @@ struct mc_conn {
     int32_t using_item_id;
     int32_t use_item_remaining_ticks;
     bool dead;
+    bool has_hurt;
+    int64_t last_hurt_ms;
+    float last_hurt_amount;
     int32_t teleport_id;
     mc_player_data_t *player;
     int64_t keepalive_id;
@@ -138,6 +141,7 @@ struct mc_conn {
     double fall_start_y;
     int64_t next_void_damage_ms;
     int64_t next_natural_regen_ms;
+    bool fast_regen_active;
     int64_t next_starvation_damage_ms;
 
     atomic_int crypto_phase; /* 0 plaintext, 1 key packet queued, 2 encrypted */

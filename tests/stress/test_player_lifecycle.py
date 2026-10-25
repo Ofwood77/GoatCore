@@ -14,7 +14,7 @@ from test_player_visibility import Viewer, close, entity_ids, has_profile, offli
 
 class Player(Viewer):
     async def play_packet(self, packet_id, payload):
-        if packet_id in (18, 20, 38, 103, 104, 121):
+        if packet_id in (18, 20, 34, 38, 68, 82, 103, 104, 121):
             self.events[packet_id].append((asyncio.get_running_loop().time(), payload))
         await super().play_packet(packet_id, payload)
 
@@ -198,6 +198,89 @@ async def chunk_abort(args):
                                not bot.conn.writer.is_closing()), return_exceptions=True)
 
 
+async def death_cycle(args):
+    admin = Player(0, settings(args))
+    admin.name = "Ofwood_"
+    peer = Player(1, settings(args))
+    try:
+        await admin.connect()
+        await admin.conn.send(44)
+        await peer.connect()
+        await until(lambda: entity_ids(peer, 1), "peer sees admin")
+        admin_entity = entity_ids(peer, 1)[0]
+        if admin.gamemode != 1:
+            await command(admin, "gamemode creative")
+            await until(lambda: admin.events[38] and admin.events[38][-1][1][:1] == b"\x03" and
+                        struct.unpack_from(">f", admin.events[38][-1][1], 1)[0] == 1.0,
+                        "creative mode")
+        await admin.conn.send(56, struct.pack(">h", 36) + varint(3) + varint(1) + varint(0) + varint(0))
+        await until(lambda: (36, 1, 3) in slot_updates(admin), "stone stack")
+        if args.expect_xp:
+            assert latest_experience(admin)[1:] == (7, 120), latest_experience(admin)
+        await command(admin, "gamemode survival")
+        await until(lambda: admin.events[38] and admin.events[38][-1][1][:1] == b"\x03" and
+                    struct.unpack_from(">f", admin.events[38][-1][1], 1)[0] == 0.0,
+                    "survival mode")
+        await command(admin, "health set 0")
+        await until(lambda: admin.events[68] and latest_health(admin)[0] == 0.0,
+                    "combat kill and zero health")
+        await until(lambda: any(len(payload) == 5 and struct.unpack_from(">i", payload)[0] == admin_entity and
+                                payload[4] == 3 for _, payload in peer.events[34]), "peer death event")
+        assert latest_inventory(admin)[36] == (0, 0), "death retained inventory without keepInventory"
+        await admin.conn.send(12, varint(0))
+        await until(lambda: admin.events[82] and latest_health(admin)[0] == 20.0,
+                    "respawn and full health")
+        assert latest_inventory(admin)[36] == (0, 0), "respawn duplicated inventory"
+        assert latest_experience(admin) == (0.0, 0, 0), latest_experience(admin)
+        print("PASS: death packet, peer event, drops, respawn, zero XP and no inventory duplication")
+    finally:
+        await asyncio.gather(*(close(bot) for bot in (admin, peer) if bot.conn and
+                               not bot.conn.writer.is_closing()), return_exceptions=True)
+
+
+async def death_respawn_abort(args):
+    admin = Player(0, settings(args))
+    admin.name = "Ofwood_"
+    peer = Player(1, settings(args))
+    replacement = None
+    try:
+        await admin.connect()
+        await admin.conn.send(44)
+        await peer.connect()
+        await until(lambda: entity_ids(peer, 1), "peer sees admin")
+        old_entity = entity_ids(peer, 1)[0]
+        if admin.gamemode != 1:
+            await command(admin, "gamemode creative")
+            await until(lambda: admin.events[38] and
+                        struct.unpack_from(">f", admin.events[38][-1][1], 1)[0] == 1.0,
+                        "creative mode")
+        await admin.conn.send(56, struct.pack(">h", 36) + varint(2) + varint(1) + varint(0) + varint(0))
+        await until(lambda: (36, 1, 2) in slot_updates(admin), "stone stack")
+        await command(admin, "gamemode survival")
+        await until(lambda: admin.events[38] and
+                    struct.unpack_from(">f", admin.events[38][-1][1], 1)[0] == 0.0,
+                    "survival mode")
+        await command(admin, "health set 0")
+        await until(lambda: admin.events[68] and latest_health(admin)[0] == 0.0,
+                    "combat kill")
+        await admin.conn.send(12, varint(0))
+        admin.expected_close = True
+        admin.conn.writer.transport.abort()
+        await until(lambda: old_entity in entity_ids(peer, 77), "dead player removal")
+        replacement = Player(0, settings(args))
+        replacement.name = "Ofwood_"
+        await replacement.connect()
+        await replacement.conn.send(44)
+        await until(lambda: len(entity_ids(peer, 1)) >= 2, "respawn reconnect visible")
+        assert latest_health(replacement)[0] == 20.0, latest_health(replacement)
+        assert latest_inventory(replacement)[36] == (0, 0), "duplicated inventory after abort"
+        assert latest_experience(replacement) == (0.0, 0, 0), latest_experience(replacement)
+        print("PASS: abort during respawn, peer removal/reappearance, healthy reconnect and no duplicated inventory or XP")
+    finally:
+        await asyncio.gather(*(close(bot) for bot in (admin, peer, replacement) if bot and bot.conn and
+                               not bot.conn.writer.is_closing()), return_exceptions=True)
+
+
 def seed_experience(args):
     assert args.world_path, "--world-path required"
     value = offline_uuid("Ofwood_").hex()
@@ -218,15 +301,18 @@ def seed_experience(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("prepare", "verify", "disconnects", "chunk-abort", "seed-xp"))
+    parser.add_argument("mode", choices=("prepare", "verify", "disconnects", "chunk-abort", "seed-xp", "death", "death-abort"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--run-id", default="LC")
     parser.add_argument("--bots", type=int, default=10)
     parser.add_argument("--world-path")
+    parser.add_argument("--expect-xp", action="store_true")
     args = parser.parse_args()
     if args.mode == "seed-xp":
         seed_experience(args)
     else:
         asyncio.run(disconnects(args) if args.mode == "disconnects" else
-                    chunk_abort(args) if args.mode == "chunk-abort" else persistence(args))
+                    chunk_abort(args) if args.mode == "chunk-abort" else
+                    death_cycle(args) if args.mode == "death" else
+                    death_respawn_abort(args) if args.mode == "death-abort" else persistence(args))
