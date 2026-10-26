@@ -16,12 +16,20 @@
 
 static int g_drop_calls = 0;
 static int g_drop_items = 0;
+static int g_motion_packets = 0;
+static int g_hurt_packets = 0;
+static uint8_t g_last_motion[16];
+static size_t g_last_motion_len = 0;
 
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold) {
     (void)c;
-    (void)packet_id;
-    (void)payload;
-    (void)payload_len;
+    if (packet_id == MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_MOTION) {
+        assert(payload_len <= sizeof(g_last_motion));
+        memcpy(g_last_motion, payload, payload_len);
+        g_last_motion_len = payload_len;
+        g_motion_packets++;
+    }
+    if (packet_id == MC_PKT_PLAY_CLIENTBOUND_ENTITY_EVENT && payload_len >= 5 && payload[4] == 2) g_hurt_packets++;
     (void)compression_threshold;
     return 0;
 }
@@ -131,6 +139,10 @@ int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, u
     (void)server; (void)subject; (void)status;
     return 0;
 }
+int net_server_broadcast_player_motion(mc_server_t *server, mc_conn_t *subject) {
+    (void)server; (void)subject;
+    return 0;
+}
 int net_server_broadcast_player_presence(mc_server_t *server, mc_conn_t *subject) {
     (void)server; (void)subject;
     return 0;
@@ -205,6 +217,7 @@ static void test_serverbound_play_packet_ids(void) {
     assert(proto_play_serverbound_packet_id_for_test("chat_command") == 0x07);
     assert(proto_play_serverbound_packet_id_for_test("chat_message") == 0x09);
     assert(proto_play_serverbound_packet_id_for_test("interact") == 0x1a);
+    assert(proto_play_serverbound_packet_id_for_test("attack") == 0x01);
     assert(proto_play_serverbound_packet_id_for_test("move_pos") == 0x1e);
     assert(proto_play_serverbound_packet_id_for_test("move_pos_rot") == 0x1f);
     assert(proto_play_serverbound_packet_id_for_test("move_rot") == 0x20);
@@ -214,17 +227,15 @@ static void test_serverbound_play_packet_ids(void) {
     assert(proto_play_serverbound_packet_id_for_test("use_item") == 0x43);
 }
 
-static void test_interact_parse(void) {
+static void test_attack_parse(void) {
     uint8_t buf[16];
     size_t pos = 0;
     int32_t target = -1;
-    bool is_attack = false;
     pos += write_varint_local(buf + pos, sizeof(buf) - pos, 123);
-    pos += write_varint_local(buf + pos, sizeof(buf) - pos, 1);
-    buf[pos++] = 0;
-    assert(proto_play_parse_interact_attack_for_test(buf, pos, &target, &is_attack) == 0);
+    assert(proto_play_parse_attack_for_test(buf, pos, &target) == 0);
     assert(target == 123);
-    assert(is_attack);
+    buf[pos++] = 0;
+    assert(proto_play_parse_attack_for_test(buf, pos, &target) != 0);
 }
 
 static void test_pvp_damage_and_gates(void) {
@@ -240,7 +251,7 @@ static void test_pvp_damage_and_gates(void) {
     target.z = 2.0;
 
     assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 0) == 1);
-    assert(fabsf(target.health - 16.0f) < 0.01f);
+    assert(fabsf(target.health - 19.0f) < 0.01f);
 
     target.health = target.player->health = 20.0f;
     assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, false, 0) == 0);
@@ -252,16 +263,74 @@ static void test_pvp_damage_and_gates(void) {
     attacker.x = 0.0;
 
     attacker.gamemode = GAMEMODE_CREATIVE;
-    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 0) == 0);
-    assert(fabsf(target.health - 20.0f) < 0.01f);
+    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 600) == 1);
+    assert(fabsf(target.health - 19.0f) < 0.01f);
     attacker.gamemode = GAMEMODE_SURVIVAL;
 
     target.gamemode = GAMEMODE_SPECTATOR;
     assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 0) == 0);
-    assert(fabsf(target.health - 20.0f) < 0.01f);
+    assert(fabsf(target.health - 19.0f) < 0.01f);
 
     test_conn_clear(&attacker, &attacker_player);
     test_conn_clear(&target, &target_player);
+}
+
+static void test_pvp_knockback_and_hurt_events(void) {
+    mc_conn_t attacker, target;
+    mc_player_data_t attacker_player, target_player;
+    test_conn_init(&attacker, &attacker_player, 1);
+    test_conn_init(&target, &target_player, 2);
+    target.on_ground = true;
+    attacker.z = -2.0;
+    g_motion_packets = g_hurt_packets = 0;
+    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 1000) == 1);
+    assert(fabs(target.motion_z - 0.4) < 0.00001);
+    assert(fabs(target.motion_y - 0.4) < 0.00001);
+    assert(g_motion_packets == 1 && g_hurt_packets == 1 && g_last_motion_len == 7);
+    assert(g_last_motion[0] == 2);
+    uint32_t high = ((uint32_t)g_last_motion[3] << 24) | ((uint32_t)g_last_motion[4] << 16) |
+                    ((uint32_t)g_last_motion[5] << 8) | g_last_motion[6];
+    uint64_t packed = (uint64_t)g_last_motion[1] | ((uint64_t)g_last_motion[2] << 8) | ((uint64_t)high << 16);
+    assert((packed & 7u) == 1u);
+    assert(((packed >> 33) & 32767u) == 22936u);
+
+    /* A stronger hit during immunity applies only the excess; Vanilla does
+     * not emit another hurt event or knockback for this partial hit. */
+    put_item(&attacker, 36, "minecraft:iron_sword");
+    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 1100) == 1);
+    assert(fabsf(target.health - 14.0f) < 0.001f);
+    assert(g_motion_packets == 1 && g_hurt_packets == 1);
+    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 1200) == 0);
+    assert(fabsf(target.health - 14.0f) < 0.001f);
+    assert(g_motion_packets == 1 && g_hurt_packets == 1);
+
+    target.motion_x = -1.0;
+    target.motion_y = 0.2;
+    target.motion_z = 1.0;
+    target.last_motion_sample_ms = 1300; /* stale by the next attack */
+    attacker.z = 0.0;
+    attacker.x = -2.0;
+    assert(proto_play_apply_pvp_attack_for_test(&attacker, &target, true, 1600) == 1);
+    assert(fabs(target.motion_x - 0.4) < 0.00001);
+    assert(fabs(target.motion_z) < 0.00001);
+    assert(g_motion_packets == 2 && g_hurt_packets == 2);
+    test_conn_clear(&attacker, &attacker_player);
+    test_conn_clear(&target, &target_player);
+}
+
+static void test_void_bypasses_creative_invulnerability(void) {
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 4);
+    c.gamemode = GAMEMODE_CREATIVE;
+    assert(proto_play_void_damage_for_test(&c, 1000) == 0);
+    assert(c.health == 16.0f && c.gamemode == GAMEMODE_CREATIVE);
+    assert(proto_play_void_damage_for_test(&c, 1100) == 0);
+    assert(c.health == 16.0f);
+    c.gamemode = GAMEMODE_SPECTATOR;
+    assert(proto_play_void_damage_for_test(&c, 1600) == 0);
+    assert(c.health == 16.0f);
+    test_conn_clear(&c, &player);
 }
 
 static void test_armor_reduces_damage(void) {
@@ -285,7 +354,7 @@ static void test_armor_reduces_damage(void) {
     assert(fabsf(none - 10.0f) < 0.01f);
     assert(leather < none);
     assert(netherite < leather);
-    assert(fabsf(netherite - 2.0f) < 0.01f);
+    assert(fabsf(netherite - 2.8f) < 0.01f);
 
     test_conn_clear(&attacker, &attacker_player);
     test_conn_clear(&target, &target_player);
@@ -631,8 +700,10 @@ static void test_vanilla_hurt_cooldown(void) {
 
 int main(void) {
     test_serverbound_play_packet_ids();
-    test_interact_parse();
+    test_attack_parse();
     test_pvp_damage_and_gates();
+    test_pvp_knockback_and_hurt_events();
+    test_void_bypasses_creative_invulnerability();
     test_armor_reduces_damage();
     test_shield_blocking();
     test_lifecycle_death_empty_inventory();

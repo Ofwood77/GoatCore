@@ -921,14 +921,6 @@ static int w_ubyte(uint8_t *buf, size_t cap, size_t *pos, uint8_t v) {
     return 0;
 }
 
-static int w_u16_be(uint8_t *buf, size_t cap, size_t *pos, uint16_t v) {
-    if (!buf || !pos || *pos + 2 > cap) return -1;
-    buf[*pos] = (uint8_t)((v >> 8) & 0xFF);
-    buf[*pos + 1] = (uint8_t)(v & 0xFF);
-    *pos += 2;
-    return 0;
-}
-
 static int w_f64(uint8_t *buf, size_t cap, size_t *pos, double v) {
     uint64_t u = 0;
     memcpy(&u, &v, sizeof(u));
@@ -1068,21 +1060,12 @@ static bool item_entity_has_motion(const mc_item_entity_t *item) {
     return fabs(item->vx) > 0.0001 || fabs(item->vy) > 0.0001 || fabs(item->vz) > 0.0001;
 }
 
-static int16_t entity_velocity_short(double velocity) {
-    double scaled = velocity * 8000.0;
-    if (scaled > 32767.0) return 32767;
-    if (scaled < -32768.0) return -32768;
-    return (int16_t)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
-}
-
 static int send_item_entity_velocity(mc_conn_t *c, const mc_item_entity_t *item) {
     if (!c || !item) return -1;
     uint8_t buf[32];
     size_t pos = 0;
     if (w_varint(buf, sizeof(buf), &pos, item->entity_id) != 0) return -1;
-    if (w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vx)) != 0 ||
-        w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vy)) != 0 ||
-        w_u16_be(buf, sizeof(buf), &pos, (uint16_t)entity_velocity_short(item->vz)) != 0) {
+    if (mc_lpvec3_write(buf, sizeof(buf), &pos, item->vx, item->vy, item->vz) != 0) {
         return -1;
     }
     return conn_write_packet(c, PKT_PLAY_ENTITY_VELOCITY, buf, pos, -1);
@@ -2734,6 +2717,22 @@ int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, u
     for (size_t i = 0; i < snapshot.len; i++) {
         mc_conn_t *viewer = snapshot.items[i];
         if (proto_play_send_remote_entity_event(viewer, subject, status) != 0) {
+            conn_close(viewer);
+            rc = -1;
+        }
+    }
+    conn_snapshot_clear(&snapshot);
+    return rc;
+}
+
+int net_server_broadcast_player_motion(mc_server_t *server, mc_conn_t *subject) {
+    if (!server || !subject) return -1;
+    mc_conn_snapshot_t snapshot;
+    if (server_snapshot_conns(server, &snapshot) != 0) return -1;
+    int rc = 0;
+    for (size_t i = 0; i < snapshot.len; i++) {
+        mc_conn_t *viewer = snapshot.items[i];
+        if (proto_play_send_remote_motion(viewer, subject) != 0) {
             conn_close(viewer);
             rc = -1;
         }

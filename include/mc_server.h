@@ -82,5 +82,6 @@ int net_server_broadcast_system_message(mc_server_t *server, const char *text);
 int net_server_broadcast_player_presence(mc_server_t *server, mc_conn_t *subject);
 int net_server_broadcast_player_animation(mc_server_t *server, mc_conn_t *subject, uint8_t animation);
 int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, uint8_t status);
+int net_server_broadcast_player_motion(mc_server_t *server, mc_conn_t *subject);
 
 #endif /* MC_SERVER_H */

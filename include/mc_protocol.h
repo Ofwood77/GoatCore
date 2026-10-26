@@ -10,6 +10,7 @@
 
 int varint_read(const uint8_t *buf, size_t buf_len, int32_t *out, size_t *bytes_read);
 int varint_write(uint8_t *buf, size_t buf_len, int32_t val, size_t *bytes_written);
+int mc_lpvec3_write(uint8_t *buf, size_t cap, size_t *pos, double x, double y, double z);
 
 int proto_handle_handshake(mc_conn_t *c, const mc_frame_t *frame);
 int proto_handle_status(mc_conn_t *c, const mc_frame_t *frame, const char *motd_json, int32_t online_players, int32_t max_players);
@@ -41,16 +42,18 @@ int32_t proto_play_try_merge_slab_state_for_test(int32_t clicked_state_id, int32
 int32_t proto_play_recompute_connected_block_state_for_test(mc_world_t *world, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int32_t proto_play_serverbound_packet_id_for_test(const char *name);
 int proto_play_parse_gamemode_for_test(const char *mode);
-int proto_play_parse_interact_attack_for_test(const uint8_t *data, size_t len, int32_t *out_target, bool *out_is_attack);
+int proto_play_parse_attack_for_test(const uint8_t *data, size_t len, int32_t *out_target);
 float proto_play_pvp_damage_for_test(const mc_conn_t *attacker, const mc_conn_t *target, float base_damage);
 int proto_play_apply_pvp_attack_for_test(mc_conn_t *attacker, mc_conn_t *target, bool pvp_enabled, int64_t now_ms);
 bool proto_play_can_pickup_items_for_test(const mc_conn_t *c);
 int proto_play_inventory_stack_count_for_test(const mc_conn_t *c);
 int proto_play_apply_damage_for_test(mc_conn_t *c, float amount, bool server_locked, int64_t now_ms);
+int proto_play_void_damage_for_test(mc_conn_t *c, int64_t now_ms);
 void proto_play_respawn_state_reset_for_test(mc_conn_t *c);
 int proto_play_movement_for_test(mc_conn_t *c, double x, double y, double z, bool on_ground, int64_t now_ms);
 int proto_play_food_tick_for_test(mc_conn_t *c, int64_t now_ms);
 int proto_play_send_remote_entity_event(mc_conn_t *viewer, mc_conn_t *subject, uint8_t status);
+int proto_play_send_remote_motion(mc_conn_t *viewer, mc_conn_t *subject);
 int proto_play_send_presence_message(mc_conn_t *viewer, mc_conn_t *subject, bool joined);
 int proto_play_drop_selected_for_test(mc_conn_t *c, int32_t requested_count);
 int proto_play_set_creative_slot_for_test(mc_conn_t *c, int16_t slot_id, const mc_slot_t *slot);

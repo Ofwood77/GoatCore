@@ -42,6 +42,7 @@
 #define PKT_PLAY_OPEN_WINDOW MC_PKT_PLAY_CLIENTBOUND_OPEN_SCREEN
 #define PKT_PLAY_SPAWN_ENTITY MC_PKT_PLAY_CLIENTBOUND_ADD_ENTITY
 #define PKT_PLAY_ENTITY_EVENT MC_PKT_PLAY_CLIENTBOUND_ENTITY_EVENT
+#define PKT_PLAY_ENTITY_MOTION MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_MOTION
 #define PKT_PLAY_UNLOAD_CHUNK MC_PKT_PLAY_CLIENTBOUND_FORGET_LEVEL_CHUNK
 #define PKT_PLAY_LOGIN MC_PKT_PLAY_CLIENTBOUND_LOGIN
 #define PKT_PLAY_GAME_EVENT MC_PKT_PLAY_CLIENTBOUND_GAME_EVENT
@@ -106,6 +107,7 @@
 #define PKT_PLAY_PLAYER_INPUT_SB MC_PKT_PLAY_SERVERBOUND_PLAYER_INPUT
 #define PKT_PLAY_PLAYER_COMMAND_SB MC_PKT_PLAY_SERVERBOUND_PLAYER_COMMAND
 #define PKT_PLAY_INTERACT_SB MC_PKT_PLAY_SERVERBOUND_INTERACT
+#define PKT_PLAY_ATTACK_SB MC_PKT_PLAY_SERVERBOUND_ATTACK
 #define PKT_PLAY_CHUNK_BATCH_RECEIVED_SB MC_PKT_PLAY_SERVERBOUND_CHUNK_BATCH_RECEIVED
 
 #define CHUNK_XZ 16
@@ -158,8 +160,9 @@
 #define PLAYER_VOID_DAMAGE_AMOUNT 4.0f
 #define PLAYER_VOID_DAMAGE_INTERVAL_MS 500
 #define PLAYER_HURT_COOLDOWN_MS 500
+#define PLAYER_KNOCKBACK_STRENGTH 0.4000000059604645
 #define PLAYER_FALL_SAFE_DISTANCE 3.0
-#define PLAYER_PVP_BASE_DAMAGE 4.0f
+#define PLAYER_PVP_BASE_DAMAGE 1.0f
 #define PLAYER_PVP_MAX_DISTANCE 4.5
 #define PLAYER_PVP_MAX_DISTANCE_SQ (PLAYER_PVP_MAX_DISTANCE * PLAYER_PVP_MAX_DISTANCE)
 #define PLAYER_SHIELD_BLOCK_DOT 0.0
@@ -273,7 +276,8 @@ static int send_window_items(mc_conn_t *c);
 static int sync_inventory_full(mc_conn_t *c);
 static int respawn_player(mc_conn_t *c);
 static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms);
-static int handle_interact_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms);
+static int apply_player_void_damage(mc_conn_t *c, int64_t now_ms);
+static int handle_attack_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms);
 static int make_text_component(const char *text, uint8_t **out, size_t *out_len);
 static int pack_simple_bitstorage_u32(const uint32_t *values, size_t value_count, int bits,
                                       uint64_t **out_words, int32_t *out_word_count);
@@ -787,6 +791,14 @@ static int send_entity_event(mc_conn_t *c, uint8_t status) {
     return conn_write_packet(c, PKT_PLAY_ENTITY_EVENT, buf, pos, -1);
 }
 
+static int send_player_motion(mc_conn_t *viewer, const mc_conn_t *subject) {
+    uint8_t buf[32];
+    size_t pos = 0;
+    if (w_varint(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
+        mc_lpvec3_write(buf, sizeof(buf), &pos, subject->motion_x, subject->motion_y, subject->motion_z) != 0) return -1;
+    return conn_write_packet(viewer, PKT_PLAY_ENTITY_MOTION, buf, pos, -1);
+}
+
 int proto_play_send_system_message(mc_conn_t *c, const char *text) {
     if (!c) return -1;
     uint8_t *msg = NULL;
@@ -1087,6 +1099,7 @@ int32_t proto_play_serverbound_packet_id_for_test(const char *name) {
     if (strcmp(name, "chat_command") == 0) return PKT_PLAY_CHAT_COMMAND;
     if (strcmp(name, "chat_message") == 0) return PKT_PLAY_CHAT_MESSAGE;
     if (strcmp(name, "interact") == 0) return PKT_PLAY_INTERACT_SB;
+    if (strcmp(name, "attack") == 0) return PKT_PLAY_ATTACK_SB;
     if (strcmp(name, "move_pos") == 0) return PKT_PLAY_SET_PLAYER_POSITION;
     if (strcmp(name, "move_pos_rot") == 0) return PKT_PLAY_SET_PLAYER_POS_ROT;
     if (strcmp(name, "move_rot") == 0) return PKT_PLAY_SET_PLAYER_ROT;
@@ -2402,11 +2415,18 @@ static int player_armor_points(const mc_conn_t *target) {
 }
 
 static float apply_armor_reduction(float damage, const mc_conn_t *target) {
-    int armor = player_armor_points(target);
-    float multiplier = 1.0f - ((float)armor * 0.04f);
-    if (multiplier < 0.2f) multiplier = 0.2f;
-    if (multiplier > 1.0f) multiplier = 1.0f;
-    return damage * multiplier;
+    static const int slots[] = {PLAYER_SLOT_HEAD, PLAYER_SLOT_CHEST, PLAYER_SLOT_LEGS, PLAYER_SLOT_FEET};
+    float armor = (float)player_armor_points(target);
+    float toughness = 0.0f;
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        const mc_slot_t *slot = player_slot_const(target, slots[i]);
+        int32_t item_id = slot_item_id_or_air(slot);
+        const char *name = item_id > ITEM_AIR ? mc_minecraft_item_name(item_id) : NULL;
+        if (name && strstr(name, "netherite_")) toughness += 3.0f;
+        else if (name && strstr(name, "diamond_")) toughness += 2.0f;
+    }
+    float effective = fmaxf(armor * 0.2f, armor - damage / (2.0f + toughness / 4.0f));
+    return damage * (1.0f - fminf(20.0f, effective) / 25.0f);
 }
 
 static bool player_is_blocking_with_shield(const mc_conn_t *target) {
@@ -2446,7 +2466,7 @@ int proto_play_apply_pvp_attack_for_test(mc_conn_t *attacker, mc_conn_t *target,
     if (!attacker || !target || attacker == target) return 0;
     if (!pvp_enabled) return 0;
     if (!attacker->player || !target->player || attacker->dead || target->dead) return 0;
-    if (attacker->gamemode == GAMEMODE_CREATIVE || attacker->gamemode == GAMEMODE_SPECTATOR) return 0;
+    if (attacker->gamemode == GAMEMODE_SPECTATOR) return 0;
     if (!player_can_take_damage(target)) return 0;
     if (!attacker->has_pos || !target->has_pos) return 0;
 
@@ -2459,58 +2479,52 @@ int proto_play_apply_pvp_attack_for_test(mc_conn_t *attacker, mc_conn_t *target,
     float base_damage = pvp_weapon_base_damage(attacker);
     float final_damage = proto_play_pvp_damage_for_test(attacker, target, base_damage);
     if (!(final_damage > 0.0f)) return 1;
+    bool full_hurt = !target->has_hurt || now_ms < target->last_hurt_ms ||
+                     now_ms - target->last_hurt_ms >= PLAYER_HURT_COOLDOWN_MS;
     float previous_health = target->health;
     if (apply_player_damage(target, final_damage, "Killed in PvP", false, now_ms) != 0) return -1;
     if (target->health == previous_health) return 0;
-    if (target->server) (void)net_server_broadcast_player_event(target->server, target, ENTITY_STATUS_HURT);
-    (void)send_entity_event(target, ENTITY_STATUS_HURT);
+    if (full_hurt) {
+        if (target->server) (void)net_server_broadcast_player_event(target->server, target, ENTITY_STATUS_HURT);
+        (void)send_entity_event(target, ENTITY_STATUS_HURT);
+        double horizontal = hypot(dx, dz);
+        if (horizontal > 0.00001) {
+            if (target->last_motion_sample_ms > 0 && now_ms - target->last_motion_sample_ms > 100) {
+                target->motion_x = 0.0;
+                target->motion_y = 0.0;
+                target->motion_z = 0.0;
+            }
+            target->motion_x = target->motion_x * 0.5 - dx / horizontal * PLAYER_KNOCKBACK_STRENGTH;
+            target->motion_y = target->on_ground ? fmin(0.4, target->motion_y * 0.5 + PLAYER_KNOCKBACK_STRENGTH)
+                                                  : target->motion_y;
+            target->motion_z = target->motion_z * 0.5 - dz / horizontal * PLAYER_KNOCKBACK_STRENGTH;
+            if (send_player_motion(target, target) != 0) return -1;
+            if (target->server && net_server_broadcast_player_motion(target->server, target) != 0) return -1;
+        }
+    }
     return 1;
 }
 
-int proto_play_parse_interact_attack_for_test(const uint8_t *data, size_t len, int32_t *out_target, bool *out_is_attack) {
+int proto_play_parse_attack_for_test(const uint8_t *data, size_t len, int32_t *out_target) {
     mc_reader_t r = {data, len, 0};
     int32_t target = 0;
-    int32_t mouse = 0;
-    bool sneaking = false;
     if (out_target) *out_target = -1;
-    if (out_is_attack) *out_is_attack = false;
     if (!data && len > 0) return -1;
-
-    if (r_varint(&r, &target) != 0 || r_varint(&r, &mouse) != 0) return -1;
-    if (mouse == 2) {
-        float x = 0.0f, y = 0.0f, z = 0.0f;
-        int32_t hand = 0;
-        if (r_f32(&r, &x) != 0 || r_f32(&r, &y) != 0 || r_f32(&r, &z) != 0 || r_varint(&r, &hand) != 0) return -1;
-        (void)x;
-        (void)y;
-        (void)z;
-        (void)hand;
-    } else if (mouse == 0) {
-        int32_t hand = 0;
-        if (r_varint(&r, &hand) != 0) return -1;
-        (void)hand;
-    } else if (mouse != 1) {
-        return -1;
-    }
-    if (r_bool(&r, &sneaking) != 0) return -1;
-    (void)sneaking;
+    if (r_varint(&r, &target) != 0) return -1;
     if (r.pos != r.len) return -1;
     if (out_target) *out_target = target;
-    if (out_is_attack) *out_is_attack = (mouse == 1);
     return 0;
 }
 
-static int handle_interact_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
+static int handle_attack_packet(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
     int32_t target_entity_id = -1;
-    bool is_attack = false;
     mc_conn_t *target = NULL;
     bool pvp_enabled = c && c->cfg ? c->cfg->pvp_enabled : true;
 
     if (!c || !frame) return -1;
-    if (proto_play_parse_interact_attack_for_test(frame->payload.data, frame->payload.len, &target_entity_id, &is_attack) != 0) {
+    if (proto_play_parse_attack_for_test(frame->payload.data, frame->payload.len, &target_entity_id) != 0) {
         return -1;
     }
-    if (!is_attack) return 0;
     if (!c->server) return 0;
 
     target = net_server_find_conn_by_entity_id(c->server, target_entity_id);
@@ -3247,8 +3261,11 @@ static int handle_player_death(mc_conn_t *c, const char *death_message, bool ser
     return save_player_data(c);
 }
 
-static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms) {
-    if (!player_can_take_damage(c)) return 0;
+static int apply_player_damage_inner(mc_conn_t *c, float amount, const char *death_message, bool server_locked,
+                                     int64_t now_ms, bool bypass_creative) {
+    if (!player_can_take_damage(c) &&
+        !(bypass_creative && c && c->player && !c->dead && !c->closing && c->state == MC_STATE_PLAY &&
+          c->gamemode == GAMEMODE_CREATIVE)) return 0;
     if (!(amount > 0.0f) || !isfinite(amount)) return 0;
 
     /* LivingEntity keeps 20 ticks of hurt immunity. During the first ten
@@ -3274,6 +3291,21 @@ static int apply_player_damage(mc_conn_t *c, float amount, const char *death_mes
     }
     if (send_set_health_packet(c) != 0) return -1;
     return 0;
+}
+
+static int apply_player_damage(mc_conn_t *c, float amount, const char *death_message, bool server_locked, int64_t now_ms) {
+    return apply_player_damage_inner(c, amount, death_message, server_locked, now_ms, false);
+}
+
+static int apply_player_void_damage(mc_conn_t *c, int64_t now_ms) {
+    if (!c || !c->player || c->dead || c->closing || c->state != MC_STATE_PLAY ||
+        c->gamemode == GAMEMODE_SPECTATOR) return 0;
+    /* out_of_world is tagged BYPASSES_INVULNERABILITY in the 26.1.1 jar. */
+    return apply_player_damage_inner(c, PLAYER_VOID_DAMAGE_AMOUNT, "You fell out of the world", true, now_ms, true);
+}
+
+int proto_play_void_damage_for_test(mc_conn_t *c, int64_t now_ms) {
+    return apply_player_void_damage(c, now_ms);
 }
 
 static int player_set_health_debug(mc_conn_t *c, float health, const char *death_message) {
@@ -3319,6 +3351,8 @@ static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spaw
     c->pitch = spawn_pitch;
     c->has_pos = true;
     c->on_ground = false;
+    c->motion_x = c->motion_y = c->motion_z = 0.0;
+    c->last_motion_sample_ms = 0;
     c->has_center_chunk = false;
     c->chunk_refresh_ping_pending = false;
     c->chunk_refresh_ping_id = 0;
@@ -4282,6 +4316,13 @@ int proto_play_send_remote_entity_event(mc_conn_t *viewer, mc_conn_t *subject, u
     if (w_i32(buf, sizeof(buf), &pos, subject->entity_id) != 0 ||
         w_ubyte(buf, sizeof(buf), &pos, status) != 0) return -1;
     return conn_write_packet(viewer, PKT_PLAY_ENTITY_EVENT, buf, pos, -1);
+}
+
+int proto_play_send_remote_motion(mc_conn_t *viewer, mc_conn_t *subject) {
+    if (!viewer || !subject || viewer == subject || viewer->closing || !viewer->play_ready) return 0;
+    mc_remote_player_t *entry = remote_player_get(viewer, subject->entity_id);
+    if (!entry || !entry->spawned) return 0;
+    return send_player_motion(viewer, subject);
 }
 
 static const mc_slot_t *selected_mainhand_slot(const mc_conn_t *c) {
@@ -7172,6 +7213,18 @@ static int handle_player_movement_update(mc_conn_t *c, bool has_pos, double x, d
         c->x = x;
         c->y = y;
         c->z = z;
+        if (prev_has_pos && c->last_motion_sample_ms > 0 && now_ms > c->last_motion_sample_ms) {
+            double ticks = (double)(now_ms - c->last_motion_sample_ms) / 50.0;
+            double vx = (x - prev_x) / ticks;
+            double vy = (y - prev_y) / ticks;
+            double vz = (z - prev_z) / ticks;
+            if (fabs(vx) <= 3.9 && fabs(vy) <= 3.9 && fabs(vz) <= 3.9) {
+                c->motion_x = vx;
+                c->motion_y = vy;
+                c->motion_z = vz;
+            }
+        }
+        c->last_motion_sample_ms = now_ms;
     }
     if (has_rot) {
         c->yaw = yaw;
@@ -7328,8 +7381,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         return net_server_broadcast_player_animation(c->server, c, hand == 0 ? 0 : 3);
     }
 
-    if (frame->packet_id == PKT_PLAY_INTERACT_SB) {
-        return handle_interact_packet(c, frame, now_ms);
+    if (frame->packet_id == PKT_PLAY_ATTACK_SB) {
+        return handle_attack_packet(c, frame, now_ms);
     }
 
     if (frame->packet_id == PKT_PLAY_USE_ITEM) {
@@ -7899,10 +7952,11 @@ int proto_play_tick(mc_conn_t *c, int64_t now_ms) {
     if (tick_item_use(c) != 0) return -1;
     if (tick_open_furnace_container(c) != 0) return -1;
 
-    if (player_can_take_damage(c) && c->has_pos && c->y < PLAYER_VOID_DAMAGE_Y) {
+    if (c->player && !c->dead && !c->closing && c->state == MC_STATE_PLAY &&
+        c->gamemode != GAMEMODE_SPECTATOR && c->has_pos && c->y < PLAYER_VOID_DAMAGE_Y) {
         if (c->next_void_damage_ms == 0 || now_ms >= c->next_void_damage_ms) {
             c->next_void_damage_ms = now_ms + PLAYER_VOID_DAMAGE_INTERVAL_MS;
-            if (apply_player_damage(c, PLAYER_VOID_DAMAGE_AMOUNT, "You fell out of the world", true, now_ms) != 0) return -1;
+            if (apply_player_void_damage(c, now_ms) != 0) return -1;
         }
     } else if (!c->dead) {
         c->next_void_damage_ms = 0;
