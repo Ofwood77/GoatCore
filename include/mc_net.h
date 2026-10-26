@@ -137,6 +137,10 @@ struct mc_conn {
     float pitch;
     bool has_pos;
     bool on_ground;
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    int64_t last_motion_sample_ms;
     bool fall_tracking;
     double fall_start_y;
     int64_t next_void_damage_ms;

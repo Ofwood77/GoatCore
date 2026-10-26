@@ -293,3 +293,68 @@ erreur pendant présence et visibilité à dix joueurs. Le paquet Player Info
 Update et la liste Tab existaient déjà ; l'utilisateur a confirmé que Tab
 fonctionne. Le rendu des nouveaux messages par deux clients Java officiels
 simultanés reste à confirmer visuellement.
+
+## Phase 1D.2 — audit des dégâts et recul des joueurs
+
+Référence directe : JAR serveur officiel Java 26.1.1 installé sur
+10.0.4.66. L'audit a porté sur `LivingEntity.hurtServer`,
+`LivingEntity.knockback`, `Player.attack`, `CombatRules`,
+`Entity.baseTick`, `LivingEntity.baseTick` et les tags de types de dégâts
+embarqués dans ce JAR. Les nombres ci-dessous sont issus de ce code ; la
+correspondance dynamique des paquets est vérifiée séparément.
+
+| Source | Règle Vanilla constatée | État GoatCore 1D.2 |
+|---|---|---|
+| Coup à main nue | Attribut initial d'attaque à 1 point ; l'armure utilise `max(armure × 0,2, armure − dégâts/(2 + ténacité/4))`, borné à 20 puis divisé par 25 | Dégât de base et formule armure/ténacité corrigés. Temps de recharge de l'attaque, coups critiques, enchantements et effets encore absents. |
+| Coup reçu | La fenêtre `invulnerableTime` est mise à 20 ticks ; au-dessus de 10 ticks restants, un coup plus fort n'applique que l'excédent et ne réémet ni événement de blessure ni recul | Excédent déjà traité ; événement et recul désormais supprimés pour ce coup partiel. La fenêtre GoatCore reste exprimée en 500 ms, pas en nombre de ticks effectivement écoulés. |
+| Recul PvP | Impulsion de 0,4 après résistance ; direction opposée à l'attaquant ; vitesse horizontale précédente divisée par deux ; au sol, vitesse Y `min(0,4, ancienne/2 + force)` ; en l'air, Y inchangé | Formule de base et paquet `Set Entity Motion` 101, encodé en `LpVec3` propre au protocole 775, vers la cible et les observateurs visibles. Le même codec corrige la vitesse des objets lâchés. Vitesse précédente estimée depuis les mouvements du client. Résistance, recul supplémentaire de sprint/enchantement et collisions serveur restent à prendre en charge. Aucune téléportation artificielle n'est utilisée. |
+| Vide | Sous `minY − 64`, 4 points par activation ; `out_of_world` traverse l'invulnérabilité Creative et l'armure | Creative reçoit maintenant les dégâts du vide ; Spectator est exclu. La position du client reste insuffisamment contrôlée par collision serveur. |
+| Feu / lave | `on_fire` inflige 1 point toutes les 20 ticks ; `lavaHurt` soumet 4 points lors du contact ; `on_fire` traverse l'armure, `lava` non ; la résistance au feu annule ces sources | Non conforme : contact exact avec le feu et la hauteur des fluides, état d'embrasement, résistance, durabilité et effets manquent. |
+| Noyade | Air initial 300 ; perte de 1 par tick avec les yeux immergés ; à −20, retour à 0 et soumission de 2 points ; récupération de 4 par tick hors de l'eau | Non implémentée : détection des yeux dans le fluide, niveau de fluide et paquets d'air manquent. L'armure ordinaire ne réduit pas la noyade. |
+| Suffocation / blocs dangereux | `in_wall` soumet 1 point lors de `baseTick` et traverse l'armure ; feu, cactus, buisson, campfire et magma ont des collisions et des types de dégâts distincts | Non implémentés. Les volumes de collision des block states, notamment partiels, restent une dépendance de la phase 2. |
+| Gel | Type `freeze` indépendant, traversant l'armure ; température et durée de gel dépendent du contact avec la poudreuse et de l'équipement | Non implémenté : état de gel, collision poudreuse et immunités d'équipement absents. |
+
+Le calcul de recul côté serveur reste partiel tant que GoatCore accepte la
+position et le drapeau `onGround` du client sans simulation de collisions.
+Le vrai paquet d'attaque 26.1.1 est `ServerboundAttack` (identifiant 1,
+VarInt d'identifiant d'entité uniquement). Le chemin PvP écoutait auparavant
+`ServerboundInteract` (26), qui sert désormais à interagir et n'envoie pas
+les attaques du client officiel. La correction sépare ces deux actions.
+Le tableau distingue volontairement les règles lues dans le JAR des scénarios
+effectivement observés sur les serveurs. Ni les effets de statut ni les
+enchantements ne sont annoncés conformes. Les interactions de blocs et de
+fluides seront raccordées aux formes de collision en phase 2 ; l'architecture
+d'entités servira ensuite aux résistances et sources de dégâts communes.
+
+Scénarios numériques exécutés sur 10.0.4.66 : le script
+`tests/stress/test_player_combat.py` a observé sur Vanilla 25590 un coup à
+main nue de 1 point, un recul horizontal de +0,400 à 2 blocs puis de −0,400
+à 2,5 blocs, et aucun second dégât immédiat. Sur GoatCore isolé 25589,
+les deux mêmes directions et distances ont produit 1 point et ±0,400. Le
+paquet de vitesse a été reçu par la cible et par l'observateur. Après le
+combat, la déconnexion a retiré l'entité visible et la reconnexion a restauré
+la santé sans doublon observé. Le test du vide en Creative a observé 20 → 16
+points. Ces scénarios ne couvrent pas les attaques chargées, les armes, les
+résistances, ni les collisions après le recul. Sur la référence Vanilla, des
+essais supplémentaires dans le monde réutilisé ont subi d'autres dégâts
+pendant la préparation des bots ; ils ne sont pas interprétés comme des
+mesures de PvP.
+
+Sur le même export de sources, `make -B precommit-check` a réussi à distance
+avec son démarrage de contrôle sur 25586. Les scénarios de mort/respawn,
+d'interruption du respawn, de dix déconnexions brutales et de visibilité à
+50 joueurs sont passés sur 25589. Un test de 50 bots en mouvement pendant
+16,19 s a compté 50 connexions, 6 348 mouvements envoyés, zéro échec de
+connexion et zéro déconnexion inattendue. Les nombres de mouvements envoyés
+ne prouvent pas tous une position acceptée. Le runtime TSan de cet hôte échoue
+sur un programme C minimal avec `unexpected memory mapping` (code 66), avant
+toute validation de GoatCore.
+
+Les tests de combat, déconnexion et reconnexion ont également réussi avec
+2 puis 4 workers réseau sur 25589, en conservant l'affinité CPU du serveur
+de test. La variante ASan/UBSan a passé `test_pvp`, le combat à deux joueurs,
+le vide Creative, mort/respawn, neuf départs brutaux concurrents et la
+visibilité à dix joueurs sur 25586, sans diagnostic dans son journal.
+L'instance temporaire de combat autorisait les commandes d'administration
+pour tous les bots afin de les placer en Survival ; cette option ne doit pas
+être transposée aux instances 25565/25587.

@@ -143,6 +143,10 @@ int net_server_broadcast_player_event(mc_server_t *server, mc_conn_t *subject, u
     (void)server; (void)subject; (void)status;
     return 0;
 }
+int net_server_broadcast_player_motion(mc_server_t *server, mc_conn_t *subject) {
+    (void)server; (void)subject;
+    return 0;
+}
 int net_server_broadcast_player_presence(mc_server_t *server, mc_conn_t *subject) {
     (void)server; (void)subject;
     return 0;
