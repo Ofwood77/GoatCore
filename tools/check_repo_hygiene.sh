@@ -44,6 +44,9 @@ while IFS= read -r path; do
         PLAN*.md|REPORT*.md)
             flag_bad "tracked AI/report note" "$path"
             ;;
+        docs/*:Zone.Identifier|docs/*.tmp|docs/*.bak)
+            flag_bad "tracked temporary documentation artifact" "$path"
+            ;;
         assets/*)
             if ! allowed_asset "$path"; then
                 flag_bad "tracked non-minimal asset" "$path"
