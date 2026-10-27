@@ -434,6 +434,25 @@ and a four-epoll-worker 10-bot workload with the same 200+200 verified edits,
 again without a reported race. These small sanitizer runs end before a full
 100-tick `MC_PERF` window and their timing is not a performance baseline.
 Sanitizers sample executed paths only; they do not prove race freedom.
+
+## Player persistence ownership (phase 1E)
+
+Player gameplay, inventory changes, disconnect cleanup and player saves remain
+owned by the authoritative tick. No save worker is introduced. The player
+store serializes direct load/save callers with one process-local mutex;
+each write uses a unique temporary gzip file, file fsync, atomic rename and
+directory fsync. The loaded passthrough NBT tree belongs exclusively to its
+`mc_player_data_t`; slot values are copied independently and the tree is
+freed with the player. Serialization clones unhandled tags rather than
+sharing mutable subtrees with the output file.
+
+The duplicate-identity gate reserves identities while departure cleanup is
+pending, preventing a reconnect from loading before the departing player's
+save finishes. These guarantees apply to one process using a world. There
+is no interprocess world lock, and player/chunk/container files do not form
+one atomic transaction. Running multiple server processes against the same
+world remains unsupported. TSan's minimal runtime probe on 10.0.4.66 exits
+66 with `unexpected memory mapping`; it does not validate these paths.
 The first multi-bot sanitizer attempts exposed a test-probe error: the QA
 read used `mc_world_get_block`, which reports air for a chunk still loading.
 It now uses `mc_world_get_block_ready`, and the test retries an unavailable

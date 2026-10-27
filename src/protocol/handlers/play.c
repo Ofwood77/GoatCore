@@ -691,6 +691,9 @@ static int ensure_player_loaded(mc_conn_t *c) {
     if (player->experience_progress > 1.0f) player->experience_progress = 1.0f;
     if (player->experience_level < 0) player->experience_level = 0;
     if (player->experience_total < 0) player->experience_total = 0;
+    if (player->gamemode != GAMEMODE_CREATIVE && player->gamemode != GAMEMODE_SPECTATOR)
+        player->flying = false;
+    if (player->gamemode == GAMEMODE_SPECTATOR) player->flying = true;
     c->gamemode = player->gamemode;
     c->health = player->health;
     c->food = player->food_level;
@@ -841,7 +844,7 @@ static int send_player_abilities(mc_conn_t *c) {
     uint8_t flags = 0;
     if (c->gamemode == GAMEMODE_CREATIVE) {
         flags |= 0x01; /* invulnerable */
-        flags |= 0x02; /* flying */
+        if (c->player && c->player->flying) flags |= 0x02; /* flying */
         flags |= 0x04; /* allow flying */
         flags |= 0x08; /* creative mode */
     } else if (c->gamemode == GAMEMODE_SPECTATOR) {
@@ -5401,7 +5404,11 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
         if (gm >= 0 && gm != c->gamemode) {
             int old_gamemode = c->gamemode;
             c->gamemode = gm;
-            if (c->player) c->player->gamemode = gm;
+            if (c->player) {
+                c->player->gamemode = gm;
+                if (gm == GAMEMODE_SPECTATOR) c->player->flying = true;
+                else if (gm != GAMEMODE_CREATIVE) c->player->flying = false;
+            }
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
             if (sync_inventory_full(c) != 0) return -1;
@@ -5726,6 +5733,7 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             int old_gamemode = c->gamemode;
             c->gamemode = gm;
             c->player->gamemode = gm;
+            if (gm != GAMEMODE_CREATIVE) c->player->flying = false;
             if (send_game_mode_event(c, gm) != 0) return -1;
             if (send_player_abilities(c) != 0) return -1;
             if (sync_inventory_full(c) != 0) return -1;
@@ -7410,6 +7418,18 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
             if (rc < 0) return -1;
             return 0;
         }
+    }
+
+    if (frame->packet_id == MC_PKT_PLAY_SERVERBOUND_PLAYER_ABILITIES) {
+        if (!c->player || frame->payload.len != 1) return -1;
+        bool may_fly = c->gamemode == GAMEMODE_CREATIVE || c->gamemode == GAMEMODE_SPECTATOR;
+        bool flying = may_fly && (frame->payload.data[0] & 0x02) != 0;
+        if (c->gamemode == GAMEMODE_SPECTATOR) flying = true;
+        if (c->player->flying != flying) {
+            c->player->flying = flying;
+            return save_player_data(c);
+        }
+        return 0;
     }
 
     if (frame->packet_id == PKT_PLAY_HELD_ITEM_SLOT_SB) {

@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 1D en cours)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 1E en cours)
 
 ## Phase 1C : cycle de vie et visibilité des joueurs
 
@@ -358,3 +358,64 @@ visibilité à dix joueurs sur 25586, sans diagnostic dans son journal.
 L'instance temporaire de combat autorisait les commandes d'administration
 pour tous les bots afin de les placer en Survival ; cette option ne doit pas
 être transposée aux instances 25565/25587.
+
+## Phase 1E — persistance avancée des joueurs
+
+Référence : serveur officiel Java 26.1.1 sur le port temporaire 25590,
+avec un joueur offline de test portant une pile de 64 pierres, un casque
+et une épée en main secondaire. Après déconnexion et redémarrage officiel,
+le client de test a retrouvé ces trois piles. Le fichier réel de référence
+est conservé dans `tests/fixtures/vanilla-26.1.1-player.dat` ; son
+`DataVersion` est 4788. GoatCore charge ce fichier, réécrit les champs qu'il
+gère, puis retrouve les trois piles et les autres champs NBT non interprétés.
+Cette preuve couvre ces objets simples et ce scénario, pas tous les items
+Vanilla.
+
+| Donnée | Sauvegarde et restauration GoatCore 1E | Comparaison / limite |
+| --- | --- | --- |
+| Identité | Fichier nommé par UUID authentifié online ou UUID offline déterministe, tag `UUID` IntArray contrôlé s'il existe ; même pseudo et UUID différents donnent deux fichiers. L'ancien `playerdata/<uuid>.dat` est lu en repli, conservé, puis migré à la prochaine sauvegarde. | Les nouveaux fichiers vont dans `players/data/<uuid>.dat` comme 26.1.1. Le contrôle des doublons couvre les connexions actives et les départs encore en sauvegarde. Une connexion client officielle reste nécessaire pour attester le chemin online après chaque binaire. |
+| Position et rotation | `Pos` (trois doubles), `Rotation` (deux floats) ; coordonnées négatives restaurées après redémarrage. | Le déplacement n'est durable qu'après une sauvegarde déclenchée ou une déconnexion/arrêt propre. Les positions invalides sont refusées ou ramenées au spawn selon le contrôle de chargement existant. |
+| Gamemode et vol | `playerGameType` et `abilities.flying` ; le paquet d'aptitudes client met à jour l'état de vol autorisé. | Les vitesses d'aptitudes personnalisées peuvent rester en NBT mais le paquet envoyé utilise encore les valeurs fixes du serveur. |
+| Inventaire et équipement | Hotbar 0–8, inventaire 9–35 dans `Inventory` ; casque/torse/jambes/bottes/main secondaire dans `equipment` ; `SelectedItemSlot`, piles et coffre de l'End. La grille de craft est restituée à l'inventaire à la fermeture normale. | Conformes au schéma NBT observé pour les piles simples : `Slot` Byte et `count` Int. L'ancien indexage réseau GoatCore est lu puis migré. Les composants, durabilité, noms et enchantements d'items ne sont pas encore représentés de bout en bout : leur présence provoque un refus de chargement ou de sauvegarde, laissant le fichier existant intact. |
+| Curseur, craft et révisions | Curseur, quatre ingrédients de craft 2×2, révision d'inventaire et du coffre de l'End dans les tags privés `mcCursorItem`, `mcCraftingItems`, `mcInventoryStateId`, `mcEnderStateId`, `mcInventoryFormat`. Le résultat de craft est recalculé et n'est jamais sauvegardé comme une seconde pile possédée. | Ces tags ne font pas partie du schéma Vanilla. Les fichiers GoatCore ne sont pas déclarés parfaitement interchangeables avec Vanilla. |
+| Santé, faim et XP | `Health`, `foodLevel`, saturation, épuisement, `XpP`, `XpLevel`, `XpTotal` chargés et sauvés ; valeurs vérifiées après déconnexion et redémarrage. | Santé maximale variable, effets actifs et durées ne sont pas appliqués par le gameplay. Les tags non interprétés sont conservés dans le fichier, ce qui ne constitue pas une restauration fonctionnelle de ces effets. |
+| Dimension et réapparition | `Dimension=minecraft:overworld` ; les autres dimensions sont refusées pour éviter de charger leur position dans l'Overworld. Mort et respawn, avec ou sans `keep_inventory`, ont été testés après redémarrage. | Nether/End et point de réapparition personnel non implémentés. Les tags inconnus de réapparition sont conservés mais la logique utilise encore le spawn du monde. |
+
+Les écritures joueur sont synchrones sur le tick autoritaire et protégées
+par un mutex au niveau du magasin. Un fichier gzip est préparé dans le même
+répertoire, fermé et `fsync` avant `rename` atomique ; le répertoire est
+ensuite synchronisé. Un échec avant `rename` laisse l'ancien fichier valide
+et nettoie le temporaire. Les fichiers NBT tronqués, les données d'item
+inconnues et les champs essentiels mal formés sont refusés ; ils ne sont pas
+remplacés par un état par défaut. Les NBT décompressés sont plafonnés à 8 MiB.
+La sauvegarde est déclenchée par les changements d'inventaire, d'état de jeu,
+de faim/santé, de slot ou de vol, ainsi que par la déconnexion et l'arrêt
+propre. Il n'y a pas encore d'autosave périodique de la position.
+
+Sur un monde temporaire à 25589, un SIGKILL après sauvegarde d'un objet et
+après un déplacement accepté a conservé l'objet, mais restauré la dernière
+position durable. Un SIGTERM avec le joueur connecté a conservé sa dernière
+position et son objet. La déconnexion brutale du client a été testée
+séparément : elle suit le nettoyage normal du serveur et sauvegarde l'état.
+Ces résultats ne garantissent aucune action non encore durable au moment
+d'un crash, ni la cohérence avec des sauvegardes de chunks ou de conteneurs
+effectuées dans une autre transaction.
+
+La suite `tests/stress/test_player_persistence.py` sépare préparation et
+vérification par un vrai redémarrage, compare les 46 slots réseau et vérifie
+identité, position négative, gamemode, vol, slot sélectionné, santé, faim et
+XP. Un, deux puis dix joueurs ont été vérifiés sur un worker réseau ; dix
+joueurs supplémentaires ont été vérifiés sur deux et quatre workers. Les
+tests C `test_player_nbt` vérifient le fichier officiel, la migration des
+anciens fichiers, deux UUID portant le même nom, l'échec forcé de `rename`
+et le rejet d'un gzip tronqué. Les essais à 25 joueurs et les transitions
+vers d'autres dimensions restent non exécutés.
+
+`make -B precommit-check` a réussi sur l'export distant avec
+`GOATCORE_SOURCE_EXPORT=1` (hygiène Git contrôlée localement). ASan/UBSan a
+passé les tests C de persistance et un cycle à deux joueurs avec redémarrage,
+inventaires complets et vol Creative. Le binaire instrumenté PIE a échoué
+avant l'ouverture du port avec une répétition de `DEADLYSIGNAL` ; la variante
+instrumentée sans PIE a terminé les scénarios et les arrêts sans diagnostic.
+Le programme minimal TSan a échoué avant toute validation, code 66,
+`unexpected memory mapping`. Aucun résultat TSan positif n'est annoncé.

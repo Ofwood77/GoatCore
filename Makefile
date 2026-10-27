@@ -233,7 +233,7 @@ test_nbt_arena: tests/test_nbt_arena.c src/world/nbt.c src/util/arena.c
 test_block_registry: tests/test_block_registry.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_block_entity_store: tests/test_block_entity_store.c src/world/block_entity_store.c src/protocol/inventory.c src/protocol/varint.c src/generated/generated_minecraft_ids.c | generated_sources
+test_block_entity_store: tests/test_block_entity_store.c src/world/block_entity_store.c src/protocol/inventory.c src/protocol/varint.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_paletted_container: tests/test_paletted_container.c src/world/paletted_container.c src/world/block_registry.c | generated_sources
@@ -248,8 +248,8 @@ test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers
 test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_player_nbt: tests/test_player_nbt.c src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+test_player_nbt: tests/test_player_nbt.c tests/fixtures/vanilla-26.1.1-player.dat src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^) $(LDFLAGS) -Wl,--wrap=rename
 
 test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_minecraft_ids.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
