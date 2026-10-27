@@ -190,6 +190,38 @@ static int run_deferred_ack_case(void) {
     return 0;
 }
 
+static int run_use_item_on_codec_case(void) {
+    mc_conn_t conn;
+    memset(&conn, 0, sizeof(conn));
+    conn.state = MC_STATE_PLAY;
+    conn.play_init_sent = true;
+    conn.has_pos = true;
+    conn.block_ack_sequence = -1;
+    /* Official FriendlyByteBuf.writeBlockHitResult: two bools, then VarInt 128.
+     * A missing world/chunk must ACK without mutating a world. */
+    uint8_t bytes[] = {0, 0,0,0,0,0,0,0,0, 1,
+                       0x3f,0,0,0, 0x3f,0x80,0,0, 0x3f,0,0,0, 0,1, 0x80,1, 0};
+    mc_frame_t frame = {0};
+    frame.packet_id = MC_PKT_PLAY_SERVERBOUND_USE_ITEM_ON;
+    frame.payload.data = bytes;
+    frame.payload.len = sizeof(bytes) - 1;
+    g_packet_count = 0;
+    if (proto_play_handle(&conn, &frame, 0) != 0 || g_packet_count != 1 ||
+        g_last_packet_id != MC_PKT_PLAY_CLIENTBOUND_BLOCK_CHANGED_ACK ||
+        g_last_payload_len != 2 || g_last_payload[0] != 0x80 || g_last_payload[1] != 1)
+        return fail("UseItemOn two bools and exact sequence");
+    for (size_t length = 0; length < sizeof(bytes) - 1; length++) {
+        frame.payload.len = length;
+        if (proto_play_handle(&conn, &frame, 0) != -1) return fail("UseItemOn truncation accepted");
+    }
+    frame.payload.len = sizeof(bytes);
+    if (proto_play_handle(&conn, &frame, 0) != -1) return fail("UseItemOn trailing data accepted");
+    frame.payload.len = sizeof(bytes) - 1;
+    bytes[9] = 6;
+    if (proto_play_handle(&conn, &frame, 0) != -1) return fail("UseItemOn invalid face accepted");
+    return 0;
+}
+
 static int run_case(mc_world_t *world, mc_chunk_t *chunk, const char *label) {
     mc_buf_t out;
     if (buf_init(&out, 8192) != 0) return fail("buf_init");
@@ -208,7 +240,7 @@ static int run_case(mc_world_t *world, mc_chunk_t *chunk, const char *label) {
 }
 
 int main(void) {
-    if (run_deferred_ack_case() != 0) return 1;
+    if (run_deferred_ack_case() != 0 || run_use_item_on_codec_case() != 0) return 1;
 
     char world_path[128];
     if (mk_temp_world(world_path, sizeof(world_path)) != 0) return fail("mkdtemp");

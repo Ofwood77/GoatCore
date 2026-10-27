@@ -1,0 +1,231 @@
+{
+  "version": "26.1.1",
+  "protocol": 775,
+  "data_version": 4788,
+  "server_jar_sha256": "3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081",
+  "blocks_report_sha256": "c4f6aafb57a085df217fcb93533de7c8baa5711ff6eecad07563b28813713cc0",
+  "scenarios": [
+    {
+      "case": "stone",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 1,
+      "count": 3
+    },
+    {
+      "case": "dirt",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 10,
+      "count": 3
+    },
+    {
+      "case": "planks",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 15,
+      "count": 3
+    },
+    {
+      "case": "log-y",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 137,
+      "count": 3
+    },
+    {
+      "case": "log-x",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 136,
+      "count": 3
+    },
+    {
+      "case": "log-z",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 138,
+      "count": 3
+    },
+    {
+      "case": "slab-bottom",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 13333,
+      "count": 3
+    },
+    {
+      "case": "slab-top",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 13331,
+      "count": 3
+    },
+    {
+      "case": "merge-up",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 13335,
+      "count": 3
+    },
+    {
+      "case": "merge-down",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 13335,
+      "count": 3
+    },
+    {
+      "case": "merge-side",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 13335,
+      "count": 3
+    },
+    {
+      "case": "no-merge-side",
+      "point": [
+        -15,
+        64,
+        16
+      ],
+      "state": 13333,
+      "count": 3
+    },
+    {
+      "case": "replace-grass",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 1,
+      "count": 3
+    },
+    {
+      "case": "occupied",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 1,
+      "count": 4
+    },
+    {
+      "case": "self-collision",
+      "point": [
+        -18,
+        64,
+        14
+      ],
+      "state": 0,
+      "count": 4
+    },
+    {
+      "case": "invalid-hit",
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": 0,
+      "count": 4
+    },
+    {
+      "case": "out-of-reach",
+      "point": [
+        -8,
+        64,
+        16
+      ],
+      "state": 0,
+      "count": 4
+    },
+    {
+      "case": "partial-collision",
+      "point": [
+        -18,
+        64,
+        14
+      ],
+      "state": 13333,
+      "count": 4
+    }
+  ],
+  "after_restart": {
+    "states": [
+      {
+        "point": [
+          -16,
+          64,
+          15
+        ],
+        "state": 1
+      },
+      {
+        "point": [
+          -16,
+          64,
+          16
+        ],
+        "state": 137
+      },
+      {
+        "point": [
+          -15,
+          64,
+          15
+        ],
+        "state": 13333
+      },
+      {
+        "point": [
+          -15,
+          64,
+          16
+        ],
+        "state": 13331
+      }
+    ],
+    "slot36": [
+      271,
+      4
+    ]
+  },
+  "shulker_block_protocol_id": 677,
+  "registries_report_sha256": "2b7b9a3a5738437c9140734e2f9eebfa7c2cfea9b685efed1f3802bdbcfccf9f"
+}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import sys
 
 
@@ -51,6 +52,16 @@ def load_report(path: str) -> tuple[list[dict], int]:
         if not isinstance(states, list) or not states:
             fail(f"block {block_name} must contain a non-empty states array")
 
+        domains = block.get("properties", {})
+        if not isinstance(domains, dict):
+            fail(f"invalid property domains for {block_name}")
+        for name, values in domains.items():
+            if not isinstance(name, str) or not name or not isinstance(values, list) or not values or \
+                    any(not isinstance(v, str) or not v for v in values) or len(set(values)) != len(values):
+                fail(f"invalid property domain {block_name}.{name}")
+        if len(states) != math.prod(len(values) for values in domains.values()):
+            fail(f"incomplete property combinations for {block_name}")
+
         default_state_id = None
         min_state_id = None
         max_block_state_id = None
@@ -60,9 +71,13 @@ def load_report(path: str) -> tuple[list[dict], int]:
             if not isinstance(state, dict):
                 fail(f"block {block_name} has an invalid state entry: {state!r}")
             raw_id = state.get("id")
-            if not isinstance(raw_id, int) or raw_id < 0:
+            if type(raw_id) is not int or raw_id < 0 or raw_id >= 32768:
                 fail(f"block {block_name} has an invalid state id: {raw_id!r}")
 
+            props = state.get("properties", {})
+            if not isinstance(props, dict) or props.keys() != domains.keys() or any(
+                    value not in domains[name] for name, value in props.items()):
+                fail(f"invalid state properties for {block_name}: {props}")
             key = canonical_state_key(block_name, state)
             if raw_id in seen_state_ids:
                 fail(f"duplicate state id {raw_id} for {key} and {seen_state_ids[raw_id]}")
@@ -111,6 +126,11 @@ def load_report(path: str) -> tuple[list[dict], int]:
             }
         )
 
+    if len(seen_state_ids) != max_state_id + 1:
+        fail("state IDs must be dense from zero")
+    for block in blocks:
+        if block["max_state_id"] - block["min_state_id"] + 1 != len(block["states"]):
+            fail(f"non-contiguous state range for {block['name']}")
     return blocks, max_state_id
 
 

@@ -14,6 +14,9 @@
 #include "mc_crafting.h"
 #include "mc_furnace.h"
 #include "mc_mining.h"
+#include "mc_placement.h"
+#include "mc_block_state.h"
+#include "generated_block_ids.h"
 #include "mc_container_store.h"
 #include "mc_nbt.h"
 #include "mc_packed.h"
@@ -1427,13 +1430,6 @@ int32_t proto_play_resolve_placement_state_ex(const mc_world_ids_t *ids, const m
     return mc_resolve_placement_state(slot, yaw, face, hit_x, hit_y, hit_z);
 }
 
-static const char *axis_from_clicked_face(int32_t face) {
-    if (face == 0 || face == 1) return "y";
-    if (face == 2 || face == 3) return "z";
-    if (face == 4 || face == 5) return "x";
-    return NULL;
-}
-
 static int floor_i32_from_f32(float v) {
     int i = (int)v;
     if ((float)i > v) i--;
@@ -1441,7 +1437,7 @@ static int floor_i32_from_f32(float v) {
 }
 
 static const char *opposite_horizontal_facing_from_yaw(float yaw) {
-    int rot = floor_i32_from_f32((yaw * 4.0f / 360.0f) + 0.5f) & 3;
+    int rot = floor_i32_from_f32((remainderf(yaw, 360.0f) * 4.0f / 360.0f) + 0.5f) & 3;
     switch (rot) {
         case 0: return "north";
         case 1: return "east";
@@ -1629,10 +1625,6 @@ static int send_recomputed_connected_neighbors(mc_conn_t *c, mc_world_t *world, 
     return 0;
 }
 
-static bool state_base_is_slab(const char *base) {
-    return str_has_suffix(base, "_slab");
-}
-
 static bool state_base_is_stairs(const char *base) {
     return str_has_suffix(base, "_stairs");
 }
@@ -1656,43 +1648,8 @@ static int32_t state_id_from_key_or_fallback(const char *key, int32_t fallback) 
     return id >= 0 ? id : fallback;
 }
 
-static int32_t slab_double_state_for_base(const char *base, int32_t fallback) {
-    char key[256];
-    if (!base) return fallback;
-    int n = snprintf(key, sizeof(key), "%s[type=double,waterlogged=false]", base);
-    if (n <= 0 || (size_t)n >= sizeof(key)) return fallback;
-    return state_id_from_key_or_fallback(key, fallback);
-}
-
-static bool slab_base_and_type(int32_t state_id, char *base, size_t base_cap, char *type, size_t type_cap) {
-    const char *key = mc_block_state_key(state_id);
-    const char *type_pos = NULL;
-    const char *type_end = NULL;
-    size_t n = 0;
-    if (!state_key_base_name(key, base, base_cap) || !state_base_is_slab(base)) return false;
-    type_pos = strstr(key, "type=");
-    if (!type_pos || !type || type_cap == 0) return false;
-    type_pos += strlen("type=");
-    type_end = type_pos;
-    while (*type_end && *type_end != ',' && *type_end != ']') type_end++;
-    n = (size_t)(type_end - type_pos);
-    if (n == 0 || n >= type_cap) return false;
-    memcpy(type, type_pos, n);
-    type[n] = '\0';
-    return true;
-}
-
 int32_t proto_play_try_merge_slab_state_for_test(int32_t clicked_state_id, int32_t requested_state_id) {
-    char clicked_base[128];
-    char clicked_type[16];
-    char requested_base[128];
-    char requested_type[16];
-    if (!slab_base_and_type(clicked_state_id, clicked_base, sizeof(clicked_base), clicked_type, sizeof(clicked_type)) ||
-        !slab_base_and_type(requested_state_id, requested_base, sizeof(requested_base), requested_type, sizeof(requested_type)) ||
-        strcmp(clicked_base, requested_base) != 0 || strcmp(clicked_type, "double") == 0) {
-        return -1;
-    }
-    return slab_double_state_for_base(clicked_base, -1);
+    return mc_placement_merge_slab(clicked_state_id, requested_state_id, 1, 0.5f, false);
 }
 
 static bool door_base_and_half(int32_t state_id, char *base, size_t base_cap, char *half, size_t half_cap) {
@@ -1723,13 +1680,14 @@ static int32_t door_other_half_state(int32_t state_id, const char *wanted_half) 
 
 static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_yaw, int32_t clicked_face,
                                           float hit_x, float hit_y, float hit_z) {
-    if (!slot || !slot->present || slot->count <= 0) return -1;
-    (void)hit_x;
-    (void)hit_z;
+    if (!slot || !slot->present || slot->count <= 0 || !isfinite(player_yaw) ||
+        !mc_placement_valid_hit(clicked_face, hit_x, hit_y, hit_z)) return -1;
 
     int32_t mapped_state_id = mc_item_default_place_state(slot->item_id);
     if (mapped_state_id < 0) return -1;
 
+    int32_t simple = mc_placement_resolve_simple(mapped_state_id, clicked_face, hit_y);
+    if (simple >= 0) return simple;
     const char *mapped_key = mc_block_state_key(mapped_state_id);
     if (!mapped_key) return mapped_state_id;
 
@@ -1738,11 +1696,6 @@ static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_ya
     if (state_key_base_name(mapped_key, base, sizeof(base))) {
         const char *facing = opposite_horizontal_facing_from_yaw(player_yaw);
         const char *half = half_from_face_hit_y(clicked_face, hit_y);
-
-        if (state_base_is_slab(base)) {
-            int n = snprintf(rewritten, sizeof(rewritten), "%s[type=%s,waterlogged=false]", base, half);
-            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
-        }
 
         if (state_base_is_stairs(base)) {
             int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=%s,shape=straight,waterlogged=false]",
@@ -1760,13 +1713,6 @@ static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_ya
             int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=lower,hinge=left,open=false,powered=false]",
                              base, facing ? facing : "north");
             if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
-        }
-    }
-
-    if (strstr(mapped_key, "axis=") != NULL) {
-        const char *axis = axis_from_clicked_face(clicked_face);
-        if (axis && rewrite_state_property(mapped_key, "axis=", axis, rewritten, sizeof(rewritten)) == 0) {
-            return mc_block_state_id(rewritten, mapped_state_id);
         }
     }
 
@@ -2037,10 +1983,7 @@ static int send_block_entity_data_packet(mc_conn_t *c, int32_t state_id, int32_t
 }
 
 static int block_action_block_id_for_state(int32_t state_id) {
-    if (state_id >= 0 && (size_t)state_id < GLOBAL_BLOCK_STATES_COUNT) {
-        return (int32_t)GLOBAL_BLOCK_STATES[state_id].block_index;
-    }
-    return state_id;
+    return mc_block_protocol_id_for_state(state_id);
 }
 
 static int send_block_event_packet(mc_conn_t *c, int32_t x, int32_t y, int32_t z, uint8_t action, uint8_t param, int32_t block_id) {
@@ -2811,10 +2754,12 @@ static bool placed_block_intersects_player(const mc_conn_t *c, const mc_world_id
     double player_min_z = c->z - PLAYER_COLLISION_HALF_WIDTH;
     double player_max_z = c->z + PLAYER_COLLISION_HALF_WIDTH;
 
+    double shape_min_y = 0.0, shape_max_y = 1.0;
+    (void)mc_placement_slab_bounds(state_id, &shape_min_y, &shape_max_y);
     return aabb_intersects_strict(player_min_x, player_min_y, player_min_z,
                                   player_max_x, player_max_y, player_max_z,
-                                  (double)block_x, (double)block_y, (double)block_z,
-                                  (double)block_x + 1.0, (double)block_y + 1.0, (double)block_z + 1.0);
+                                  (double)block_x, (double)block_y + shape_min_y, (double)block_z,
+                                  (double)block_x + 1.0, (double)block_y + shape_max_y, (double)block_z + 1.0);
 }
 
 static bool is_chest_state(int32_t state_id) {
@@ -5491,15 +5436,11 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
         const mc_world_ids_t *ids = mc_world_ids(world);
         if (!world || !ids) return 0;
 
-        int32_t sid = -1;
-        if (strcmp(norm, "minecraft:air") == 0) sid = ids->air;
-        else if (strcmp(norm, "minecraft:stone") == 0) sid = ids->stone;
-        else if (strcmp(norm, "minecraft:water") == 0) sid = ids->water_level[0];
-        else if (strcmp(norm, "minecraft:lava") == 0) sid = ids->lava_level[0];
-        else if (strcmp(norm, "minecraft:fire") == 0) sid = ids->fire_age[0];
-        else if (strcmp(norm, "minecraft:redstone_wire") == 0) sid = ids->wire_power[0];
-        else if (strcmp(norm, "minecraft:redstone_block") == 0) sid = ids->redstone_block;
-        else if (strcmp(norm, "minecraft:redstone_lamp") == 0) sid = ids->lamp_lit[0];
+        int32_t sid = mc_block_state_id(norm, -1);
+        if (sid < 0) {
+            const mc_block_desc_t *desc = mc_block_desc_by_name(norm);
+            if (desc) sid = (int32_t)desc->default_state;
+        }
 
         if (sid < 0) return 0;
         (void)mc_world_set_block(world, x, y, z, sid);
@@ -7683,7 +7624,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         int32_t x = 0, y = 0, z = 0;
         int32_t face = 0;
         float cx = 0.0f, cy = 0.0f, cz = 0.0f;
-        bool inside = false;
+        bool inside = false, world_border_hit = false;
         int32_t seq = 0;
         bool has_sequence = false;
         if (r_varint(&r, &hand) != 0) return -1;
@@ -7693,10 +7634,18 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (r_f32(&r, &cy) != 0) return -1;
         if (r_f32(&r, &cz) != 0) return -1;
         if (r_bool(&r, &inside) != 0) return -1;
-        if (r.pos < r.len) {
-            if (r_varint(&r, &seq) != 0) return -1;
-            has_sequence = true;
+        if (r_bool(&r, &world_border_hit) != 0 || r_varint(&r, &seq) != 0 || r.pos != r.len ||
+            hand < 0 || hand > 1 || face < 0 || face > 5 || seq < 0) return -1;
+        has_sequence = true;
+        if (!mc_placement_valid_hit(face, cx, cy, cz) || !c->has_pos ||
+            !mc_placement_within_reach(c->x, c->y + (c->sneaking ? 1.27 : 1.62), c->z,
+                                       x, y, z, c->gamemode == GAMEMODE_CREATIVE ? 6.0 : 5.5) ||
+            c->dead ||
+            y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT ||
+            x <= -30000000 || x >= 30000000 || z <= -30000000 || z >= 30000000) {
+            return queue_block_changed_ack_packet(c, seq);
         }
+        (void)world_border_hit;
         if (hand != 0) {
             if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
             return 0;
@@ -7706,11 +7655,17 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         (void)cz;
         (void)inside;
 
+        int32_t clicked_state_id = -1;
+        if (mc_world_get_block_ready(get_world(c), x, y, z, &clicked_state_id) != 0)
+            return queue_block_changed_ack_packet(c, seq);
+
         int open_rc = try_open_target_container(c, x, y, z);
         if (open_rc != 0) {
             if (open_rc > 0 && has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
             return open_rc < 0 ? -1 : 0;
         }
+
+        if (c->gamemode == GAMEMODE_SPECTATOR) return queue_block_changed_ack_packet(c, seq);
 
         {
             int food_rc = try_consume_selected_food(c);
@@ -7720,6 +7675,10 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 return 0;
             }
         }
+
+        /* Adventure can use containers/food; ordinary block placement requires
+         * can_place_on components, which are not implemented yet. */
+        if (c->gamemode == GAMEMODE_ADVENTURE) return queue_block_changed_ack_packet(c, seq);
 
         int32_t px = x;
         int32_t py = y;
@@ -7757,41 +7716,25 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                          normalized_state_id >= 0 && mc_block_state_key(normalized_state_id) ? mc_block_state_key(normalized_state_id) : "(none)");
             }
             if (normalized_state_id >= 0) {
-                int32_t clicked_state_id = -1;
-                if (mc_world_get_block(world, x, y, z, &clicked_state_id) != 0) {
-                    clicked_state_id = -1;
+                bool replacing_clicked = block_state_is_replaceable(ids, clicked_state_id) ||
+                    mc_placement_merge_slab(clicked_state_id, normalized_state_id, face, cy, true) >= 0;
+                if (replacing_clicked) { px = x; py = y; pz = z; }
+                if (py < MC_WORLD_MIN_Y || py >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT ||
+                    px <= -30000000 || px >= 30000000 || pz <= -30000000 || pz >= 30000000 ||
+                    mc_world_get_block_ready(world, px, py, pz, &target_state_id) != 0) {
+                    return queue_block_changed_ack_packet(c, seq);
                 }
-                if (clicked_state_id >= 0) {
-                    char clicked_base[128];
-                    char clicked_type[16];
-                    char requested_base[128];
-                    char requested_type[16];
-                    if (slab_base_and_type(clicked_state_id, clicked_base, sizeof(clicked_base), clicked_type, sizeof(clicked_type)) &&
-                        slab_base_and_type(normalized_state_id, requested_base, sizeof(requested_base), requested_type,
-                                           sizeof(requested_type)) &&
-                        strcmp(clicked_base, requested_base) == 0 && strcmp(clicked_type, "double") != 0) {
-                        int32_t double_state = slab_double_state_for_base(clicked_base, normalized_state_id);
-                        if (double_state >= 0 && !placed_block_intersects_player(c, ids, x, y, z, double_state) &&
-                            mc_world_set_block(world, x, y, z, double_state) == 0) {
-                            placed_block = true;
-                            authoritative_state_id = double_state;
-                            network_state_id = double_state;
-                            if (mc_world_flush_block(world, x, y, z) != 0) return -1;
-                            if (send_block_update_packet(c, x, y, z, network_state_id) != 0) return -1;
-                            if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
-                            if (c->gamemode != GAMEMODE_CREATIVE && held_idx >= 0 && held && held->present) {
-                                if (consume_selected_item(c) != 0) return -1;
-                            }
-                        }
+                int32_t merged = mc_placement_merge_slab(target_state_id, normalized_state_id, face, cy, replacing_clicked);
+                if (merged >= 0) normalized_state_id = merged;
+                else {
+                    for (int level = 0; level < 16; level++) {
+                        if (target_state_id != ids->water_level[level]) continue;
+                        int32_t wet = mc_block_state_with_property(normalized_state_id, "waterlogged", "true");
+                        if (wet >= 0) normalized_state_id = wet;
+                        break;
                     }
                 }
-                if (placed_block) {
-                    /* Double-slab placement targets the clicked block, not the adjacent placement cell. */
-                } else
-                if (mc_world_get_block(world, px, py, pz, &target_state_id) != 0) {
-                    target_state_id = -1;
-                }
-                if (!placed_block && target_state_id >= 0 && !block_state_is_replaceable(ids, target_state_id)) {
+                if (!placed_block && target_state_id >= 0 && merged < 0 && !block_state_is_replaceable(ids, target_state_id)) {
                     if (send_block_update_packet(c, px, py, pz, target_state_id) != 0) return -1;
                     if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
                     if (held_idx >= 0) {
@@ -7822,7 +7765,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                         strcmp(door_half, "lower") == 0) {
                         int32_t upper_state = door_other_half_state(normalized_state_id, "upper");
                         int32_t upper_target = -1;
-                        if (upper_state < 0 || mc_world_get_block(world, px, py + 1, pz, &upper_target) != 0 ||
+                        if (upper_state < 0 || mc_world_get_block_ready(world, px, py + 1, pz, &upper_target) != 0 ||
                             !block_state_is_replaceable(ids, upper_target) ||
                             placed_block_intersects_player(c, ids, px, py + 1, pz, upper_state)) {
                             if (send_block_update_packet(c, px, py, pz, target_state_id >= 0 ? target_state_id : ids->air) != 0) return -1;

@@ -75,7 +75,7 @@ static int test_nbt_parse_and_validate(void) {
     pos += 2;
     memcpy(buf + pos, "DataVersion", 11);
     pos += 11;
-    write_i32_be(buf + pos, 4785);
+    write_i32_be(buf + pos, 4788);
     pos += 4;
 
     buf[pos++] = 0x00;
@@ -95,13 +95,19 @@ static int test_nbt_parse_and_validate(void) {
     }
 
     version = mc_nbt_compound_get(root, "DataVersion");
-    if (!version || version->type != MC_NBT_TAG_INT || version->payload.int_val != 4785) {
+    if (!version || version->type != MC_NBT_TAG_INT || version->payload.int_val != 4788) {
         mc_arena_destroy(&arena);
         return fail("arena DataVersion read");
     }
     if (!mc_anvil_validate_chunk(root)) {
         mc_arena_destroy(&arena);
         return fail("arena validate chunk");
+    }
+
+    root->payload.compound.children[0]->payload.int_val = 4785;
+    if (!mc_anvil_validate_chunk(root)) {
+        mc_arena_destroy(&arena);
+        return fail("legacy GoatCore DataVersion import");
     }
 
     mc_arena_reset(&arena);

@@ -73,6 +73,27 @@ int main(void) {
     assert(mc_world_get_block_ready(world, x, MC_WORLD_MIN_Y - 1, z, &state) == 0);
     assert(state == ids->air);
 
+    assert(mc_world_set_block(world, 0, MC_WORLD_MIN_Y - 1, 0, ids->stone) == -1);
+    assert(mc_world_set_block(world, 0, MC_WORLD_MIN_Y + MC_WORLD_HEIGHT, 0, ids->stone) == -1);
+    /* Across both sides of negative chunk boundaries; save real variants. */
+    int32_t variants[] = {
+        mc_global_state_id_from_key("minecraft:oak_log[axis=x]", UINT32_MAX),
+        mc_global_state_id_from_key("minecraft:oak_slab[type=top,waterlogged=false]", UINT32_MAX)
+    };
+    for (int i = 0; i < 2; i++) {
+        int32_t nx = -17 + i, nz = 15 + i;
+        assert(variants[i] >= 0);
+        assert(wait_block_ready(world, nx, 64, nz, &state) == 0);
+        assert(mc_world_set_block(world, nx, 64, nz, variants[i]) == 0);
+        assert(mc_world_flush_block(world, nx, 64, nz) == 0);
+    }
+    mc_world_destroy(world);
+    world = mc_world_create_with_workers(world_path, 1234, 2);
+    assert(world);
+    for (int i = 0; i < 2; i++) {
+        assert(wait_block_ready(world, -17 + i, 64, 15 + i, &state) == 0);
+        assert(state == variants[i]);
+    }
     mc_world_destroy(world);
     printf("test_world_consistency: ok\n");
     return 0;

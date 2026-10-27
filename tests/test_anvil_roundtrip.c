@@ -915,6 +915,7 @@ static int test_container_state_truth(const char *root) {
 
     mc_world_t *w2 = mc_world_create(world, 0);
     if (!w2) return fail("mc_world_create container state reload");
+    ids = mc_world_ids(w2); /* The previous descriptor pointer belonged to the destroyed world. */
     if (wait_block_equals(w2, 1, 64, 1, chest_true) != 0) {
         mc_world_destroy(w2);
         return fail("container state preserved on load");
@@ -965,7 +966,27 @@ static int test_container_state_truth(const char *root) {
     return 0;
 }
 
+static int test_encoded_data_version(void) {
+    mc_chunk_t chunk;
+    if (mc_chunk_init(&chunk, -1, 1, 0) != 0) return fail("DataVersion chunk init");
+    uint8_t *raw = NULL;
+    size_t length = 0, consumed = 0;
+    mc_nbt_tag_t *root = NULL;
+    int rc = mc_anvil_encode_chunk_nbt(&chunk, NULL, &raw, &length);
+    mc_chunk_destroy(&chunk);
+    if (rc != 0) return fail("DataVersion chunk encode");
+    rc = mc_nbt_read_named_root(raw, length, &root, &consumed);
+    free(raw);
+    if (rc != 0) return fail("DataVersion encoded NBT parse");
+    const mc_nbt_tag_t *version = mc_nbt_compound_get(root, "DataVersion");
+    bool valid = consumed == length && version && version->type == MC_NBT_TAG_INT &&
+                 version->payload.int_val == 4788;
+    mc_nbt_free(root);
+    return valid ? 0 : fail("encoded chunks must use Vanilla 26.1.1 DataVersion 4788");
+}
+
 int main(void) {
+    if (test_encoded_data_version() != 0) return 1;
     char tmpl[] = "/tmp/mc_world_roundtripXXXXXX";
     char *dir = mkdtemp(tmpl);
     if (!dir) return fail("mkdtemp");

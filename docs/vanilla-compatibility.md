@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 1E en cours)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 2A : premier lot)
 
 ## Phase 1C : cycle de vie et visibilité des joueurs
 
@@ -419,3 +419,328 @@ avant l'ouverture du port avec une répétition de `DEADLYSIGNAL` ; la variante
 instrumentée sans PIE a terminé les scénarios et les arrêts sans diagnostic.
 Le programme minimal TSan a échoué avant toute validation, code 66,
 `unexpected memory mapping`. Aucun résultat TSan positif n'est annoncé.
+
+## Phase 2A — premier lot : registres, bûches et dalles (2026-10-27)
+
+Ce lot établit des primitives et valide des scénarios précis. Il ne termine
+ni la phase 2A entière, ni les phases 2B/2C, ni la phase 2 de la roadmap.
+Le modèle de concurrence est conservé : décodage/validation ordonnés sur le
+tick, mutations du monde, inventaire et notifications autoritaires sur ce tick.
+
+### État initial et provenance
+
+HEAD initial : `86d615c86d80e8e7441fa9e54e6e582f91e8c11c`.
+`git status` ne montrait aucune modification suivie ; `.vscode/`,
+`src/main.py` et `start-aider.sh` étaient non suivis et sont préservés.
+`git ls-remote origin refs/heads/main refs/heads/codex/network-epoll-phase2`
+confirmait ce même commit sur les deux branches distantes. Aucun push,
+merge, rebase ni commande Git sur le serveur distant.
+
+Référence officielle installée sur `10.0.4.66` :
+`/opt/goatcore/vanilla-2611/versions/26.1.1/server-26.1.1.jar`.
+Son `version.json` contient `26.1.1`, protocole `775`, DataVersion `4788`.
+SHA-256 du JAR interne :
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+
+Rapports régénérés sur l'hôte distant avec le JDK 25 livré dans cette
+installation :
+
+```sh
+cd /opt/goatcore/vanilla-2611
+./jdk-25.0.5+8/bin/java -DbundlerMainClass=net.minecraft.data.Main \
+  -jar server.jar --reports --output /opt/goatcore/vanilla-2611/phase2a-generated
+```
+
+Le `reports/registries.json` produit est aussi identique au rapport local :
+SHA-256 `2b7b9a3a5738437c9140734e2f9eebfa7c2cfea9b685efed1f3802bdbcfccf9f`.
+La nouvelle table `generated_block_ids` conserve les 1 168 vrais IDs protocolaires
+de blocs séparément de leurs index internes. Par exemple, chest a l'ID 201,
+shulker_box 677. Les événements d'ouverture/fermeture shulker utilisent cette
+conversion ; le comportement complet des block entities reste hors validation.
+
+Le `reports/blocks.json` produit est identique octet pour octet au fichier
+local `data/26.1.1/reports/blocks.json` : SHA-256
+`c4f6aafb57a085df217fcb93533de7c8baa5711ff6eecad07563b28813713cc0`.
+Le registre C et son en-tête se régénèrent à l'identique : **1 168 blocs,
+29 873 états**. Les fichiers d'identifiants items/paquets se régénèrent aussi
+à l'identique, à la ligne d'include près lorsque le fichier temporaire porte
+un autre nom ; JSON et en-tête sont identiques. La table item→état par défaut
+est identique : 1 014 entrées mappées, 1 506 items au total.
+Cette table par égalité de nom n'est pas une preuve du comportement de tous
+les BlockItem (noms spéciaux, variantes murales et objets multiparties).
+
+Les anciennes ressources `assets/version.json` (1.21.1) et
+`mc_vania_asset/server/version.json` (26.1, DataVersion 4786) ne servent pas
+à cette validation. Les données complètes brutes restent ignorées par Git.
+
+### Matrice d'audit
+
+| Fonctionnalité existante | Conformité connue / tests | Bug ou limite constaté | Dépendance / priorité |
+|---|---|---|---|
+| Registre généré, clés canoniques, états par défaut | Rapport officiel identique ; parcours des 29 873 états | Domaines et produit des propriétés pas contrôlés à la génération | Corrigé dans ce lot ; aucun ID deviné |
+| `block_index`, `mc_block_id_t` | Index interne trié, pas un identifiant réseau Vanilla de bloc | Un BlockEvent shulker envoyait cet index comme ID réseau de bloc | Corrigé par une table générée de `registries.json`, sans changer les index gameplay |
+| Flags du registre | Validité, air et défaut renseignés | Solidité, opacité, lumière et block entity restent des placeholders | Extraire les propriétés/formes officielles avant généralisation |
+| Palette réseau et Anvil | Tests palette, codec, roundtrip et invalidation de cache déjà présents | Les états inconnus lus dans certaines palettes retombent sur air | Durcissement/imports complets ultérieurs |
+| Version NBT des chunks | Écriture et validateur historique à 4785 | Le serveur cible 4788 | Tag corrigé ; test du NBT réellement encodé et validation d'arène mis à jour ; fixtures d'import historiques conservées |
+| World/chunk | Dirty, revision, cache invalidé, file d'updates et sauvegarde présents | `get_block` assimile un chunk indisponible à air ; `set_block` accepte des écritures différées | Placement utilise désormais `get_block_ready` avant toute écriture |
+| `Use Item On` 0x42 | Bytecode officiel `FriendlyByteBuf` et `ServerboundUseItemOnPacket` | Deuxième booléen absent, séquence optionnelle, fin non contrôlée | Corrigé ; bots corrigés simultanément |
+| Pierre, terre, planches | Déjà mappés et consommés côté serveur | Placement dans le voisin même si le bloc cliqué est remplaçable | Corrigé ; short grass vérifiée dynamiquement |
+| Bûches orientées | Axe selon la face déjà présent | Logique enfouie dans `play.c` | Extraite dans `placement.c` ; axes X/Y/Z comparés |
+| Dalles | Moitié selon face/point déjà présente | Fusion inconditionnelle sur la dalle cliquée ; pas de fusion sur cible adjacente ; collision cubique | Corrigé et comparé ; types bottom/top/double |
+| Escaliers | Orientation et moitié présentes, forme straight imposée | Orientation opposée au joueur utilisée ; angles et voisinage absents ; collision cubique | Non déclarés conformes ; 2B/2C |
+| Portes/trappes | États et deux moitiés de porte partiellement gérés | Facing, charnière, alimentation, support, formes et transaction multipartie incomplets | Non validées ; lot ultérieur |
+| Torches et blocs sur support | Item→état par défaut présent | Variantes murales/support/survie des blocs non résolus | Non validés ; prochaine famille après formes/support |
+| Destruction et drops | Mining/block_drops + tests C existants | Minage avancé, destruction des supports et voisinage non exhaustifs | Préservés ; pas de refonte de ces modules |
+| Synchronisation A→B | File d'updates globale et envoi direct existaient | Un ACK ne prouve pas une mutation | Deux bots comparent l'état et l'inventaire ; redémarrage vérifié |
+
+### Corrections et architecture
+
+`mc_block_state` expose la recherche du bloc par nom, la lecture exacte d'une
+propriété et son remplacement validé contre le registre ; les autres propriétés
+sont conservées. Il n'accepte ni valeur inconnue, ni propriété partiellement
+correspondante. Aucun tableau manuel d'identifiants supplémentaires.
+
+`mc_placement` résout les axes et moitiés de dalles, les fusions cliquées ou
+adjacentes, les bornes Y d'une dalle et la portée vers l'AABB ciblée.
+La fusion supprime waterlogged comme Vanilla ; le placement dans de l'eau
+initialise cette propriété lorsqu'elle existe. Les tests C couvrent ce changement
+de propriété ; les fluides dynamiques ne sont pas déclarés validés.
+La logique dupliquée des dalles/axes a été retirée de `play.c`.
+
+Le handler lit maintenant les deux booléens et la séquence obligatoire, contrôle
+la fin du paquet, main/face/séquence, les valeurs finies et la tolérance du point
+par rapport au centre (`<1.0000001`, comme le code officiel). Il rejette une
+position hors hauteur, hors limites fixes, hors portée, un joueur mort ou en
+Spectator/Adventure. La portée utilise les valeurs de base 4,5/5 blocs + la
+tolérance serveur de 1 bloc, et l'œil debout/accroupi. Les attributs personnalisés,
+la nage et les autres poses ne sont pas pris en charge par ce contrôle.
+Le flag `worldBorderHit` est décodé mais la bordure dynamique est absente.
+La normalisation du yaw avant conversion entière évite aussi une conversion
+hors plage avec un angle fini extrême.
+
+Les nouveaux chunks sont écrits avec `DataVersion=4788`, contrôlé sur le NBT
+réellement produit. La lecture des anciens chunks GoatCore marqués 4785 reste acceptée, et les
+fixtures d'import historiques restent dans les tests ; cette correction du tag ne constitue pas une validation de tous les
+champs NBT ou de la migration Vanilla/DataFixer.
+
+Le placement de dalle passe par le même chemin de mutation/inventaire/réseau
+que le placement ordinaire. Les chunks indisponibles ne reçoivent plus une
+mutation différée issue d'un placement client. `/setblock`, derrière les contrôles
+administrateur existants, utilise le registre pour préparer les mêmes fixtures
+sur les deux serveurs ; les clés complètes doivent être canoniques.
+
+### Validation fonctionnelle et limites
+
+Scénario réutilisable : `tests/stress/test_block_placement.py`, exécuté sur des
+mondes temporaires distincts, GoatCore 25589 et Vanilla 25590, jamais 25565.
+L'opérateur offline synthétique `Ofwood_` prépare les fixtures ; les commandes
+réellement exécutées vérifient ses privilèges sur les instances temporaires.
+Deux bots observent chaque placement réussi ; les IDs attendus viennent du
+rapport officiel, et les quantités Survival passent de 4 à 3. Les refus
+préservent les blocs et n'émettent pas de consommation. Les séquences traversent
+la frontière VarInt 127/128. Le lecteur comprend aussi les updates de section
+Vanilla, sans imposer une égalité du délai ou du nombre de paquets.
+
+Scénarios : pierre, terre, planches de chêne ; bûche de chêne X/Y/Z ; dalle de
+chêne basse/haute ; fusion dessus/dessous/face latérale ; face latérale ne
+fusionnant pas et pose adjacente ; remplacement d'herbe courte ; refus d'une
+cible occupée, d'une collision avec le joueur, d'un point invalide et d'une cible
+hors portée ; dalle basse sous les pieds sans collision dans la moitié haute.
+La cible hors portée reste dans un chunk chargé : une première vérification
+Vanilla à `(80,64,80)` était inexploitable car ce chunk n'était pas chargé ;
+le fixture corrigé utilise `(-8,64,16)`.
+
+Après arrêt propre et redémarrage, quatre poses réellement effectuées
+(pierre, bûche Y, dalle basse, dalle haute), réparties autour de coordonnées
+négatives et frontières de chunks, sont conservées avec le slot 36 (4 dalles).
+GoatCore est interrogé via sa lecture QA autoritaire ; Vanilla via
+`execute if block ... run tellraw`, et l'inventaire reçu à la reconnexion est
+vérifié. Le test existant `test_block_persistence.py` vérifie aussi trois bots,
+trois démarrages, les états `[1,0,1]`, puis `[0,0,1]` après destruction.
+L'identifiant du paquet BlockEvent d'ouverture d'une shulker box a également
+été contrôlé contre Vanilla : action 1, paramètre 1, ID de bloc 677 ; ce test
+n'affirme pas la conformité de l'inventaire ou des formes de cette famille.
+La comparaison est une preuve pour ces scénarios et le chêne testé, pas pour
+toutes les essences, tous les items mappés ou tous les cas de voisinage.
+
+Tests C ajoutés/complétés : parcours exhaustif des états/propriétés/défauts,
+permutation complète des IDs protocolaires de blocs, valeurs invalides, domaines de génération incomplets/corrompus, faces et seuil
+0,5 de fusion, effacement waterlogged, axes, bornes des dalles, portée et nombres
+non finis ; codec avec deux booléens, VarInt 128, troncatures et octet final ;
+hauteur, lecture de chunk indisponible, coordonnées négatives et sauvegarde de
+variantes de states. Les suites palette/Anvil/cache existantes sont conservées.
+
+Restent notamment : collision avec les autres joueurs/entités (le test du volume
+ne porte encore que sur le poseur), formes hors dalles, support et voisinage,
+états de redstone/fluides évolutifs, block entities, offhand, Adventure avec
+composants can_place_on, resynchronisation complète de toutes les prédictions
+refusées, bordure dynamique, attributs de portée, crash-consistance des chunks.
+Aucun test manuel avec deux clients officiels ni nouveau login Mojang positif
+sur 25588 n'a été exécuté pour ce binaire. Ces absences empêchent de promouvoir
+le binaire vers 25565 ; les services principaux restent préservés.
+
+### Compilation, sanitizers et infrastructure
+
+Copie distante isolée : `/opt/goatcore/phase2a-stage.9yuVhu`, sans Git.
+Export via `scripts/remote-build-stage.sh`, qui reprend le transfert tar/SSH
+existant en excluant également node_modules et tous les artefacts personnels.
+`GOATCORE_SOURCE_EXPORT=1 make -B -j4 precommit-check` a réussi après correction
+du fixture du nouveau test de codec : l'ACK existant est immédiat, le test
+initial supposait à tort qu'il serait différé. Les tests C, smoke, login,
+arrêt et multi-epoll à 1/2/4 workers, les tests de générateurs et ceux du client
+Python sont passés. Les sources de blocs/IDs sont régénérées et comparées
+indépendamment ; recettes/loot n'ont pas été régénérés sur cette copie faute de
+sources brutes complètes. Les étapes intermédiaires DataVersion ont fait
+échouer les tests d'arène puis d'import Anvil ; la compatibilité de lecture
+4785 a été conservée. Un ajout de test placé dans la mauvaise fonction a aussi
+produit une erreur de compilation, corrigée avant le passage final.
+La compilation locale standard a échoué faute de
+`libcurl` de développement ; le test C autonome local a réussi. Toutes les
+compilations complètes et exécutions de serveurs ont eu lieu sur 10.0.4.66.
+
+ASan+UBSan : les trois tests C registre/codec/monde, les 18 scénarios à deux bots,
+le BlockEvent shulker, le redémarrage et une charge de 10 bots avec 2 workers
+réseau (200 poses + 200 casses, zéro cycle manquant, zéro erreur et zéro
+déconnexion inattendue) ont réussi sur le binaire instrumenté du lot de placement.
+Après l'alignement DataVersion, les tests NBT/arène et Anvil instrumentés
+couvrent aussi l'écriture 4788 et la conservation des imports 4785. ASan a
+trouvé un use-after-free dans l'ancien `test_container_state_truth` : le pointeur
+`ids` appartenait au monde détruit. Le test reprend désormais celui du nouveau
+monde ; le passage Anvil instrumenté complet réussit après cette correction.
+Le diagnostic initial est conservé dans `asan-dataversion-failure.log`.
+Options : `-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie`,
+linker `-fsanitize=address,undefined -no-pie`, `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`,
+`UBSAN_OPTIONS=halt_on_error=1`. Aucun diagnostic sur ces passages.
+
+Les premiers binaires ASan PIE étaient instables avant l'initialisation :
+`DEADLYSIGNAL` répété sans pile, ou SIGSEGV avant ouverture du port. Un processus
+a dû être interrompu ; son journal répétitif est résumé dans
+`asan-startup-failure.log`. Une première reprise avec `handle_segv=0` a passé,
+une autre est sortie -11. Un programme minimal C ne faisant qu'un `puts` a
+échoué **avant main 6 fois sur 20** sous ASan+UBSan PIE, contre **20 réussites
+sur 20** compilé sans PIE. Le passage final utilise donc sans PIE, avec le
+handler ASan normal actif. L'origine exacte de l'instabilité PIE n'est pas
+établie ; elle ne doit être ni cachée, ni présentée comme un défaut de placement
+diagnostiqué, ni comme une preuve d'absence générale d'erreurs mémoire.
+
+TSan : le probe minimal sort 66 avec `FATAL: ThreadSanitizer: unexpected memory
+mapping`. Trois tentatives supplémentaires sans PIE échouent aussi de cette
+manière. Aucun scénario GoatCore n'a donc été validé sous TSan dans cette session.
+
+Les services principaux n'ont été ni remplacés ni redémarrés. Contrôle final
+via systemd, configurations et requêtes Status/Ping du protocole :
+`goatcore.service` actif, PID 10634, 25565, `online-mode=true` ;
+`goatcore-test.service` actif, PID 10621, 25587, `online-mode=false`.
+Les PID sont ceux de l'audit initial. Les deux ports répondent en 26.1.1/775.
+Aucun monde principal, inventaire ni permission principale n'a été réinitialisé.
+Les privilèges d'Ofwood_ ont été testés réellement sur les instances temporaires
+par les commandes de fixture ; aucune nouvelle vérification en jeu sur les
+services principaux n'est revendiquée. Aucun login officiel sur le nouveau
+binaire n'a été effectué et aucune mise à jour des services principaux n'est
+promue. Les instances temporaires de test sont arrêtées entre les passages.
+
+Binaire normal testé/stagé : `mc_server.normal` dans ce répertoire, SHA-256
+`e721ea5d07e37a3417386aedc4ff943ec77868732506f9c841c819b74e9644c4`.
+Il est aussi restauré sous `mc_server` après les tests instrumentés.
+Le binaire des services principaux est conservé.
+
+### Mesures de charge et réserve sur les performances
+
+Commandes distantes : `python3 tests/stress/benchmark_network.py --server-binary
+./mc_server.normal --workers 1 --mode blocks --bots N --cycles-per-bot 100
+--duration 180 --block-cooldown 0.01`, pour N=1,10,25,50, séquentiellement.
+Mondes plats frais, 1 worker réseau, 2 workers chunks, protocole 775.
+Le client attend désormais la réception du chunk de sa cible avant la première
+action : le chunk central pouvait arriver avant la cible dans le chunk voisin.
+La quantité de travail reste exactement 100 cycles pose+casse par bot.
+
+| Bots | Poses/casses confirmées | Cycles manquants | Erreurs d'action | Déconnexions inattendues | Durée (s) | TPS ; P95/P99 MSPT (ms) |
+|---:|---:|---:|---:|---:|---:|---|
+| 1 | 100/100 | 0 | 0 | 0 | 6.617 | 19.33 ; 47.1/51.9 |
+| 10 | 1000/1000 | 0 | 0 | 0 | 19.164 | 6.89 ; 161.9/231.4 |
+| 25 | 2500/2500 | 0 | 0 | 0 | 48.606 | 6.20 ; 271.5/353.4 |
+| 50 | 5000/5000 | 0 | 0 | 0 | 98.913 | 4.41 ; 662.5/1000.0 |
+
+TPS/MSPT : pire fenêtre active complète de 100 ticks sélectionnée par le script,
+pas un histogramme de l'ensemble du test. Le dernier bucket des percentiles est
+plafonné à 1 000 ms ; les maxima exacts restent dans les logs. Les observations
+diffèrent entre charges : elles ne constituent pas une courbe de capacité.
+
+| Bots | Latence update moyenne/max (ms) | CPU serveur (%) | Sauvegarde périodique moyenne maximale par fenêtre (ms/tick) | Max sauvegarde chunk / flush explicite (ms) |
+|---:|---:|---:|---:|---:|
+| 1 | 20.7/123.4 | 80.0 | 2.003 | 3.731/7.251 |
+| 10 | 76.2/646.1 | 56.6 | 2.253 | 3.620/74.881 |
+| 25 | 167.1/6189.0 | 44.7 | 2.424 | 3.910/350.198 |
+| 50 | 409.6/3532.4 | 55.8 | 4.590 | 315.198/1075.205 |
+
+Le CPU est la somme des threads du processus avant shutdown, mesurée via
+`/proc/PID/stat` (100 % = un cœur) et excluant le bot Python. Les moyennes de
+sauvegarde sont des phases MC_PERF, pas le temps total d'un arrêt. Les longues
+latences incluent réseau, tick et traitement client ; aucun gain n'est annoncé.
+
+Essais initiaux conservés, avant l'attente explicite du chunk : 10 bots ont
+terminé 1 000+1 000 opérations avec 1 erreur et 4,52 TPS ; 25 bots ont terminé
+2 500+2 500 sans erreur à 2,63 TPS ; 50 bots, délai 120 s, n'ont terminé que
+4 707 cycles (4 712 poses, 4 707 casses), avec 293 cycles manquants et 48 erreurs,
+à 3,28 TPS. Le rapport final ne remplace pas ces échecs par un résultat fictif.
+
+Comparaison supplémentaire : compilation distante des sources exactes du HEAD
+initial `86d615c8`, exportées avec `git archive` sur le PC, **sans Git distant**.
+Chaque version reçoit une copie du même monde, le même client attendant son
+chunk, 10 bots et 100 cycles/bot :
+
+| Version | Poses/casses | Cycles manquants / erreurs / déconnexions | Durée (s) | TPS ; P95/P99 MSPT (ms) |
+|---|---:|---:|---:|---|
+| 86d615c8 | 1000/1000 | 0/0/0 | 18.584 | 15.97 ; 89.7/114.1 |
+| Phase 2A | 1000/1000 | 0/0/0 | 18.604 | 7.79 ; 149.1/220.5 |
+
+Le temps global est presque identique mais la fenêtre de tick du candidat est
+plus mauvaise. Une seule paire et des conditions hôte/IO non contrôlées ne
+permettent pas d'attribuer précisément cet écart. L'ancien codec produit un
+ACK incorrect ; ce benchmark compare les modifications réellement confirmées
+par BlockUpdate, pas la conformité des ACK de la référence.
+Le profilage retrouve du temps dans le ramassage d'objets et les flushs
+synchrones, déjà présents dans la référence. **La tenue de 20 TPS et la
+non-régression des queues de latence ne sont pas validées.** Aucun moteur de
+simulation parallèle, ordonnanceur ou sauvegarde asynchrone n'est ajouté pour
+masquer cette limite dans ce lot.
+
+Les mesures ci-dessus portent sur le binaire
+`a0d97b09a92cfe18a2862d081d6d130b3c7bf529b727052d3ca416499d2f463b`,
+avant la dernière correction du tag DataVersion des chunks et le maintien
+explicite de la lecture de l'ancien tag 4785. Les quatre charges n'ont pas été
+répétées après cette correction de version ; aucune
+validation des performances du binaire final à 20 TPS n'est revendiquée.
+Un contrôle ciblé sur le **binaire final** après correction de version a aussi
+confirmé 100 poses et 100 casses avec 1 bot en 6,613 s, sans cycle manquant,
+erreur ni déconnexion inattendue ; fenêtre sélectionnée 19,32 TPS, P95/P99
+50,2/52,5 ms. Ce passage ne remplace pas les charges 10/25/50 non répétées.
+
+Les logs et rapports restent dans `tests/stress/results/network-benchmark-*`
+de la copie distante ; `performance-final.json` conserve les chemins de chacun.
+
+### Fichiers du lot et vérifications non effectuées
+
+Code et API : `include/mc_block_state.h`, `include/mc_placement.h`,
+`include/mc_nbt.h`, `src/world/nbt.c`, `src/world/block_state.c`, `src/gameplay/placement.c`,
+`src/generated/generated_block_ids.c`, `src/generated/generated_block_ids.h`,
+`src/protocol/handlers/play.c`.
+
+Génération et déploiement : `Makefile`, `tools/generate_registry.py`,
+`tools/gen_block_ids.py`, `tools/check_generated.sh`, `scripts/remote-build-stage.sh`.
+
+Tests et preuves : `tests/test_block_registry.c`, `tests/test_chunk_network_codec.c`,
+`tests/test_world_consistency.c`, `tests/test_anvil_roundtrip.c`,
+`tests/test_nbt_arena.c`, `tests/test_registry_generator.py`,
+`tests/stress/stress.py`, `tests/stress/benchmark_network.py`,
+`tests/stress/test_block_persistence.py`, `tests/stress/test_block_placement.py`,
+`tests/fixtures/vanilla-26.1.1-placement.json`, `tests/fixtures/README.md`,
+`tests/stress/README.md` et le présent document.
+
+Non effectués : tests Node/Mineflayer, essai manuel à deux vrais clients Java,
+connexion Mojang positive sur le nouveau binaire, TSan fonctionnel, tests
+complets des supports, des portes/trappes/escaliers/torches, formes d'entités et
+attributs de portée, bordure dynamique, crash-consistance des chunks et charge
+finale complète après la correction de DataVersion et de sa compatibilité de lecture. La phase 2A reste
+ouverte au-delà de ce premier lot. Les déploiements principaux sont différés
+sans altération de leurs sauvegardes.

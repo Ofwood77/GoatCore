@@ -104,7 +104,7 @@ async def place_block(bot, target):
     bot.clear_block_events(target)
     bot.sequence += 1
     base = (target[0], target[1] - 1, target[2])
-    payload = varint(0) + position(*base) + varint(1) + struct.pack(">fff?", 0.5, 1.0, 0.5, False) + varint(bot.sequence)
+    payload = varint(0) + position(*base) + varint(1) + struct.pack(">fff??", 0.5, 1.0, 0.5, False, False) + varint(bot.sequence)
     await bot.conn.send(66, payload)
     if await bot.expect_block(target, lambda state: state != 0) is None:
         raise AssertionError(f"placement not confirmed at {target}")

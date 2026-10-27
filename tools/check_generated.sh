@@ -14,6 +14,8 @@ COMPONENTS_ITEM_DIR=${COMPONENTS_ITEM_DIR:-$DATA_REPORTS_DIR/minecraft/component
 REQUIRE_RAW_DATA=${REQUIRE_RAW_DATA:-0}
 
 generated_files="
+src/generated/generated_block_ids.c
+src/generated/generated_block_ids.h
 src/world/block_registry.c
 src/world/block_registry.h
 src/generated/generated_minecraft_ids.c
@@ -48,9 +50,28 @@ if [ "$missing_generated" -ne 0 ]; then
     exit 1
 fi
 
+# The block registry can be verified independently of recipes and loot inputs.
+if [ -f "$DATA_REPORTS_DIR/blocks.json" ]; then
+    block_tmp=$(mktemp -d "${TMPDIR:-/tmp}/goatcore-block-registry.XXXXXX")
+    trap 'rm -rf "$block_tmp"' EXIT INT TERM
+    python3 tools/generate_registry.py "$DATA_REPORTS_DIR/blocks.json" "$block_tmp/block_registry.c" "$block_tmp/block_registry.h"
+    diff -u src/world/block_registry.c "$block_tmp/block_registry.c"
+    diff -u src/world/block_registry.h "$block_tmp/block_registry.h"
+    if [ -f "$DATA_REPORTS_DIR/registries.json" ]; then
+        python3 tools/gen_block_ids.py "$DATA_REPORTS_DIR/blocks.json" "$DATA_REPORTS_DIR/registries.json" "$block_tmp/generated_block_ids.c" "$block_tmp/generated_block_ids.h"
+        diff -u src/generated/generated_block_ids.c "$block_tmp/generated_block_ids.c"
+        diff -u src/generated/generated_block_ids.h "$block_tmp/generated_block_ids.h"
+        echo "[generated-check] block protocol IDs match registry report"
+    fi
+    rm -rf "$block_tmp"
+    trap - EXIT INT TERM
+    echo "[generated-check] complete block registry matches input report"
+fi
+
 missing_raw=0
 for path in \
     "$DATA_REPORTS_DIR/blocks.json" \
+    "$DATA_REPORTS_DIR/registries.json" \
     "$MC_IDS_SOURCE" \
     "$MC_BLOCK_LOOT_SOURCE" \
     "$MC_RECIPE_SOURCE" \
@@ -109,6 +130,7 @@ trap cleanup EXIT INT TERM
 mkdir -p "$tmp_dir/src/world" "$tmp_dir/src/generated"
 
 echo "[generated-check] regenerating into $tmp_dir"
+python3 tools/gen_block_ids.py "$DATA_REPORTS_DIR/blocks.json" "$DATA_REPORTS_DIR/registries.json" "$tmp_dir/src/generated/generated_block_ids.c" "$tmp_dir/src/generated/generated_block_ids.h"
 python3 tools/generate_registry.py "$DATA_REPORTS_DIR/blocks.json" "$tmp_dir/src/world/block_registry.c" "$tmp_dir/src/world/block_registry.h"
 python3 tools/gen_minecraft_ids.py "$MC_IDS_SOURCE" "$tmp_dir/src/generated/generated_minecraft_ids.c" "$tmp_dir/src/generated/generated_minecraft_ids.h" "$tmp_dir/src/generated/generated_minecraft_ids.json"
 python3 tools/gen_registries.py "$tmp_dir/src/world/block_registry.h" "$tmp_dir/src/generated/generated_registries.c" "$tmp_dir/src/generated/generated_registries.h"

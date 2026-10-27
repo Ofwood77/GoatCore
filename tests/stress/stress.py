@@ -150,6 +150,7 @@ class Bot:
         self.failures = 0
         self.latencies = []
         self.block_events = defaultdict(asyncio.Queue)
+        self.chunk_ready_events = defaultdict(asyncio.Event)
         self.slot_events = asyncio.Queue()
         self.qa_positions = asyncio.Queue()
         self.qa_messages = asyncio.Queue()
@@ -250,6 +251,7 @@ class Bot:
         elif packet_id == 45 and self.pos is not None and len(payload) >= 8:
             self.chunk_packets += 1
             chunk_x, chunk_z = struct.unpack_from(">ii", payload)
+            self.chunk_ready_events[(chunk_x, chunk_z)].set()
             if (chunk_x, chunk_z) == (math.floor(self.pos[0]) // 16,
                                        math.floor(self.pos[2]) // 16):
                 if self.origin_chunk_at is None:
@@ -366,6 +368,13 @@ class Bot:
         # Prepare each private target once; repeated preparation would add
         # unmetered break packets to the high-rate scenario.
         if not self.block_prepared or self.args.shared_zone:
+            # The central chunk can arrive before this negative/boundary target.
+            # A real client cannot interact with a chunk it has not received.
+            try:
+                await asyncio.wait_for(self.chunk_ready_events[(bx // 16, bz // 16)].wait(), self.args.timeout)
+            except TimeoutError:
+                self.failures += 1
+                return False
             self.clear_block_events(block)
             self.sequence += 1
             await self.conn.send(41, varint(0) + position(*block) + varint(1) + varint(self.sequence))
@@ -375,7 +384,7 @@ class Bot:
             self.block_prepared = True
         self.clear_block_events(block)
         self.sequence += 1
-        place = varint(0) + position(*base) + varint(1) + struct.pack(">fff?", 0.5, 1.0, 0.5, False) + varint(self.sequence)
+        place = varint(0) + position(*base) + varint(1) + struct.pack(">fff??", 0.5, 1.0, 0.5, False, False) + varint(self.sequence)
         if self.args.place_limiter:
             sent_at = await self.args.place_limiter.send(self.conn, 66, place)
         else:
@@ -424,7 +433,7 @@ class Bot:
             self.block_prepared = True
             self.fast_state = 0
         self.sequence += 1
-        place = varint(0) + position(*base) + varint(1) + struct.pack(">fff?", 0.5, 1.0, 0.5, False) + varint(self.sequence)
+        place = varint(0) + position(*base) + varint(1) + struct.pack(">fff??", 0.5, 1.0, 0.5, False, False) + varint(self.sequence)
         sent_at = await self.args.place_limiter.send(self.conn, 66, place)
         self.place_send_times.append(sent_at)
         await asyncio.sleep(0.055)

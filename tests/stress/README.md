@@ -89,3 +89,49 @@ serveur. Ne pas lancer directement plusieurs centaines de bots. Le protocole
 775 est pris en charge seulement pour les paquets nécessaires à ces scénarios ;
 ce client ne remplace pas un client Java complet (authentification online-mode,
 resource packs et mécaniques de jeu générales non implémentés).
+
+### Phase 2A : comparaison des placements (hôte distant uniquement)
+
+`test_block_placement.py` attend une instance **temporaire offline** déjà
+lancée, protocole 775, et un opérateur offline `Ofwood_`. Ce pseudo n'authentifie
+aucun compte Microsoft. Utiliser un monde plat jetable et `MC_QA_MODE=1` /
+`MC_ADMIN_USERNAME=Ofwood_` côté GoatCore ; sur Vanilla, un vrai `ops.json`
+offline et `spawn-protection=0`. Les commandes administrateur préparent les
+mêmes positions et états initiaux. Aucun bot au port 25565.
+
+Exporter les sources depuis le PC avec `scripts/remote-build-stage.sh` (stdout :
+chemin isolé créé sous `/opt/goatcore/`). Ce script réutilise le transfert tar
+SSH des scripts de déploiement, exclut fichiers personnels, objets, résultats
+et node_modules, et ne modifie aucun service principal. Compiler sur l'hôte
+avec `GOATCORE_SOURCE_EXPORT=1 make -B precommit-check` dans ce répertoire.
+Le rapport brut doit avoir été vérifié avec le datagen du JAR officiel 26.1.1 ;
+le script le transfère s'il est disponible localement.
+
+Exemples **depuis la copie distante**, une fois les serveurs temporaires prêts :
+
+```sh
+python3 tests/stress/test_block_placement.py --port 25589 --snapshot /tmp/goatcore-placement.json
+python3 tests/stress/test_block_placement.py --port 25590 --vanilla --snapshot /tmp/vanilla-placement.json
+```
+
+Arrêter proprement chaque serveur puis le redémarrer sur son même monde,
+sans réinitialiser les données joueur. Vérifier les blocs et le slot reçu :
+
+```sh
+python3 tests/stress/test_block_placement.py --port 25589 --snapshot /tmp/goatcore-placement.json --verify
+python3 tests/stress/test_block_placement.py --port 25590 --vanilla --snapshot /tmp/vanilla-placement.json --verify
+```
+
+Les deux rapports JSON `cases` doivent être égaux. Les preuves de référence et
+empreintes du JAR/rapport sont dans `tests/fixtures/vanilla-26.1.1-placement.json`.
+Le scénario couvre un second observateur, Survival/Creative, axes, dalles,
+remplacement d'herbe, placements refusés, seuil VarInt 127/128, coordonnées
+négatives et frontières de chunks. Il ne prétend pas valider toutes les formes,
+le voisinage ou l'ordre temporel exact des paquets Vanilla.
+
+Pour des charges à travail fixé, réutiliser `benchmark_network.py --mode blocks
+--bots N --workers 1 --cycles-per-bot 100 --duration 120 --block-cooldown 0.01`.
+Le CPU du processus est calculé à partir de `/proc/PID/stat`, somme de tous ses
+threads avant l'arrêt (100 % = un cœur), sur sa durée de vie avant shutdown.
+Il exclut le bot Python ; les temps de sauvegarde détaillés restent dans les
+logs `MC_PERF`. Toujours conserver aussi les essais en échec et leurs compteurs.

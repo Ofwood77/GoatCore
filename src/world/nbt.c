@@ -663,7 +663,11 @@ bool mc_anvil_validate_chunk(const mc_nbt_tag_t *root) {
     if (!root || root->type != MC_NBT_TAG_COMPOUND) return false;
     version = mc_nbt_compound_get(root, "DataVersion");
     if (!version || version->type != MC_NBT_TAG_INT) return false;
-    return version->payload.int_val == MC_ANVIL_EXPECTED_DATA_VERSION;
+    /* Existing GoatCore worlds were written with the historical 4785 tag.
+     * Keep that import path while all new chunks advertise 26.1.1/4788.
+     * This is not a general Vanilla DataFixer or arbitrary-version importer. */
+    return version->payload.int_val == MC_ANVIL_EXPECTED_DATA_VERSION ||
+           version->payload.int_val == 4785;
 }
 
 static void dump_indent(FILE *out, int indent) {

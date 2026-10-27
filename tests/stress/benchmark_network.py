@@ -69,6 +69,9 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     with log_path.open("w", encoding="utf-8") as log_file:
         proc = subprocess.Popen([str(server_binary or ROOT / "mc_server")], cwd=server_cwd, env=env,
                                 stdout=log_file, stderr=subprocess.STDOUT)
+        process_started = time.monotonic()
+        process_cpu_seconds = None
+        process_cpu_percent = None
         try:
             deadline = time.monotonic() + 10
             while True:
@@ -95,6 +98,11 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
             if run.returncode != 0 and not report_path.is_file():
                 raise RuntimeError(f"stress failed ({run.returncode}): {run.stdout[-1500:]} {run.stderr[-500:]}")
         finally:
+            if proc.poll() is None:
+                # /proc reports CPU summed over every thread in this server.
+                fields = Path(f"/proc/{proc.pid}/stat").read_text().rsplit(")", 1)[1].split()
+                process_cpu_seconds = (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+                process_cpu_percent = 100 * process_cpu_seconds / (time.monotonic() - process_started)
             if proc.poll() is None:
                 proc.send_signal(signal.SIGTERM)
             try:
@@ -128,6 +136,8 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     item_samples = [tuple(map(float, row)) for row in ITEM_TICK.findall(log)]
     peak_item_tick = max(item_samples, key=lambda row: row[1]) if item_samples else None
     return {
+        "server_cpu_seconds_before_shutdown": process_cpu_seconds,
+        "server_cpu_percent_before_shutdown": process_cpu_percent,
         "network_workers": count,
         "offline_skins": offline_skins,
         "initial_world": "copied" if world_template else "fresh",
