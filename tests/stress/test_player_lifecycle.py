@@ -14,7 +14,7 @@ from test_player_visibility import Viewer, close, entity_ids, has_profile, offli
 
 class Player(Viewer):
     async def play_packet(self, packet_id, payload):
-        if packet_id in (18, 20, 34, 38, 68, 82, 103, 104, 121):
+        if packet_id in (18, 20, 34, 38, 64, 68, 82, 103, 104, 105, 121):
             self.events[packet_id].append((asyncio.get_running_loop().time(), payload))
         await super().play_packet(packet_id, payload)
 
@@ -226,13 +226,15 @@ async def death_cycle(args):
                     "combat kill and zero health")
         await until(lambda: any(len(payload) == 5 and struct.unpack_from(">i", payload)[0] == admin_entity and
                                 payload[4] == 3 for _, payload in peer.events[34]), "peer death event")
-        assert latest_inventory(admin)[36] == (0, 0), "death retained inventory without keepInventory"
+        expected_slot = (1, 3) if args.keep_inventory else (0, 0)
+        assert latest_inventory(admin)[36] == expected_slot, "incorrect inventory at death"
         await admin.conn.send(12, varint(0))
         await until(lambda: admin.events[82] and latest_health(admin)[0] == 20.0,
                     "respawn and full health")
-        assert latest_inventory(admin)[36] == (0, 0), "respawn duplicated inventory"
-        assert latest_experience(admin) == (0.0, 0, 0), latest_experience(admin)
-        print("PASS: death packet, peer event, drops, respawn, zero XP and no inventory duplication")
+        assert latest_inventory(admin)[36] == expected_slot, "incorrect inventory after respawn"
+        if not args.keep_inventory:
+            assert latest_experience(admin) == (0.0, 0, 0), latest_experience(admin)
+        print("PASS: death packet, peer event, respawn and expected keepInventory state")
     finally:
         await asyncio.gather(*(close(bot) for bot in (admin, peer) if bot.conn and
                                not bot.conn.writer.is_closing()), return_exceptions=True)
@@ -285,7 +287,7 @@ def seed_experience(args):
     assert args.world_path, "--world-path required"
     value = offline_uuid("Ofwood_").hex()
     filename = f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:]}" + ".dat"
-    path = Path(args.world_path) / "playerdata" / filename
+    path = Path(args.world_path) / "players" / "data" / filename
     raw = gzip.decompress(path.read_bytes())
     for tag, payload in ((b"\x05\x00\x03XpP", struct.pack(">f", 0.4)),
                          (b"\x03\x00\x07XpLevel", struct.pack(">i", 7)),
@@ -308,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument("--bots", type=int, default=10)
     parser.add_argument("--world-path")
     parser.add_argument("--expect-xp", action="store_true")
+    parser.add_argument("--keep-inventory", action="store_true")
     args = parser.parse_args()
     if args.mode == "seed-xp":
         seed_experience(args)

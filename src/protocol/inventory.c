@@ -6,6 +6,7 @@
  */
 #include "mc_inventory.h"
 #include "mc_protocol.h"
+#include "mc_nbt.h"
 #include "generated_minecraft_ids.h"
 
 #include <stdlib.h>
@@ -267,6 +268,7 @@ void mc_player_data_clear(mc_player_data_t *player) {
     if (!player) return;
     mc_inventory_clear(&player->inventory);
     for (size_t i = 0; i < MC_CONTAINER_SLOT_COUNT; i++) mc_slot_clear(&player->ender_chest[i]);
+    mc_nbt_free(player->passthrough_nbt);
     memset(player, 0, sizeof(*player));
 }
 

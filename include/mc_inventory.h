@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct mc_nbt_tag mc_nbt_tag_t;
+
 #define MC_PLAYER_SLOT_COUNT 46
 #define MC_PLAYER_HOTBAR_BASE 36
 #define MC_PLAYER_HOTBAR_SIZE 9
@@ -89,6 +91,7 @@ typedef struct mc_player_data {
     bool has_uuid;
     char username[17];
     int32_t gamemode;
+    bool flying;
     float health;
     int32_t food_level;
     float food_saturation;
@@ -104,6 +107,8 @@ typedef struct mc_player_data {
     mc_inventory_t inventory;
     mc_slot_t ender_chest[MC_CONTAINER_SLOT_COUNT];
     int32_t ender_state_id;
+    /* Top-level NBT fields GoatCore does not interpret survive a save. */
+    mc_nbt_tag_t *passthrough_nbt;
 } mc_player_data_t;
 
 void mc_slot_init(mc_slot_t *slot);

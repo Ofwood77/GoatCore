@@ -178,20 +178,21 @@ static int read_list(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, mc_nbt
     tag->payload.list.length = length;
     if (length == 0) return 0;
     if (tag->payload.list.elem_type == MC_NBT_TAG_END) return -1;
+    if ((size_t)length > r->len - r->pos) return -1;
 
     if ((size_t)length > SIZE_MAX / sizeof(*items)) return -1;
     items = (mc_nbt_tag_t **)alloc_zero(alloc, (size_t)length * sizeof(*items));
     if (!items) return -1;
+    tag->payload.list.items = items;
 
     for (int32_t i = 0; i < length; i++) {
         mc_nbt_tag_t *item = (mc_nbt_tag_t *)alloc_zero(alloc, sizeof(*item));
         if (!item) return -1;
         item->type = tag->payload.list.elem_type;
-        if (read_payload(r, alloc, item, depth + 1) != 0) return -1;
         items[i] = item;
+        if (read_payload(r, alloc, item, depth + 1) != 0) return -1;
     }
 
-    tag->payload.list.items = items;
     return 0;
 }
 
@@ -207,13 +208,6 @@ static int read_compound(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, mc
         if (r_u8(r, &type_u8) != 0) return -1;
         if (type_u8 == MC_NBT_TAG_END) break;
 
-        child = (mc_nbt_tag_t *)alloc_zero(alloc, sizeof(*child));
-        if (!child) return -1;
-        child->type = (mc_nbt_type_t)type_u8;
-
-        if (r_string(r, alloc, &child->name) != 0) return -1;
-        if (read_payload(r, alloc, child, depth + 1) != 0) return -1;
-
         if (count == cap) {
             int32_t new_cap = cap ? cap * 2 : 16;
             mc_nbt_tag_t **next;
@@ -223,15 +217,21 @@ static int read_compound(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, mc
             next = (mc_nbt_tag_t **)alloc_zero(alloc, (size_t)new_cap * sizeof(*next));
             if (!next) return -1;
             if (children && count > 0) memcpy(next, children, (size_t)count * sizeof(*next));
+            if (alloc->alloc == heap_alloc_adapter) free(children);
             children = next;
             cap = new_cap;
+            tag->payload.compound.children = children;
         }
 
+        child = (mc_nbt_tag_t *)alloc_zero(alloc, sizeof(*child));
+        if (!child) return -1;
+        child->type = (mc_nbt_type_t)type_u8;
         children[count++] = child;
+        tag->payload.compound.length = count;
+        if (r_string(r, alloc, &child->name) != 0) return -1;
+        if (read_payload(r, alloc, child, depth + 1) != 0) return -1;
     }
 
-    tag->payload.compound.length = count;
-    tag->payload.compound.children = children;
     return 0;
 }
 
@@ -284,13 +284,14 @@ static int read_payload(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, mc_
             tag->payload.int_array.length = n;
             if (n == 0) return 0;
             if ((size_t)n > SIZE_MAX / sizeof(*p)) return -1;
+            if ((size_t)n > (r->len - r->pos) / 4) return -1;
 
             p = (int32_t *)alloc_zero(alloc, (size_t)n * sizeof(*p));
             if (!p) return -1;
+            tag->payload.int_array.data = p;
             for (int32_t i = 0; i < n; i++) {
                 if (r_i32(r, &p[i]) != 0) return -1;
             }
-            tag->payload.int_array.data = p;
             return 0;
         }
 
@@ -303,13 +304,14 @@ static int read_payload(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, mc_
             tag->payload.long_array.length = n;
             if (n == 0) return 0;
             if ((size_t)n > SIZE_MAX / sizeof(*p)) return -1;
+            if ((size_t)n > (r->len - r->pos) / 8) return -1;
 
             p = (int64_t *)alloc_zero(alloc, (size_t)n * sizeof(*p));
             if (!p) return -1;
+            tag->payload.long_array.data = p;
             for (int32_t i = 0; i < n; i++) {
                 if (r_i64(r, &p[i]) != 0) return -1;
             }
-            tag->payload.long_array.data = p;
             return 0;
         }
 
@@ -337,8 +339,11 @@ static int read_root(mc_nbt_reader_t *r, const mc_nbt_allocator_t *alloc, bool n
     if (!root) return -1;
     root->type = (mc_nbt_type_t)type_u8;
 
-    if (named_root && r_string(r, alloc, &root->name) != 0) return -1;
-    if (read_payload(r, alloc, root, 0) != 0) return -1;
+    if ((named_root && r_string(r, alloc, &root->name) != 0) ||
+        read_payload(r, alloc, root, 0) != 0) {
+        if (alloc->alloc == heap_alloc_adapter) mc_nbt_free(root);
+        return -1;
+    }
 
     if (bytes_read) *bytes_read = r->pos;
     *out = root;
