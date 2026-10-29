@@ -97,6 +97,8 @@ int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *
  * queued/loading, and -1 on error. This is the strict read used by mining and
  * other protocol flows that must not guess when the world is still loading. */
 int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
+/* Read-only prospective state resolution; unavailable neighbors return 1. */
+int mc_world_resolve_block_state(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state, int32_t *resolved);
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);

@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 2A : premier lot)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 2A : lots 1 et 2)
 
 ## Phase 1C : cycle de vie et visibilité des joueurs
 
@@ -487,7 +487,7 @@ Les anciennes ressources `assets/version.json` (1.21.1) et
 | Pierre, terre, planches | Déjà mappés et consommés côté serveur | Placement dans le voisin même si le bloc cliqué est remplaçable | Corrigé ; short grass vérifiée dynamiquement |
 | Bûches orientées | Axe selon la face déjà présent | Logique enfouie dans `play.c` | Extraite dans `placement.c` ; axes X/Y/Z comparés |
 | Dalles | Moitié selon face/point déjà présente | Fusion inconditionnelle sur la dalle cliquée ; pas de fusion sur cible adjacente ; collision cubique | Corrigé et comparé ; types bottom/top/double |
-| Escaliers | Orientation et moitié présentes, forme straight imposée | Orientation opposée au joueur utilisée ; angles et voisinage absents ; collision cubique | Non déclarés conformes ; 2B/2C |
+| Escaliers | Orientation et moitié présentes, forme straight imposée | Orientation opposée au joueur utilisée ; angles et voisinage absents ; collision cubique | État au lot 1 ; corrections et validation du lot 2 ci-dessous |
 | Portes/trappes | États et deux moitiés de porte partiellement gérés | Facing, charnière, alimentation, support, formes et transaction multipartie incomplets | Non validées ; lot ultérieur |
 | Torches et blocs sur support | Item→état par défaut présent | Variantes murales/support/survie des blocs non résolus | Non validés ; prochaine famille après formes/support |
 | Destruction et drops | Mining/block_drops + tests C existants | Minage avancé, destruction des supports et voisinage non exhaustifs | Préservés ; pas de refonte de ces modules |
@@ -744,3 +744,292 @@ attributs de portée, bordure dynamique, crash-consistance des chunks et charge
 finale complète après la correction de DataVersion et de sa compatibilité de lecture. La phase 2A reste
 ouverte au-delà de ce premier lot. Les déploiements principaux sont différés
 sans altération de leurs sauvegardes.
+
+## Phase 2A, lot 2 — états et voisinage des escaliers (27–29 octobre 2026)
+
+Ce lot valide les scénarios d'escaliers décrits ci-dessous. La phase 2 et la
+phase 2A restent ouvertes. Les résultats du lot 1 ci-dessus sont historiques ;
+les mesures suivantes portent toutes sur le binaire final du lot 2, comprenant
+déjà la correction DataVersion 4788 et la lecture des anciens chunks 4785.
+
+### État initial et audit réutilisé
+
+HEAD initial : `ac6b85a11e1aad3dee446c80065e8169e429edce`, après
+`6ffedc7b66c8b8c7c83e66bdb7881fc27c310f29`. Aucun changement suivi au départ ;
+`.vscode/`, `src/main.py` et `start-aider.sh` restent personnels et exclus.
+Les références locales d'origin étaient encore au commit `86d615c8` ; un relevé
+en lecture seule `git ls-remote origin` le 29 octobre confirme que main/HEAD
+distant pointe toujours sur `86d615c86d80e8e7441fa9e54e6e582f91e8c11c`.
+Aucun push, merge ou Git sur le serveur de test.
+
+| Composant existant | Preuve / conformité connue avant le lot | Écart constaté | Réutilisation et correction prioritaire |
+|---|---|---|---|
+| Registre, propriétés, defaults, item→état | Rapports officiels, 1 168 blocs / 29 873 états ; tests du lot 1 | Aucun besoin de reconstruire le registre | Recherche des propriétés et états dans les tables existantes ; aucun ID d'escalier deviné |
+| Décodage UseItemOn, portée, cible READY, inventaire | Tests C et 18 scénarios différentiels du lot 1 | Logique spécifique d'escalier dans play.c, facing inversé | Même décodage/validation ; délégation du calcul au module gameplay |
+| Forme des escaliers | `straight` fixé au placement | Quatre angles absents ; pas de recalcul après pose/casse/rotation voisine | Règle locale pure, puis réconciliation autoritaire |
+| Notifications des voisins | Connexions de certaines familles calculées dans play.c | Aucun chemin générique pour la forme des escaliers | Hook dans le monde, commun aux poses, commandes et destructions |
+| Collision au placement | AABB du poseur, dalles partielles | Escalier traité comme cube plein | Huit voxels de demi-bloc pour les cinq formes et deux moitiés |
+| Mutation, updates et cache chunk | mc_chunk_set_block, révision, dirty, updates_push ; tests C | Les nouvelles formes doivent suivre exactement ce chemin | Réutilisé pour chaque escalier modifié, sans changement du modèle de concurrence |
+| Persistance Anvil/NBT | Tests de palette, roundtrip 4788 et lecture 4785 | Quatre attentes de facing incorrectes dans le test historique | Attentes corrigées ; angles et frontière négative ajoutés au roundtrip monde |
+
+### Référence officielle et architecture
+
+La référence est le JAR interne **officiel 26.1.1** installé sur l'hôte distant,
+SHA-256 `3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+`javap` du `StairBlock` de ce JAR a permis de vérifier `getStateForPlacement`,
+`getStairsShape` et `canTakeShape`. Rapport blocks.json déjà vérifié au lot 1 :
+SHA-256 `c4f6aafb57a085df217fcb93533de7c8baa5711ff6eecad07563b28813713cc0`.
+Les observations réelles du serveur officiel confirment ensuite les résultats,
+indépendamment du modèle C. La capture compacte est conservée dans
+`tests/fixtures/vanilla-26.1.1-stairs.json`.
+
+`src/gameplay/block_neighbors.c` et `include/mc_block_neighbors.h` fournissent
+le calcul pur : orientation du joueur, moitié selon face et hitY, forme par
+lecture du voisinage, sélection source/écoulement pour waterlogged, voxels.
+L'interface de lecture distingue état disponible, chunk indisponible et erreur.
+Le dispatcher ne traite actuellement que les escaliers ; il n'introduit aucun
+scheduled tick, random tick, moteur de fluides ou redstone.
+
+Le facing suit la direction horizontale du joueur : yaw 0=sud, 90=ouest,
+180=nord, 270=est. La moitié est supérieure sur la face du dessous ou sur une
+face latérale avec hitY strictement supérieur à 0,5. Un escalier perpendiculaire
+de même moitié devant produit un angle extérieur ; derrière, un angle intérieur.
+Un escalier de même facing et même moitié sur le côté pertinent bloque l'angle.
+L'angle extérieur est prioritaire. Le matériau n'intervient pas. Les états des
+voisins consultés utilisent facing/half, jamais leur shape : une passe sur le
+bloc modifié et ses quatre voisins horizontaux suffit, sans boucle récursive.
+
+`mc_world_resolve_block_state` résout l'état prospectif avant la collision et
+la consommation. `mc_world_set_block` réconcilie les escaliers concernés après
+mutation ; chaque changement utilise mc_chunk_set_block et updates_push,
+invalide la révision de chunk et marque dirty. Le broadcast et la sauvegarde
+existants restent utilisés. Une rotation par commande et une destruction ne
+dépendent donc pas du seul handler UseItemOn. play.c délègue le calcul et la
+collision ; il n'accueille pas l'algorithme des angles.
+
+Les réconciliations appartiennent au tick. L'intégration d'un chunk READY
+réexamine ses escaliers et ceux des quatre chunks voisins READY, avec filtrage
+des sections par palette. Le chemin d'arrêt intègre aussi les résultats workers
+restants avant sauvegarde. Un voisin indisponible ne vaut pas air : la pose est
+refusée tant que les dépendances nécessaires manquent ; les formes chargées
+sont conservées jusqu'à disponibilité du voisin. Aucun chargement synchrone,
+nouveau thread ou nouvelle propriété de l'état partagé.
+
+### Matrice différentielle exécutée
+
+Même script, mêmes actions et positions sur GoatCore :25589 et Vanilla :25590,
+deux mondes isolés sur **10.0.4.66**, opérateur offline synthétique Ofwood_ et
+second bot observateur. Le scénario émet les vrais paquets 775 : rotation 32,
+UseItemOn 66, PlayerAction 41, inventaire Creative 56 ; les codecs existants
+restent réutilisés, y compris les séquences traversant 127/128.
+Chaque observation vérifie le nom et toutes les propriétés, pas seulement
+l'apparence. L'état autoritaire est lu via la commande QA GoatCore ou
+`execute if block` sur Vanilla ; les poses réussies et transformations sont
+aussi attendues sur les deux connexions. Les refus sont contrôlés dans le monde
+et l'inventaire, sans attendre artificiellement une notification d'air Vanilla.
+Le contrôle final des deux refus reconnecte le poseur sans réinitialiser sa
+pile : l'inventaire autoritaire reçu doit encore contenir quatre escaliers,
+ce qui évite de déduire une absence de consommation d'une liste vide d'updates.
+
+| Scénarios | Observations nommées | Résultat GoatCore / Vanilla |
+|---|---:|---|
+| Quatre facings × deux moitiés, Survival 4→3 items | 8 | Identiques |
+| Quatre faces latérales × hitY 0,25 / 0,5 / 0,75 | 12 | Identiques, seuil strict vérifié |
+| Quatre facings × deux moitiés × intérieur/extérieur × gauche/droite ; pose initiale, pose voisine, rotation, restauration, destruction | 160 | Identiques sur les deux clients et dans le monde |
+| Matériaux oak/stone, veto latéral, moitié opposée du veto | 6 | Identiques |
+| Priorité extérieur et repli intérieur après veto | 2 | Identiques |
+| Pose dans une source d'eau confinée | 1 | waterlogged=true identique |
+| Cible occupée, collision du poseur, pose autorisée dans la partie vide | 3 | Résultats identiques ; refus sans consommation |
+| Arrêt propre, redémarrage et reconnexion | 8 états supplémentaires | Quatre types d'angle et straight, deux moitiés, identiques après relecture |
+
+Total : **192 observations identiques**, plus **8 états persistés identiques**.
+Les fixtures et angles traversent les limites de chunks X=-16 et Z=16, avec
+coordonnées X négatives. La matrice teste des placements oak_stairs et un voisin
+stone_stairs ; elle ne prouve pas séparément toutes les essences du registre.
+Les rotations de voisin sont préparées avec `/setblock` : il n'existe pas de
+rotation générique d'un escalier placé par simple clic en Vanilla. La destruction
+des 32 voisins est effectuée par le vrai paquet Creative PlayerAction.
+
+La persistance ne se contente pas d'un ACK : les huit états finaux proviennent
+de poses réelles, sont interrogés avant l'arrêt, puis relus depuis le même monde
+après un nouveau processus et une reconnexion. Le test C vérifie en plus dirty,
+révision, présence dans la queue de mises à jour et recalcul entre chunks chargés
+séparément. Pas de validation de crash-consistance lors d'un arrêt brutal.
+
+### Tests, sanitizers et erreurs rencontrées
+
+Compilation et `GOATCORE_SOURCE_EXPORT=1 make -B -j4 precommit-check` réussis
+dans `/opt/goatcore/phase2a-stage.7gYhw1` sur 10.0.4.66. La variable signale
+l'export sans métadonnées Git ; elle ne lance ni Git ni serveur sur le PC.
+Les tests existants de réseau à 1/2/4 workers, inventaire, combat, auth, NBT,
+palettes, chunks et lecture 4785 restent passants. Tests Python : générateur
+de registre (3) et infrastructure stress (12), réussis.
+
+Tests C ajoutés/complétés : `test_stairs` couvre toutes les rotations, moitiés,
+angles, veto, priorité, conservation waterlogged, eau source/écoulement,
+seuil hitY, voxels et lecture indisponible ; `test_world_consistency` couvre
+frontière négative, révision/cache, update, sauvegarde et chargement séparé ;
+`test_anvil_roundtrip` corrige les quatre attentes d'orientation inversées.
+Le test d'Anvil conserve ses cas de corruption volontaire : son message
+`anvil load failed ... world_corrupt` est attendu.
+
+Le runner `run_block_checks.py` lance, arrête et redémarre une instance jetable
+avec un répertoire unique. Il interdit les ports 25565 et 25587, conserve logs,
+rapports et snapshot, et garantit l'arrêt du sous-processus dans finally.
+Le scénario historique `test_block_placement.py` a également réussi : 18 cas,
+deux observateurs, Survival/Creative, blocs pleins, bûches, dalles et fusion,
+refus, inventaire, BlockEvent shulker ID 677, puis quatre états et inventaire
+restaurés après redémarrage. Pas de nouveau test différentiel exhaustif du minage.
+
+ASan+UBSan : build distant `-O1 -g -fsanitize=address,undefined
+-fno-omit-frame-pointer -fno-pie`, lien `-no-pie`,
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`, `UBSAN_OPTIONS=halt_on_error=1`.
+`test_stairs`, `test_world_consistency` et `test_anvil_roundtrip` réussis, ainsi
+que la matrice d'escaliers complète avec redémarrage et la suite historique de
+placement avec redémarrage. Aucun diagnostic sanitizer dans ces passages.
+Empreinte de ce binaire instrumenté :
+`4f2a9befb1b9a76e30965e1a51dfdf8f98a46fe0ee8d5bd7d338fb9579ddbf9f`.
+TSan : sonde minimale échouant avant tout test, `unexpected memory mapping`,
+code 66. Aucune validation des races par TSan.
+
+Deux problèmes de préparation ont été rencontrés et corrigés avant les passages
+finaux : une attente de snapshot attribuait un angle à l'escalier terminal dont
+le voisin était latéral (la forme correcte est straight) ; un arrêt Vanilla a
+dépassé la borne initiale de 30 secondes et a été tué par le runner. La borne est
+désormais de 60 secondes et les passages finaux edit/restart ont terminé
+proprement. Les anciens logs restent conservés à distance ; ils ne sont pas
+présentés comme des validations réussies.
+
+### Performance du binaire final
+
+Binaire normal testé, SHA-256 :
+`8654181ee8d704efc0b72fe0fe76b4d6c768006bde65187fc193b9309a67b917`.
+Les tests fonctionnels normaux et toutes les charges ci-dessous utilisent ce
+même fichier `mc_server.normal`. Les services principaux n'ont pas reçu ce
+binaire. Commande distante, exécutée séquentiellement pour N=1,10,25,50 :
+
+```sh
+python3 tests/stress/benchmark_network.py --server-binary ./mc_server.normal \
+  --workers 1 --mode blocks --bots N --cycles-per-bot 100 \
+  --duration 180 --block-cooldown 0.01
+```
+
+Un worker réseau, deux workers chunks, monde plat jetable frais, 100 cycles
+pose+casse par bot. Les compteurs portent sur les BlockUpdate réellement reçus,
+pas sur les actions envoyées. Les percentiles/TPS suivants proviennent de la
+pire fenêtre active complète de 100 ticks retenue par le script (plus grand
+P95 parmi les fenêtres proches du pic de joueurs), pas de tout le test.
+P99=1000 ms signifie le dernier bucket plafonné, pas un maximum exact.
+
+| Bots | Poses / casses confirmées | Manquants / erreurs / déconnexions | Durée s | TPS fenêtre | MSPT P50 / P95 / P99 ms | >50 ms fenêtre ; toutes fenêtres complètes |
+|---:|---:|---:|---:|---:|---:|---|
+| 1 | 100 / 100 | 0 / 0 / 0 | 6,613 | 19,52 | 32,1 / 46,9 / 51,9 | 3/100 ; 3/100 |
+| 10 | 1000 / 1000 | 0 / 0 / 0 | 19,089 | 6,99 | 98,7 / 169,0 / 199,0 | 86/100 ; 86/100 |
+| 25 | 2500 / 2500 | 0 / 0 / 0 | 39,765 | 3,81 | 152,0 / 424,4 / 1000,0 | 87/100 ; 87/100 |
+| 50 | 5000 / 5000 | 0 / 0 / 0 | 100,974 | 5,24 | 25,1 / 421,6 / 670,1 | 38/100 ; 191/500 |
+
+Les ticks de la dernière fenêtre incomplète ne sont pas inclus dans la dernière
+colonne. Les taux ne forment donc pas une mesure exhaustive de tous les ticks.
+
+| Bots | Latence update moyenne / max ms | CPU processus % | Max des moyennes sauvegarde périodique ms/tick | Max sauvegarde chunk / flush explicite ms |
+|---:|---:|---:|---:|---:|
+| 1 | 20,48 / 102,54 | 77,03 | 1,645 | 2,816 / 9,950 |
+| 10 | 74,70 / 279,93 | 50,35 | 2,010 | 4,369 / 66,882 |
+| 25 | 160,93 / 1299,10 | 41,66 | 1,758 | 3,972 / 380,244 |
+| 50 | 421,02 / 3300,43 | 44,49 | 1,467 | 11,966 / 1918,179 |
+
+CPU : somme des threads du serveur avant shutdown via /proc, 100 %=un cœur,
+hors bots. Les latences incluent client/réseau/tick ; les temps de sauvegarde
+sont ceux des fenêtres MC_PERF, pas une durée totale d'arrêt. Un échantillon
+lent à 50 bots montre 2965 ms dans les items, dont 2924 ms dans leur ramassage ;
+ce chemin préexiste et n'est pas refondu dans le lot.
+
+Comparaison supplémentaire avec les sources exactes du HEAD initial ac6b85a1,
+exportées par Git **local** puis compilées à distance sans Git. Même client,
+10 bots × 100 cycles, chaque version reçoit sa propre copie du même monde :
+
+| Binaire | Poses / casses | Manquants / erreurs / déconnexions | Durée s | TPS fenêtre | MSPT P50 / P95 / P99 ms |
+|---|---:|---:|---:|---:|---:|
+| ac6b85a1 | 1000 / 1000 | 0 / 0 / 0 | 17,593 | 8,25 | 84,8 / 151,4 / 170,3 |
+| Lot 2 final | 1000 / 1000 | 0 / 0 / 0 | 18,613 | 8,37 | 86,3 / 163,2 / 219,6 |
+
+Quantité d'actions égale, mais une seule paire, IO et charge hôte non contrôlés,
+chargement réseau non identique (3707 contre 3811 chunks reçus). Le candidat
+prend 5,8 % de temps global supplémentaire et sa queue MSPT est plus mauvaise
+dans les fenêtres choisies. **Aucun gain ni absence de régression temporelle
+n'est démontré ; les 20 TPS ne sont pas validés.** Aucune optimisation prématurée
+pour masquer ce résultat.
+
+Charge supplémentaire oak_stairs, ID item 442 lu dans le registre 26.1.1 :
+10 bots × 100 cycles, 1000 poses + 1000 casses, zéro manquant/erreur/déconnexion,
+19,632 s ; fenêtre 6,59 TPS, P50/P95/P99 103,7/177,4/244,1 ms, 86/100 ticks
+au-delà de 50 ms ; latence moyenne/max 77,90/272,19 ms, CPU 55,77 %.
+Ce passage du 29 octobre ne se compare pas directement à ceux du 27 octobre.
+Un premier passage de 20 cycles par bot avait confirmé 200+200 opérations en
+5,534 s, mais n'avait aucune fenêtre complète MC_PERF : ses TPS restent inconnus.
+Ces charges ne couvrent pas un monde dense en escaliers ni les pires coûts de
+réconciliation au chargement de sections directes.
+
+Preuves brutes : `tests/stress/results/stairs-lot2-final/` dans la copie locale
+(ignorées par Git), et `tests/stress/results/` dans la copie distante isolée.
+Rapports : `stairs-final`, `vanilla-stairs-final`, `placement-regression`,
+`asan-stairs`, `asan-placement`. Le contrôle renforcé de l'inventaire après refus
+est répété le 29 octobre dans `stairs-checked`, `vanilla-stairs-checked` et
+`asan-stairs-checked`, sur les mêmes binaires ; benchmarks `network-benchmark-20261027T174458Z`,
+`174506Z`, `174525Z`, `174606Z`, `174747Z`, `174805Z`, `174824Z`, et
+`network-benchmark-20261029T191447Z`. Les logs racine `performance-*.log`,
+`precommit.log`, `asan-*.log` et `tsan-probe.log` donnent commandes et résultats.
+
+### Limites et état de l'infrastructure
+
+Conforme **dans les scénarios comparés** : facing, half, cinq shapes, veto,
+priorité, mélange de matériaux, changements après pose/casse/rotation,
+source-water placement, notification des deux joueurs et relecture sauvegardée.
+Le calcul est commun aux familles `_stairs` du registre ; la couverture réelle
+n'inclut pas toutes les essences ni toutes les géométries de placement.
+
+Collision limitée à la forme de l'escalier contre l'AABB existante du poseur.
+Pas de validation complète du mouvement sur les marches, step-height, postures,
+autres joueurs, mobs ou autres entités. Les formes de voisinage peuvent changer
+après le placement ; aucun moteur général de résolution physique n'est ajouté.
+Waterlogged conserve sa propriété à travers un changement de forme ; seule la
+pose en source confinée est testée en différentiel. L'exclusion des écoulements
+est vérifiée en C et contre le prédicat du JAR ; leur simulation, restauration
+de l'eau à la casse et ticks fluides ne sont pas validés. Les anciennes règles
+waterlogged des autres familles sont préservées. Restent aussi les tests de
+chunks extrêmement denses, clients Java réels, auth Mojang positive du candidat,
+TSan fonctionnel et crash-consistance des chunks. Aucun de ces points n'est
+présenté comme acquis.
+
+Aucun remplacement du binaire principal, écrasement de monde, changement de
+configuration, permissions, authentification, start/restart/stop de service
+principal n'a été effectué par ce lot. Empreintes principales avant/après égales :
+
+- `/opt/goatcore/app/mc_server` : `f840ed3f535d80d8b87293b1ada6fdf88cacd6c681740f1dcfa3b06bd1dc423c`.
+- config online : `59a6b486122324c914563879fd8f43b2498695392498bc149858a7b25b423abd`.
+- config offline : `5d95cf9989874b72faddfeb39fe1abc7f3a4d545bf34ad98fbd7d3ce757f4517`.
+
+Écart d'exploitation constaté lors de la reprise le 29 octobre : au relevé
+initial les deux services étaient actifs (PID 10634/10621), au relevé final
+25565 est actif (PID 140) et **25587 est inactif**. Le journal indique un arrêt
+propre de goatcore-test.service le 27 octobre à 21:04:07 ; son auteur n'est pas
+identifié ici. L'hôte a redémarré depuis le premier relevé. La consigne de ne
+pas intervenir sur ces services est respectée ; 25587 n'est pas relancé.
+Les processus temporaires sont arrêtés et 25589/25590 libérés. Les permissions
+des services principaux n'ont pas été changées ni retestées en jeu ; celles de
+l'opérateur synthétique fonctionnent sur les instances temporaires uniquement.
+
+Fichiers du lot : `Makefile`, `include/mc_block_neighbors.h`, `include/mc_world.h`,
+`src/gameplay/block_neighbors.c`, `src/world/world.c`,
+`src/protocol/handlers/play.c`, `tests/test_stairs.c`,
+`tests/test_world_consistency.c`, `tests/test_anvil_roundtrip.c`,
+`tests/stress/run_block_checks.py`, `tests/stress/test_stair_placement.py`,
+`tests/stress/benchmark_network.py`, `tests/stress/stress.py`,
+`tests/stress/README.md`, `tests/fixtures/vanilla-26.1.1-stairs.json`,
+`tests/fixtures/README.md` et ce document.
+
+Suites recommandées : étendre progressivement les tests de collision/placement
+des escaliers, profiler la charge existante avant toute promesse de performance,
+puis traiter les supports des torches et les portes/trappes dans les prochains
+lots 2A. L'interface de voisinage pourra servir à la future 2B ; les collisions
+générales restent à la future 2C. Ces phases ne sont pas commencées dans ce lot.

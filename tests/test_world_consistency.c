@@ -94,6 +94,37 @@ int main(void) {
         assert(wait_block_ready(world, -17 + i, 64, 15 + i, &state) == 0);
         assert(state == variants[i]);
     }
+    /* A front stair crosses the negative X chunk boundary. All writes, including
+     * orientation edits and removal, must update the authoritative neighbors. */
+    int32_t center = mc_global_state_id_from_key("minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", UINT32_MAX);
+    int32_t front = mc_global_state_id_from_key("minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]", UINT32_MAX);
+    int32_t corner = mc_global_state_id_from_key("minecraft:oak_stairs[facing=east,half=bottom,shape=outer_left,waterlogged=false]", UINT32_MAX);
+    for(int nx=-18;nx<=-15;nx++) for(int nz=13;nz<=15;nz++) {
+        assert(wait_block_ready(world,nx,64,nz,&state)==0);
+        assert(mc_world_set_block(world,nx,64,nz,0)==0);
+    }
+    assert(mc_world_set_block(world,-17,64,14,center)==0);
+    mc_chunk_t *owner=mc_world_get_chunk(world,-2,0,0);
+    assert(owner);
+    uint64_t revision=owner->revision;
+    assert(mc_world_set_block(world,-16,64,14,front)==0);
+    assert(owner->revision>revision && owner->dirty);
+    updates=mc_world_updates(world,&updates_len);
+    bool announced=false;
+    for(size_t i=0;i<updates_len;i++)
+        if(updates[i].x==-17 && updates[i].y==64 && updates[i].z==14 && updates[i].state_id==corner) announced=true;
+    assert(announced);
+    assert(mc_world_get_block_ready(world,-17,64,14,&state)==0 && state==corner);
+    assert(mc_world_flush_block(world,-17,64,14)==0);
+    assert(mc_world_flush_block(world,-16,64,14)==0);
+    mc_world_destroy(world);
+    world=mc_world_create_with_workers(world_path,1234,2);
+    assert(world);
+    assert(wait_block_ready(world,-17,64,14,&state)==0 && state==corner);
+    assert(wait_block_ready(world,-16,64,14,&state)==0);
+    assert(mc_world_get_block_ready(world,-17,64,14,&state)==0 && state==corner);
+    assert(mc_world_set_block(world,-16,64,14,0)==0);
+    assert(mc_world_get_block_ready(world,-17,64,14,&state)==0 && state==center);
     mc_world_destroy(world);
     printf("test_world_consistency: ok\n");
     return 0;

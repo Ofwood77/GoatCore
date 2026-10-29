@@ -40,7 +40,7 @@ def free_port():
 
 def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1000,
               server_binary=None, world_template=None, cycles_per_bot=None,
-              block_cooldown=0.01, offline_skins=False):
+              block_cooldown=0.01, offline_skins=False, block_item_id=1):
     name = {1: "one", 2: "two", 4: "four"}[count]
     port = free_port()
     world = result_dir / f"world-{name}"
@@ -89,12 +89,13 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
                        "--bots", str(bots), "--duration", str(duration), "--mode", mode,
                        "--report", str(report_path)]
             if mode in ("blocks", "mixed", "fastblocks"):
-                command += ["--allow-block-changes"]
+                command += ["--allow-block-changes", "--block-item-id", str(block_item_id)]
             if cycles_per_bot is not None:
                 command += ["--cycles-per-bot", str(cycles_per_bot), "--block-cooldown", str(block_cooldown),
                             "--interval", "0.001"]
             run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
                                  timeout=max(50, duration + bots * 0.1 + 30))
+            (result_dir / f"stress-{name}.log").write_text(run.stdout + run.stderr, encoding="utf-8")
             if run.returncode != 0 and not report_path.is_file():
                 raise RuntimeError(f"stress failed ({run.returncode}): {run.stdout[-1500:]} {run.stderr[-500:]}")
         finally:
@@ -116,6 +117,9 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     report = json.loads(report_path.read_text(encoding="utf-8"))
     log = log_path.read_text(encoding="utf-8")
     windows = [tuple(map(float, match)) for match in SUMMARY.findall(log)]
+    p50 = [float(value) for value in re.findall(r"perf summary: ticks=\d+ tps=[\d.]+[^\n]*?p50_total=([\d.]+)ms", log)]
+    if len(p50) != len(windows): raise ValueError("inconsistent performance summary windows")
+    windows = [values + (p50[i],) for i, values in enumerate(windows)]
     active = max(windows, key=lambda values: values[6]) if windows else None
     # The final window often contains idle connected players after the action
     # phase. Report the highest-task window separately instead of hiding peaks.
@@ -138,6 +142,7 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
     return {
         "server_cpu_seconds_before_shutdown": process_cpu_seconds,
         "server_cpu_percent_before_shutdown": process_cpu_percent,
+        "block_item_id": block_item_id,
         "network_workers": count,
         "offline_skins": offline_skins,
         "initial_world": "copied" if world_template else "fresh",
@@ -163,17 +168,17 @@ def benchmark(count, result_dir, bots=50, duration=12, mode="connect", slow_ms=1
         "origin_chunk_seconds_mean": report["origin_chunk_seconds_mean"],
         "connection_seconds_mean": report["connection_seconds_mean"],
         "active_100_tick_window": None if active is None else {
-            "tps": active[1], "p95_mspt": active[2], "p99_mspt": active[3],
+            "tps": active[1], "p50_mspt": active[7], "p95_mspt": active[2], "p99_mspt": active[3],
             "ticks_over_50ms": int(active[4]), "tasks": int(active[5]),
             "protocol_player_ticks": int(active[6]),
         },
         "peak_task_100_tick_window": None if peak_tasks is None else {
-            "tps": peak_tasks[1], "p95_mspt": peak_tasks[2], "p99_mspt": peak_tasks[3],
+            "tps": peak_tasks[1], "p50_mspt": peak_tasks[7], "p95_mspt": peak_tasks[2], "p99_mspt": peak_tasks[3],
             "ticks_over_50ms": int(peak_tasks[4]), "tasks": int(peak_tasks[5]),
             "protocol_player_ticks": int(peak_tasks[6]),
         },
         "worst_active_100_tick_window": None if worst_active is None else {
-            "tps": worst_active[1], "p95_mspt": worst_active[2], "p99_mspt": worst_active[3],
+            "tps": worst_active[1], "p50_mspt": worst_active[7], "p95_mspt": worst_active[2], "p99_mspt": worst_active[3],
             "ticks_over_50ms": int(worst_active[4]), "tasks": int(worst_active[5]),
             "protocol_player_ticks": int(worst_active[6]),
         },
@@ -202,6 +207,7 @@ def main():
     parser.add_argument("--duration", type=float, default=12)
     parser.add_argument("--cycles-per-bot", type=int,
                         help="fixed verified place+break cycles per bot (blocks mode); duration is a deadline")
+    parser.add_argument("--block-item-id", type=int, default=1)
     parser.add_argument("--block-cooldown", type=float, default=0.01,
                         help="seconds between fixed-workload place/break operations")
     parser.add_argument("--mode", choices=("connect", "movement", "blocks", "mixed", "fastblocks"), default="connect")
@@ -234,7 +240,7 @@ def main():
     for count in args.workers:
         row = benchmark(count, result_dir, args.bots, args.duration, args.mode,
                         args.slow_ms, args.server_binary.resolve(), args.world_template,
-                        args.cycles_per_bot, args.block_cooldown, args.offline_skins)
+                        args.cycles_per_bot, args.block_cooldown, args.offline_skins, args.block_item_id)
         rows.append(row)
         print(json.dumps(row), flush=True)
     (result_dir / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")

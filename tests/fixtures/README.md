@@ -41,3 +41,22 @@ Le même scénario vérifie désormais le BlockEvent d'ouverture d'une shulker b
 action 1, paramètre 1, vrai ID protocolaire du bloc 677. Le rapport des registres
 est identifié par son SHA-256. Ce contrôle du paquet ne valide pas les block
 entities ou l'animation complète auprès des autres joueurs.
+
+# Référence des escaliers Vanilla 26.1.1
+
+`vanilla-26.1.1-stairs.json` conserve les 192 observations produites par
+`tests/stress/test_stair_placement.py` sur le serveur officiel 26.1.1 distant
+(:25590), identiques au rapport GoatCore (:25589). Les huit états de
+`after_restart` ont aussi été interrogés après arrêt propre, redémarrage et
+reconnexion sur chacun des deux mondes. Les empreintes du JAR interne officiel,
+du rapport blocks.json et du binaire GoatCore sont incluses.
+
+Les noms et propriétés proviennent de lectures autoritaires (`execute if block`
+sur Vanilla, commande QA sur GoatCore). Les deux bots attendent également les
+updates pour les poses et transformations ; les refus ne nécessitent pas un
+paquet de changement inexistant sur Vanilla. Les fixtures sont préparées par
+un opérateur synthétique offline Ofwood_, sans identité Mojang. Le JSON couvre
+facings, moitiés, angles, veto, rotations/destructions voisines, eau source,
+collisions de placement et frontières négatives. Il ne valide ni la simulation
+des fluides ni les collisions générales. La matrice et ses limites sont décrites
+dans `docs/vanilla-compatibility.md`, section du lot 2.

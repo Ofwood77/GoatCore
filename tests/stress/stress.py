@@ -330,13 +330,14 @@ class Bot:
     async def setup_block_item(self):
         if self.gamemode != 1:
             raise RuntimeError("block mode needs creative gamemode (use a temporary creative world)")
-        # Player inventory hotbar slot 36, stone item registry id 1.
-        await self.conn.send(56, struct.pack(">h", 36) + varint(64) + varint(1) + varint(0) + varint(0))
+        # Registry ID supplied by the benchmark (stone by default).
+        item_id = getattr(self.args, "block_item_id", 1)
+        await self.conn.send(56, struct.pack(">h", 36) + varint(64) + varint(item_id) + varint(0) + varint(0))
         while True:
             slot, item, count = await asyncio.wait_for(self.slot_events.get(), self.args.timeout)
             if slot == 36:
-                if item != 1 or count < 1:
-                    raise RuntimeError(f"stone inventory rejected: item={item} count={count}")
+                if item != item_id or count < 1:
+                    raise RuntimeError(f"block inventory rejected: item={item} count={count}")
                 break
         await self.conn.send(53, struct.pack(">h", 0))
 
@@ -534,6 +535,7 @@ def options(argv=None):
     parser.add_argument("--port", type=int, default=25565)
     parser.add_argument("--radius", type=float, default=3)
     parser.add_argument("--interval", type=float, default=1)
+    parser.add_argument("--block-item-id", type=int, default=1, help="registered item ID for the block workload (default stone)")
     parser.add_argument("--block-cooldown", type=float, default=1,
                         help="seconds to leave each placed/cleared block visible")
     parser.add_argument("--block-rate", type=float,
@@ -561,6 +563,8 @@ def options(argv=None):
         args.block_rate = 400.0
     if args.block_rate is not None and args.mode not in ("blocks", "mixed", "fastblocks"):
         parser.error("block-rate requires a block mode")
+    if not 1 <= args.block_item_id <= 1505:
+        parser.error("block-item-id must be in the 26.1.1 item registry (1..1505)")
     if not 1 <= args.port <= 65535:
         parser.error("port must be 1..65535")
     if args.mode in ("blocks", "mixed", "fastblocks") and not args.allow_block_changes:

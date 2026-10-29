@@ -63,7 +63,7 @@ ne sont alors **pas** attribués à un bot précis et ne sont pas comptés comme
 poses/casses vérifiées.
 
 Les modes blocs demandent un monde créatif : chaque bot place de la pierre (item
-id 1) dans son hotbar via le paquet créatif 775, attend la confirmation
+id 1 par défaut, ou `--block-item-id` issu du registre cible) dans son hotbar via le paquet créatif 775, attend la confirmation
 d'inventaire, pose puis casse à partir d'un bloc support. Une action n'est comptée
 qu'après une mise à jour `BlockUpdate` portant l'état attendu. Le monde sera
 modifié pendant le test : utilisez un monde jetable ou une copie. La préparation
@@ -135,3 +135,53 @@ Le CPU du processus est calculé à partir de `/proc/PID/stat`, somme de tous se
 threads avant l'arrêt (100 % = un cœur), sur sa durée de vie avant shutdown.
 Il exclut le bot Python ; les temps de sauvegarde détaillés restent dans les
 logs `MC_PERF`. Toujours conserver aussi les essais en échec et leurs compteurs.
+
+### Lot 2 : escaliers et voisinage (hôte distant uniquement)
+
+Depuis la copie distante préparée avec le script d'export ci-dessus, le runner
+gère une instance temporaire, son arrêt, son redémarrage et la relecture sur le
+même monde. Les chemins de résultats doivent être nouveaux ; aucun fichier
+des services principaux n'est utilisé comme destination. Les ports 25565 et
+25587 sont interdits par le runner et le scénario d'escaliers.
+
+```sh
+python3 tests/stress/run_block_checks.py --kind goatcore --port 25589 \
+  --server-binary ./mc_server.normal --result-dir tests/stress/results/stairs-new
+python3 tests/stress/run_block_checks.py --kind vanilla --port 25590 \
+  --vanilla-root /opt/goatcore/vanilla-2611 --result-dir tests/stress/results/vanilla-stairs-new
+```
+
+Le script renvoie un échec si le serveur, le scénario ou l'arrêt propre échoue.
+Il conserve metadata.json (dont SHA du binaire GoatCore), report-edit.json,
+report-verify.json, snapshot et journaux de chaque processus. Comparer les deux
+report-edit.json complets : leurs `cases` et `saved` doivent être identiques ;
+les deux report-verify.json doivent indiquer huit états restaurés.
+La capture obtenue est versionnée dans `tests/fixtures/vanilla-26.1.1-stairs.json`.
+`--suite placement` réutilise la suite du lot 1 avec la même procédure d'arrêt
+et de relecture. Le runner se lance avec Python ; il ne requiert pas de bit
+exécutable ni de modifications des scripts de déploiement existants.
+
+La matrice des escaliers contient 192 observations : directions et moitiés,
+faces latérales et seuil 0,5, quatre angles avec pose/rotation/casse du voisin,
+veto latéraux, mélange oak/stone, eau source confinée, refus et forme partielle
+contre le poseur. Les noms et propriétés sont interrogés dans le monde, en plus
+des updates attendues sur deux connexions. Le scénario seul peut aussi cibler
+un serveur temporaire déjà lancé :
+
+```sh
+python3 tests/stress/test_stair_placement.py --port 25589 --snapshot /tmp/stairs-snapshot.json
+# Après arrêt propre et redémarrage du même monde :
+python3 tests/stress/test_stair_placement.py --port 25589 --snapshot /tmp/stairs-snapshot.json --verify
+```
+
+Pour une charge d'escaliers, le benchmark accepte aussi `--block-item-id 442`
+(oak_stairs du registre **26.1.1**, à revérifier lors d'un changement de version).
+Le défaut reste stone=1. P50/P95/P99 sont rapportés pour les fenêtres complètes
+MC_PERF de 100 ticks ; une charge trop courte peut n'en produire aucune.
+`worst_active_100_tick_window` est sélectionnée par P95 parmi les fenêtres à
+au moins 90 % du maximum de proto_ticks ; ce n'est pas un histogramme global.
+Les logs stress stdout/stderr sont désormais conservés dans stress-one.log,
+stress-two.log ou stress-four.log avec le rapport JSON et le journal serveur.
+Une charge complétant ses actions ne démontre pas à elle seule le maintien
+de 20 TPS. La section lot 2 de `docs/vanilla-compatibility.md` conserve les
+mesures finales à 1/10/25/50 bots et leurs réserves.

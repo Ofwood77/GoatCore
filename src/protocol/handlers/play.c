@@ -15,6 +15,7 @@
 #include "mc_furnace.h"
 #include "mc_mining.h"
 #include "mc_placement.h"
+#include "mc_block_neighbors.h"
 #include "mc_block_state.h"
 #include "generated_block_ids.h"
 #include "mc_container_store.h"
@@ -1625,10 +1626,6 @@ static int send_recomputed_connected_neighbors(mc_conn_t *c, mc_world_t *world, 
     return 0;
 }
 
-static bool state_base_is_stairs(const char *base) {
-    return str_has_suffix(base, "_stairs");
-}
-
 static bool state_base_is_trapdoor(const char *base) {
     return str_has_suffix(base, "_trapdoor");
 }
@@ -1686,6 +1683,8 @@ static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_ya
     int32_t mapped_state_id = mc_item_default_place_state(slot->item_id);
     if (mapped_state_id < 0) return -1;
 
+    int32_t stairs = mc_stairs_placement(mapped_state_id, player_yaw, clicked_face, hit_y);
+    if (stairs >= 0) return stairs;
     int32_t simple = mc_placement_resolve_simple(mapped_state_id, clicked_face, hit_y);
     if (simple >= 0) return simple;
     const char *mapped_key = mc_block_state_key(mapped_state_id);
@@ -1696,12 +1695,6 @@ static int32_t mc_resolve_placement_state(const mc_slot_t *slot, float player_ya
     if (state_key_base_name(mapped_key, base, sizeof(base))) {
         const char *facing = opposite_horizontal_facing_from_yaw(player_yaw);
         const char *half = half_from_face_hit_y(clicked_face, hit_y);
-
-        if (state_base_is_stairs(base)) {
-            int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=%s,shape=straight,waterlogged=false]",
-                             base, facing ? facing : "north", half);
-            if (n > 0 && (size_t)n < sizeof(rewritten)) return state_id_from_key_or_fallback(rewritten, mapped_state_id);
-        }
 
         if (state_base_is_trapdoor(base)) {
             int n = snprintf(rewritten, sizeof(rewritten), "%s[facing=%s,half=%s,open=false,powered=false,waterlogged=false]",
@@ -2754,6 +2747,9 @@ static bool placed_block_intersects_player(const mc_conn_t *c, const mc_world_id
     double player_min_z = c->z - PLAYER_COLLISION_HALF_WIDTH;
     double player_max_z = c->z + PLAYER_COLLISION_HALF_WIDTH;
 
+    if (mc_stairs_is_state(state_id))
+        return mc_stairs_intersects(state_id, player_min_x - block_x, player_min_y - block_y, player_min_z - block_z,
+                                    player_max_x - block_x, player_max_y - block_y, player_max_z - block_z);
     double shape_min_y = 0.0, shape_max_y = 1.0;
     (void)mc_placement_slab_bounds(state_id, &shape_min_y, &shape_max_y);
     return aabb_intersects_strict(player_min_x, player_min_y, player_min_z,
@@ -7729,11 +7725,13 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 else {
                     for (int level = 0; level < 16; level++) {
                         if (target_state_id != ids->water_level[level]) continue;
-                        int32_t wet = mc_block_state_with_property(normalized_state_id, "waterlogged", "true");
+                        int32_t wet = mc_block_placement_in_water(normalized_state_id, level);
                         if (wet >= 0) normalized_state_id = wet;
                         break;
                     }
                 }
+                if (mc_world_resolve_block_state(world, px, py, pz, normalized_state_id, &normalized_state_id) != 0)
+                    return queue_block_changed_ack_packet(c, seq);
                 if (!placed_block && target_state_id >= 0 && merged < 0 && !block_state_is_replaceable(ids, target_state_id)) {
                     if (send_block_update_packet(c, px, py, pz, target_state_id) != 0) return -1;
                     if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;

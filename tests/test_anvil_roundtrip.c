@@ -1131,13 +1131,13 @@ int main(void) {
         return fail("setup oak_stairs placement slot");
     }
     if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 0.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
-            mc_block_state_id("minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]", -1) ||
-        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 90.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
-            mc_block_state_id("minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", -1) ||
-        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 180.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
             mc_block_state_id("minecraft:oak_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]", -1) ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 90.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=west,half=bottom,shape=straight,waterlogged=false]", -1) ||
+        proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 180.0f, 0.0f, 0.5f, 0.25f, 0.5f) !=
+            mc_block_state_id("minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]", -1) ||
         proto_play_resolve_placement_state_ex(ids, &placement_slot, 2, 270.0f, 0.0f, 0.5f, 0.75f, 0.5f) !=
-            mc_block_state_id("minecraft:oak_stairs[facing=west,half=top,shape=straight,waterlogged=false]", -1)) {
+            mc_block_state_id("minecraft:oak_stairs[facing=east,half=top,shape=straight,waterlogged=false]", -1)) {
         mc_world_destroy(w);
         return fail("placement oak_stairs facing and half");
     }

@@ -11,6 +11,7 @@
  * still allowing chunk IO and generation to happen off-thread.
  */
 #include "mc_world.h"
+#include "mc_block_neighbors.h"
 
 #include "generated_registries.h"
 #include "mc_chunk_store.h"
@@ -997,6 +998,8 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
     return mc_world_create_with_workers(world_path, level_seed, 0);
 }
 
+static void reconcile_chunk_neighbors(mc_world_t *w, mc_chunk_t *chunk);
+
 int mc_world_worker_count(const mc_world_t *w) {
     return w ? w->worker_count : 0;
 }
@@ -1041,6 +1044,7 @@ void mc_world_destroy(mc_world_t *w) {
             mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
+        if (e && e->state == CHUNK_SLOT_READY && e->chunk) reconcile_chunk_neighbors(w, e->chunk);
         mc_be_store_destroy(&done->block_entities);
         free(done);
         done = next;
@@ -1136,6 +1140,63 @@ int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int
     return 0;
 }
 
+static int neighbor_read(void *ctx, int32_t x, int32_t y, int32_t z, int32_t *state) {
+    mc_world_t *w = ctx;
+    if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) { *state = w->ids.air; return 0; }
+    int32_t cx, cz; int lx, lz;
+    if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) != 0) return -1;
+    mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(cx, cz));
+    if (!e || e->state != CHUNK_SLOT_READY || !e->chunk) return 1;
+    *state = (int32_t)mc_chunk_get_block(e->chunk, lx, y, lz);
+    return 0;
+}
+int mc_world_resolve_block_state(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state, int32_t *resolved) {
+    return w ? mc_block_neighbor_state(neighbor_read, w, x, y, z, state, resolved) : -1;
+}
+static int reconcile_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
+    int32_t current, next;
+    if (neighbor_read(w, x, y, z, &current) != 0 || !mc_stairs_is_state(current)) return 0;
+    int rc = mc_world_resolve_block_state(w, x, y, z, current, &next);
+    if (rc == 1) return 0; /* Keep the saved shape until the neighbor is READY. */
+    if (rc || next == current) return rc;
+    int32_t cx, cz; int lx, lz;
+    if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) != 0) return -1;
+    mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(cx, cz));
+    if (mc_chunk_set_block(e->chunk, lx, y, lz, (uint32_t)next) != 0) return -1;
+    e->chunk->dirty = true;
+    return updates_push(w, (mc_block_update_t){x, y, z, next});
+}
+static int reconcile_local(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
+    static const int directions[5][2] = {{0,0},{0,-1},{1,0},{0,1},{-1,0}};
+    for (size_t i = 0; i < 5; i++)
+        if (reconcile_block(w, x + directions[i][0], y, z + directions[i][1]) != 0) return -1;
+    return 0;
+}
+/* Reconcile loaded stairs when either side of a chunk boundary becomes READY.
+ * Palette filtering avoids scanning flat-world sections that have no stairs. */
+static void reconcile_loaded_stairs(mc_world_t *w, mc_chunk_t *chunk) {
+    if (!chunk) return;
+    for (int s = 0; s < MC_WORLD_SECTION_COUNT; s++) {
+        mc_paletted_container_t *sec = &chunk->sections[s];
+        bool possible = sec->is_direct || mc_stairs_is_state((int32_t)sec->uniform_state);
+        for (unsigned i = 0; !possible && i < sec->palette_len; i++) possible = mc_stairs_is_state((int32_t)sec->palette[i]);
+        if (!possible) continue;
+        for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+            int wy = MC_WORLD_MIN_Y + s * 16 + y;
+            if (!mc_stairs_is_state((int32_t)mc_chunk_get_block(chunk, x, wy, z))) continue;
+            if (reconcile_local(w, chunk->cx * 16 + x, wy, chunk->cz * 16 + z) != 0)
+                log_error("stair neighbor reconciliation failed");
+        }
+    }
+}
+static void reconcile_chunk_neighbors(mc_world_t *w, mc_chunk_t *chunk) {
+    static const int directions[5][2] = {{0,0},{0,-1},{1,0},{0,1},{-1,0}};
+    for (size_t i = 0; i < 5; i++) {
+        mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(chunk->cx + directions[i][0], chunk->cz + directions[i][1]));
+        if (e && e->state == CHUNK_SLOT_READY) reconcile_loaded_stairs(w, e->chunk);
+    }
+}
+
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id) {
     if (!w) return -1;
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) return -1;
@@ -1163,7 +1224,8 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
                      mc_block_state_key(old) ? mc_block_state_key(old) : "(null)",
                      mc_block_state_key(state_id) ? mc_block_state_key(state_id) : "(null)");
         }
-        return updates_push(w, (mc_block_update_t){x, y, z, state_id});
+        if (updates_push(w, (mc_block_update_t){x, y, z, state_id}) != 0) return -1;
+        return mc_stairs_is_state(old) || mc_stairs_is_state(state_id) ? reconcile_local(w, x, y, z) : 0;
     }
 
     if (!e) {
@@ -1291,6 +1353,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
             mc_chunk_destroy(done->chunk);
             free(done->chunk);
         }
+        if (e && e->state == CHUNK_SLOT_READY && e->chunk) reconcile_chunk_neighbors(w, e->chunk);
         mc_be_store_destroy(&done->block_entities);
         free(done);
         done = next;
