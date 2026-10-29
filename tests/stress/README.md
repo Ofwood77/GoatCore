@@ -185,3 +185,99 @@ stress-two.log ou stress-four.log avec le rapport JSON et le journal serveur.
 Une charge complétant ses actions ne démontre pas à elle seule le maintien
 de 20 TPS. La section lot 2 de `docs/vanilla-compatibility.md` conserve les
 mesures finales à 1/10/25/50 bots et leurs réserves.
+
+### Profilage continu du tick et des attentes d'E/S (hôte distant uniquement)
+
+`profile_tick.py` réutilise `Bot`, les cibles privées, les codecs 775 et le cycle
+pose/casse de stress.py. Il attend **tous les 441 chunks** du rayon 10 de chaque
+bot, prépare le slot et la cible, puis sépare échauffement (5 s), repos initial
+(5 s), charge active à nombre fixe de cycles et repos final (5 s). Tous les bots
+restent connectés pendant ces phases. Les connexions, lectures de chunks et
+actions de préparation ne comptent pas comme actions mesurées.
+
+Chaque exécution copie le même monde de référence immuable. Sans
+`--world-template`, le script prépare d'abord ce monde avec un bot, puis conserve
+son manifeste SHA-256. Les identités offline sont déterministes et identiques
+entre copies. Les versions sont alternées à chaque répétition. Une action
+incomplète, une déconnexion ou un arrêt non propre provoque un échec ; les
+résultats bruts déjà écrits sont conservés. Les ports temporaires sont attribués
+par le noyau ; 25565 et 25587 sont interdits.
+
+Le binaire doit contenir le point de trace optionnel de src/net/server.c.
+`MC_PERF=1 MC_PERF_TRACE_PATH=/chemin/frais/ticks.csv` enregistre **chaque tick**,
+avec horodatages CLOCK_MONOTONIC, CPU du thread, passes rapides, phases du tick,
+attentes de verrous, files et items. Le fichier est bufferisé et fermé à l'arrêt.
+Sans cette variable, il n'y a ni écriture de trace ni lectures d'horloge ajoutées
+par ce mécanisme. MC_PERF et ses logs préexistants restent indépendants.
+
+Compiler la sonde optionnelle uniquement dans la copie de test distante :
+
+```sh
+cc -shared -fPIC -O2 -Wall -Wextra -o profile_fsync.so tests/stress/profile_fsync.c -ldl -pthread
+python3 tests/stress/profile_tick.py \
+  --binary reference=/chemin/reference/mc_server \
+  --binary current=/chemin/avant-correction/mc_server \
+  --bots 1 10 25 50 --repetitions 3 --cycles 100 \
+  --fsync-probe ./profile_fsync.so --result-dir tests/stress/results/profile-comparison-new
+```
+
+La bibliothèque n'est préchargée que dans le processus enfant temporaire. Elle
+mesure chaque fsync, son CPU, son résultat et son fichier sans changer la valeur
+de retour ni errno. Elle ne doit jamais être injectée dans un service principal.
+Pour comparer d'anciennes révisions, exporter celles-ci avec **Git local**, puis
+appliquer seulement le même point de trace aux deux sources. Ne jamais utiliser
+Git sur le serveur distant. Conserver les SHA des binaires et expliciter cet
+ajout commun d'instrumentation ; ne pas comparer silencieusement une version
+instrumentée à une autre sans instrumentation.
+
+Les sorties comprennent ticks.csv, fsync.csv, resources.json (échantillonnage
+250 ms : CPU serveur/client, mémoire, IO, schedstat/wchan des threads, pression
+CPU/IO/mémoire), actions.json, bots.log, server.log et summary.json. comparison.json
+conserve toutes les répétitions, pas seulement la meilleure. Le profil CPU gprof
+doit être réalisé dans une passe séparée avec un binaire `-pg` ; ses temps ne
+remplacent pas les mesures normales et ne représentent pas les attentes d'E/S.
+
+TPS = nombre de débuts réels de tick dans la phase / durée monotone de la phase.
+Une discrétisation d'un tick explique un petit dépassement de 20 sur une phase
+courte. MSPT utilise les ticks complets qui chevauchent la phase, y compris un
+éventuel dernier tick lent ; les ticks de bord sont comptés séparément. Les
+percentiles sont à rang le plus proche et ne plafonnent pas à 1000 ms. Les passes
+rapides sont distinctes du coût du tick programmé : tick_and_fast_ms et les
+intervalles entre débuts de tick évitent de confondre MSPT et période réelle.
+Les coûts imbriqués (handlers/flush, items/fsync) ne doivent pas être additionnés.
+Les appels fsync chevauchant une frontière sont comptés entiers : leurs sommes
+par phase ne sont pas strictement additives non plus. CPU/RSS sont échantillonnés,
+pas une attribution exhaustive de tous les processus de l'hôte physique.
+
+Tests purs des calculs : `python3 tests/stress/test_tick_profile.py`, sans serveur.
+Pour vérifier un ramassage réel, deux observateurs et la sauvegarde/relecture :
+
+```sh
+python3 tests/stress/run_block_checks.py --kind goatcore --suite pickup --port 25589 \
+  --server-binary ./mc_server.corrected --result-dir tests/stress/results/pickup-new
+python3 tests/stress/run_block_checks.py --kind vanilla --suite pickup --port 25590 \
+  --result-dir tests/stress/results/vanilla-pickup-new
+```
+
+Comparer les invariants des deux report-edit.json et report-verify.json : deux
+objets lâchés/ramassés, quantité observée par les deux joueurs, pile de quatre
+restaurée sans réinitialisation d'inventaire, puis après un nouveau processus.
+Le regroupement éventuel des entités items par Vanilla n'impose pas un nombre
+identique de TakeItemEntity ; c'est la somme des quantités qui est comparée.
+
+Le même scénario accepte `--pickup-count 100` dans le runner : deux piles
+préparées, 100 drops unitaires puis exactement 100 objets récupérés, vérification
+de l'inventaire à la reconnexion et après redémarrage. Pour mesurer les attentes
+du serveur GoatCore, ajouter `--fsync-probe ./profile_fsync.so`. Le runner écrit
+ticks-edit.csv et fsync-edit.csv, puis des fichiers distincts pour verify.
+Le scénario attend les chunks, confirme les piles vidées, utilise une lecture QA
+comme barrière de préparation, vérifie qu'aucun ramassage n'a commencé, puis une
+seconde barrière après les 100 ramassages. Les bornes sont dans `active_us` du
+rapport edit. Le temps d'attente du délai normal de ramassage est inclus ; les
+écritures de préparation et de déconnexion en sont exclues. Comparer les
+invariants de quantité sur Vanilla ; les bornes temporelles ne doivent pas être
+égalisées artificiellement entre serveurs.
+
+Une sonde demandée mais absente ne vaut jamais zéro fsync : les chemins invalides
+et l'absence de fichier de trace provoquent un échec. Sans sonde demandée,
+profile_tick.py conserve `fsync: null` pour indiquer une métrique non mesurée.

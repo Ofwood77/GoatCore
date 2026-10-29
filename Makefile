@@ -232,7 +232,7 @@ test_framing_crypto: tests/test_framing_crypto.c src/net/buffer.c src/protocol/v
 test_pvp: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 
 test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync
 
 test_nbt: tests/test_nbt.c src/world/nbt.c src/util/arena.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -317,6 +317,7 @@ login-integration-check: mc_server
 precommit-check: hygiene-check generated-check test smoke-start multi-epoll-check login-integration-check
 	python3 tests/test_registry_generator.py
 	python3 tests/stress/test_stress.py
+	python3 tests/stress/test_tick_profile.py
 
 dev-run:
 	$(MAKE) clean

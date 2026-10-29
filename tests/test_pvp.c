@@ -1,12 +1,16 @@
 #include "mc_net.h"
 #include "mc_protocol.h"
+#include "mc_player_store.h"
+#include "mc_world.h"
 #include "generated_minecraft_ids.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -20,9 +24,19 @@ static int g_motion_packets = 0;
 static int g_hurt_packets = 0;
 static uint8_t g_last_motion[16];
 static size_t g_last_motion_len = 0;
+static mc_world_t *g_pickup_world;
+static int g_fsync_calls, g_inventory_packets;
+static bool g_fail_fsync;
+int __real_fsync(int fd);
+int __wrap_fsync(int fd) {
+    g_fsync_calls++;
+    if (g_fail_fsync) { errno = EIO; return -1; }
+    return __real_fsync(fd);
+}
 
 int conn_write_packet(mc_conn_t *c, int32_t packet_id, const uint8_t *payload, size_t payload_len, int compression_threshold) {
     (void)c;
+    if (packet_id == MC_PKT_PLAY_CLIENTBOUND_CONTAINER_SET_CONTENT) g_inventory_packets++;
     if (packet_id == MC_PKT_PLAY_CLIENTBOUND_SET_ENTITY_MOTION) {
         assert(payload_len <= sizeof(g_last_motion));
         memcpy(g_last_motion, payload, payload_len);
@@ -56,7 +70,7 @@ void net_server_release_conn(mc_conn_t *conn) {
 
 mc_world_t *net_server_world(mc_server_t *server) {
     (void)server;
-    return NULL;
+    return g_pickup_world;
 }
 
 int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot) {
@@ -553,6 +567,68 @@ static void test_pickup_inventory_empty_merge_full_and_spectator(void) {
     test_conn_clear(&player_conn, &player);
 }
 
+static void assert_pickup_saved(const char *path, const char *name, int count) {
+    mc_player_data_t loaded;
+    mc_player_data_init(&loaded);
+    assert(mc_player_store_load(path, NULL, false, name, &loaded) == 0);
+    assert((loaded.inventory.slots[36].present ? loaded.inventory.slots[36].count : 0) == count);
+    mc_player_data_clear(&loaded);
+}
+
+static void test_pickup_pass_atomic_save_and_failure(void) {
+    char path[] = "/tmp/goatcore-pickup-save-XXXXXX";
+    assert(mkdtemp(path));
+    g_pickup_world = mc_world_create_with_workers(path, 0, 1);
+    assert(g_pickup_world);
+    mc_conn_t c;
+    mc_player_data_t player;
+    test_conn_init(&c, &player, 30);
+    c.server = (mc_server_t *)0x1;
+    snprintf(player.username, sizeof(player.username), "PickupBatch");
+    assert(mc_player_store_save(path, &player) == 0);
+    g_fsync_calls = g_inventory_packets = 0;
+    int32_t stone = mc_minecraft_item_id("minecraft:stone");
+    mc_slot_t slot = {0};
+    for (int i = 0; i < 3; i++) {
+        assert(mc_slot_set_simple(&slot, stone, 1) == 0);
+        assert(proto_play_pickup_ground_slot_deferred(&c, &slot) == 1);
+        assert(!slot.present);
+    }
+    assert(c.pickup_save_pending && g_inventory_packets == 3 && g_fsync_calls == 0);
+    assert_pickup_saved(path, player.username, 0); /* explicit pre-commit crash window */
+    assert(proto_play_flush_pickup_save(&c) == 0);
+    assert(!c.pickup_save_pending && g_fsync_calls == 2); /* file AND directory */
+    assert_pickup_saved(path, player.username, 3);
+    assert(proto_play_flush_pickup_save(&c) == 0 && g_fsync_calls == 2);
+    assert(mc_slot_set_simple(&slot, stone, 1) == 0);
+    assert(proto_play_try_pickup_ground_slot(&c, &slot) == 1); /* direct API stays immediate */
+    assert(g_fsync_calls == 4);
+    assert_pickup_saved(path, player.username, 4);
+    assert(mc_slot_set_simple(&slot, stone, 1) == 0);
+    assert(proto_play_pickup_ground_slot_deferred(&c, &slot) == 1);
+    atomic_store(&c.closing, true);
+    assert(proto_play_flush_pickup_save(&c) == 0); /* socket failure must not discard a pickup */
+    assert_pickup_saved(path, player.username, 5);
+    atomic_store(&c.closing, false);
+    assert(mc_slot_set_simple(&slot, stone, 1) == 0);
+    assert(proto_play_pickup_ground_slot_deferred(&c, &slot) == 1);
+    g_fail_fsync = true;
+    assert(proto_play_flush_pickup_save(&c) == -1 && c.pickup_save_pending);
+    g_fail_fsync = false;
+    assert_pickup_saved(path, player.username, 5); /* previous atomic file intact */
+    assert(proto_play_flush_pickup_save(&c) == 0 && !c.pickup_save_pending);
+    assert_pickup_saved(path, player.username, 6);
+    int syncs = g_fsync_calls;
+    c.gamemode = GAMEMODE_SPECTATOR;
+    assert(mc_slot_set_simple(&slot, stone, 1) == 0);
+    assert(proto_play_pickup_ground_slot_deferred(&c, &slot) == 0);
+    assert(proto_play_flush_pickup_save(&c) == 0 && !c.pickup_save_pending && g_fsync_calls == syncs);
+    mc_slot_clear(&slot);
+    test_conn_clear(&c, &player);
+    mc_world_destroy(g_pickup_world);
+    g_pickup_world = NULL;
+}
+
 static void test_manual_drop_selected_item_stack_empty_and_dead(void) {
     mc_conn_t player_conn;
     mc_player_data_t player;
@@ -711,6 +787,7 @@ int main(void) {
     test_lifecycle_keep_inventory();
     test_lifecycle_respawn_reset();
     test_pickup_inventory_empty_merge_full_and_spectator();
+    test_pickup_pass_atomic_save_and_failure();
     test_manual_drop_selected_item_stack_empty_and_dead();
     test_creative_set_slot_gate();
     test_vanilla_movement_exhaustion_and_invalid_position();

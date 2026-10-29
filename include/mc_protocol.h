@@ -58,6 +58,10 @@ int proto_play_send_presence_message(mc_conn_t *viewer, mc_conn_t *subject, bool
 int proto_play_drop_selected_for_test(mc_conn_t *c, int32_t requested_count);
 int proto_play_set_creative_slot_for_test(mc_conn_t *c, int16_t slot_id, const mc_slot_t *slot);
 int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot);
+/* Tick item pass only: same mutation/packets, one atomic save per recipient
+ * before leaving the pass. Direct callers keep the immediate-save API above. */
+int proto_play_pickup_ground_slot_deferred(mc_conn_t *c, mc_slot_t *ground_slot);
+int proto_play_flush_pickup_save(mc_conn_t *c);
 int proto_play_encode_chunkdata_for_test(mc_world_t *world, const mc_chunk_t *chunk, mc_buf_t *out);
 int proto_play_validate_chunkdata_for_test(const uint8_t *data, size_t len);
 

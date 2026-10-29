@@ -1,4 +1,4 @@
-# GoatCore 26.1.1 — compatibilité Vanilla (phase 2A : lots 1 et 2)
+# GoatCore 26.1.1 — compatibilité Vanilla (phase 2A et diagnostic des performances)
 
 ## Phase 1C : cycle de vie et visibilité des joueurs
 
@@ -1033,3 +1033,506 @@ des escaliers, profiler la charge existante avant toute promesse de performance,
 puis traiter les supports des torches et les portes/trappes dans les prochains
 lots 2A. L'interface de voisinage pourra servir à la future 2B ; les collisions
 générales restent à la future 2C. Ces phases ne sont pas commencées dans ce lot.
+
+## Phase 2 — lot technique : tick, E/S et service 25587 (29 octobre 2026)
+
+HEAD initial `477c2b6b18d6cc259f2900ee2377476b349d9ee9`, aucun changement suivi.
+Les trois éléments personnels `.vscode/`, `src/main.py`, `start-aider.sh` sont
+préservés et exclus. Référence de comparaison : `ac6b85a1`. Aucun push, merge,
+réécriture d'historique ni Git sur l'hôte distant. Ce chantier n'ouvre aucune
+autre phase de gameplay.
+
+### Enquête en lecture seule : arrêt normal du conteneur de test
+
+Au début de l'enquête : 25565 actif, PID 140 ; 25587 inactif, sans PID.
+Le système distant s'identifie comme un **conteneur LXC**. Son journal précédent
+établit cette séquence UTC le 27 octobre, avec précision à la microseconde :
+
+- 21:04:07.867493 : systemd PID 1 reçoit `SIGRTMIN+3`.
+- 21:04:07.888127 : activation de `halt.target`.
+- 21:04:07.925338 : arrêt de goatcore-test.service ; à .926429, arrêt du service
+  principal, avec les autres unités de la séquence générale d'arrêt.
+- 21:04:07.964543 : goatcore-test.service désactivé avec succès ; à .965325,
+  service arrêté, sans message de crash ni de dépassement du délai d'arrêt.
+- 21:04:08.576609 : systemd-halt.service ; à .586321, `Shutting down`.
+
+Il s'agit donc d'un arrêt ordonné du conteneur, et non d'un crash isolé du
+serveur offline. Le journal ne fournit pas l'identité de l'émetteur du signal,
+ni le motif de la demande d'arrêt de l'environnement. Une action d'orchestrateur
+ou d'administrateur reste possible, sans preuve permettant de l'attribuer.
+Il n'existe pas de preuve d'OOM dans le journal accessible du boot concerné ;
+les événements noyau/hyperviseur hors du conteneur ne sont pas entièrement
+observables ici, donc aucun diagnostic global d'absence d'OOM n'est revendiqué.
+
+L'unité offline est **static**, sans `[Install]`, `Restart=no`, sans limite de
+durée (`RuntimeMaxUSec=infinity`), `StopWhenUnneeded=no`, ni dépendance BindsTo
+ou PartOf. Aucun timer d'arrêt GoatCore n'est listé. L'unité principale est
+activée au démarrage. Après les boots suivants, dont celui du 27 à 22:04:34,
+le service principal démarre à 22:04:35, mais aucune dépendance ne demande le
+démarrage automatique du service offline. Cela explique son état actuel.
+
+Les scripts du dépôt pouvant agir sur 25587 ont été lus : remote-test-server.sh
+peut le démarrer/l'arrêter explicitement ; deploy-remote.sh ne le redémarre que
+s'il était actif. Aucun journal ne relie leur invocation à cet arrêt ; la
+séquence halt englobe tous les services. Aucun de ces scripts d'exploitation
+n'a été exécuté pour modifier les services pendant ce chantier.
+
+Restauration proposée, **uniquement sur autorisation ultérieure** : relire la
+configuration offline, vérifier port et monde distincts, puis démarrer
+goatcore-test.service avec son binaire existant. Les risques sont une reprise
+des anciennes données de test et la charge de l'instance additionnelle ; cela
+ne doit pas servir de prétexte pour remplacer le binaire partagé ou activer
+l'unité au boot sans demande distincte. Aucune restauration n'a été effectuée.
+
+### Méthode de comparaison et limites de mesure
+
+Sources exportées depuis Git **local** vers une copie isolée créée par
+scripts/remote-build-stage.sh : `/opt/goatcore/phase2a-stage.KTpn22`.
+Les deux révisions utilisent les mêmes options C11/O2, bibliothèques, assets
+26.1.1 et paramètres. src/net/server.c était identique dans ac6b85a1 et 477c2b6b ;
+le même ajout de trace optionnelle a été appliqué à chacun pour la première
+comparaison. Il ne s'agit donc pas des octets originaux de ces deux commits,
+mais de leurs comportements avec une instrumentation commune, explicitement
+identifiée par les SHA-256 des binaires.
+
+Un worker réseau, deux workers chunks, zéro simulation worker ; affinité auto,
+même cpuset disponible de 12 CPU logiques (`0-4,6-9,11,14-15`), sans exclusivité
+sur l'hôte physique. Distances de vue et simulation 10, seed 0, mode offline,
+skins offline désactivés. Le disque du conteneur est ext4 sur un volume LVM.
+Les services principaux restent dans leur état initial pendant les mesures.
+Le CPU, le stockage physique et d'éventuels voisins de l'hôte ne sont pas
+réservés : les répétitions et la pression IO observée ne suppriment pas cette
+limite d'attribution.
+
+Le driver profile_tick.py réutilise les bots, codecs, cibles et block_cycle de
+stress.py, y compris le même logger de paquets flushé. Il copie un unique monde
+préparé, dont les fichiers sont identifiés par manifeste SHA-256 ; mêmes noms
+offline et mêmes positions sur chaque copie. Les étapes sont séparées :
+connexions/réception de **441 chunks par bot**, slot créatif et nettoyage de
+cible ; échauffement 5 s ; repos initial 5 s ; **100 cycles pose+casse par bot** ;
+repos final 5 s. Aucun bot ne part dès la fin de ses propres actions : le nombre
+d'observateurs demeure constant jusqu'à la fin du repos final. Trois répétitions
+par couple version/effectif, avec ordre des versions alterné entre répétitions.
+
+Chaque action compte après le BlockUpdate attendu. Les préparations n'entrent
+pas dans le nombre de poses/casses mesurées. Un échec ou une action manquante
+fait échouer la passe, sans réduire silencieusement la quantité de travail.
+Le driver ajoute une collecte des TakeItemEntity dans la comparaison après
+correction pour distinguer le nombre de ramassages du nombre d'écritures disque.
+Ce compteur supplémentaire est commun aux deux binaires de cette comparaison.
+
+La trace CSV horodatée par CLOCK_MONOTONIC enregistre tous les ticks, sans
+sélection de fenêtre de 100 ticks ni bucket MSPT plafonné. TPS = débuts de tick
+dans la phase / durée réelle de la phase. Une incertitude de discrétisation
+d'un tick peut produire un taux légèrement supérieur à 20 sur une courte durée.
+MSPT = durée complète des ticks chevauchant la phase, avec compte séparé des
+ticks de bord et inclusion du dernier tick lent. Les percentiles sont à rang
+le plus proche. La période entre débuts de tick inclut attente, passes rapides,
+retard et resynchronisation ; le MSPT du tick programmé exclut les passes rapides.
+Ces deux grandeurs ne sont donc pas réciproques. Les durées sont conservées
+dans les CSV pour recalculer les distributions et vérifier nombre de ticks/TPS.
+
+L'instrumentation existante détaille handlers, flush chunks, phases du monde,
+items, réseau et verrous. MC_PERF_TRACE_PATH ajoute seulement une sortie CSV
+bufferisée lorsqu'elle est demandée avec MC_PERF=1. Sans cette option, aucune
+écriture ni lecture d'horloge supplémentaire de ce point de trace n'a lieu.
+La sonde de tests profile_fsync.c est préchargée uniquement dans l'instance
+temporaire ; elle conserve résultat/errno et relève wall time, CPU et fichier
+de chaque fsync. Les coûts imbriqués ne doivent pas être additionnés.
+
+Le moniteur conserve des échantillons à 250 ms du CPU serveur et client, RSS,
+high-water mark, IO du processus, schedstat/wchan des threads, pression
+CPU/IO/mémoire et compteurs CPU globaux. Les files et attentes de verrous sont
+présentes dans la trace continue. Les maxima mémoire échantillonnés et CPU sur
+les bornes d'échantillonnage ne sont pas des intégrales exactes de la phase.
+Les appels fsync chevauchant une frontière sont comptés entiers. Les fichiers
+de trace ajoutent une petite charge de diagnostic, commune aux versions testées.
+
+Le high-water mark de la file est cumulatif depuis le démarrage et peut inclure
+la préparation ; task_depth mesure la profondeur observée au point de trace.
+Le compteur de latence de file préexistant utilise l'heure de début du drain :
+il ne mesure pas toute l'attente derrière les handlers du même batch. Les
+latences client incluent aussi décodage et traitement Python. Leurs résumés sont
+conservés, mais pas une trace horodatée exhaustive de chaque envoi réseau.
+
+perf, strace et gdb ne sont pas disponibles ; gprof l'est. Le profil CPU dédié
+est distinct des mesures de débit normales. Ses échantillons et compteurs ne
+mesurent pas le temps bloqué dans les appels système ; les fonctions inlinées
+et les bibliothèques non profilées limitent l'attribution. Les mesures murales
+par phase et de fsync constituent les preuves principales des attentes.
+
+### Correction unique : barrière de sauvegarde des ramassages
+
+La référence et le lot 2 sauvegardent le fichier joueur **après chaque slot
+ramassé**, depuis proto_play_try_pickup_ground_slot, au milieu de la boucle
+d'items. Chaque écriture atomique compresse le NBT, synchronise le fichier
+temporaire, renomme, puis synchronise le répertoire. À 10 bots, le premier
+passage de référence montre 286 fsync représentant 6,378 s de temps mural pour
+0,026 s CPU, sur 14,223 s de charge active. À 50 bots, son premier passage
+montre 25,634 s dans fsync et un tick maximal de 1,878 s. Ce coût préexiste aux
+escaliers et justifie de cibler les répétitions de commits de ramassage.
+
+La correction conserve l'ordre des absorptions d'inventaire et de tous les
+paquets d'inventaire, TakeItemEntity, suppression et métadonnées. Le chemin
+de ramassage de la passe d'items marque seulement un flag tick-owned par
+connexion ; à la fin de **cette même passe**, chaque destinataire modifié fait
+une sauvegarde atomique complète. Le fsync du fichier **et** du répertoire
+restent présents. Le chemin public immédiat reste disponible pour les appels
+hors de la passe d'items. Aucune sauvegarde async, nouveau thread, modification
+des règles de ramassage, validation, protocole, scheduler ou ordre des updates.
+Les flushs de chunks restent inchangés : aucune seconde optimisation.
+
+Un échec de sauvegarde ferme la connexion comme auparavant et conserve le flag
+pour la sauvegarde habituelle de départ. Un socket fermé pendant la passe ne
+fait pas abandonner les objets déjà acceptés. Le flag ne concerne que des
+mutations déjà réalisées par le tick et ne traverse pas un worker.
+
+**Compromis de durabilité explicite :** le commit disque intervient à la fin
+de la passe d'items, au lieu d'entre deux ramassages. Un arrêt brutal avant
+cette barrière peut perdre les ramassages de cette passe ; la borne est logique,
+pas une promesse de quelques millisecondes. Le dernier fichier joueur reste
+atomique, et la fin de passe est synchrone. Cela ne crée pas de transaction
+atomique entre inventaire, items au sol et chunks, dont la crash-consistance
+globale n'était déjà pas validée. Les tests ne prétendent pas garantir ce cas.
+L'effet attendu se limite aux passes recevant plusieurs ramassages pour un
+même joueur ; une passe avec un seul ramassage ne supprime aucun fsync.
+
+### Révisions ac6b85a1 / 477c2b6b : mesures continues avant correction
+
+Les 24 passes normales ont terminé avec tous leurs cycles confirmés, zéro
+manquant, zéro échec et aucune déconnexion avant la fermeture volontaire.
+Chaque ligne ci-dessous regroupe **trois répétitions** : durée médiane d'une
+passe, TPS agrégés (somme des ticks / somme des durées), percentiles de tous les
+ticks actifs regroupés, nombre total de dépassements et maximum de l'ensemble.
+Il ne s'agit ni de moyennes de percentiles ni de la meilleure fenêtre.
+Les actions indiquées sont confirmées **dans chacune des trois passes**.
+
+| Version | Bots | Poses / casses par passe | Durée médiane s | TPS agrégés | MSPT P50 / P95 / P99 ms | >50 ms / ticks | Max ms |
+|---|---:|---:|---:|---:|---|---:|---:|
+| ac6b85a1 | 1 | 100 / 100 | 4,834 | 19,99 | 0,334 / 3,071 / 4,245 | 0 / 291 | 7,989 |
+| 477c2b6b | 1 | 100 / 100 | 4,853 | 19,93 | 0,207 / 3,687 / 5,849 | 0 / 293 | 9,707 |
+| ac6b85a1 | 10 | 1000 / 1000 | 15,399 | 13,29 | 50,810 / 117,240 / 153,164 | 306 / 606 | 399,070 |
+| 477c2b6b | 10 | 1000 / 1000 | 14,780 | 14,65 | 46,118 / 105,766 / 181,057 | 291 / 644 | 250,054 |
+| ac6b85a1 | 25 | 2500 / 2500 | 32,974 | 8,69 | 50,138 / 182,227 / 269,297 | 429 / 854 | 588,336 |
+| 477c2b6b | 25 | 2500 / 2500 | 32,594 | 8,96 | 52,817 / 177,171 / 288,511 | 457 / 877 | 1026,731 |
+| ac6b85a1 | 50 | 5000 / 5000 | 91,353 | 6,55 | 16,037 / 392,484 / 1121,647 | 540 / 1822 | 3657,326 |
+| 477c2b6b | 50 | 5000 / 5000 | 94,841 | 6,53 | 15,411 / 384,416 / 1054,444 | 548 / 1883 | 5258,967 |
+
+Les deux versions sont proches dans ce scénario, avec des variations de queue
+de latence et du nombre de ramassages. Les résultats ne montrent pas une
+régression systématique imputable aux escaliers ; ils ne prouvent pas non plus
+un coût nul de tout voisinage ou de chargements denses en escaliers.
+L'ancienne charge démarrait des actions pendant l'arrivée des chunks et faisait
+partir chaque bot dès sa fin de travail. Ces deux différences interdisent une
+comparaison numérique directe avec les anciens tableaux du lot 2.
+
+Le P50 plus faible à 50 qu'à 25 ne signifie pas que 50 joueurs coûtent moins :
+les longues rafales de travail alternent avec de nombreux ticks courts. La
+médiane masque cette distribution ; P99, maximum et débit global se dégradent.
+Dans cette campagne continue, le débit à 50 est inférieur à celui à 25. Les
+anciens classements de fenêtres sélectionnées pouvaient aussi mélanger des
+phases de chargement et des effectifs d'observateurs décroissants.
+
+Au repos **avant** les actions, P95 du lot 2 : 0,130 / 0,209 / 0,985 / 3,069 ms
+pour 1/10/25/50 bots. Après les actions, avec les items encore présents :
+0,275 / 1,895 / 6,429 / 14,241 ms. Les fortes chutes se manifestent donc surtout
+pendant les modifications et ramassages, et non dans le seul maintien de joueurs
+connectés immobiles. Ces repos ne sont que des observations de cinq secondes,
+pas une validation de stabilité sur plusieurs heures.
+
+Les traces identifient précisément les deux pires ticks à 50 bots :
+
+- Référence, passe r2, tick 811 : 3,657 s, dont 3,398 s items ; 176 fsync
+  occupent 3,091 s, CPU total du tick 0,338 s.
+- Lot 2, passe r1, tick 845 : 5,259 s, dont 5,081 s items ; 260 fsync occupent
+  4,612 s, CPU total du tick 0,365 s. La passe rapide précédente dure 0,119 s.
+
+Ces pauses viennent principalement de la répétition d'attentes de stockage,
+pas d'un calcul d'angle d'escalier d'une durée de plusieurs secondes. À 50 bots,
+les trois passes du lot 2 totalisent 81,364 s dans 4 254 fsync, pour 0,344 s CPU
+dans ces appels. Les phases handlers et flush chunks restent aussi coûteuses :
+elles constituent une seconde piste de travail, distincte du regroupement des
+sauvegardes de joueurs.
+
+| Bots, lot 2 avant correction | CPU serveur / client %¹ | RSS serveur min–max KiB² | Profondeur de file observée max | Attentes push/drain cumulées ms³ | Latence action moyenne / max ms |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 9,6 / 6,8 | 24668–24760 | 1 | 0,707 | 13,22 / 50,50 |
+| 10 | 31,6 / 32,5 | 27540–27952 | 18 | 2,677 | 58,75 / 252,51 |
+| 25 | 47,5 / 69,4 | 31940–32688 | 31 | 4,907 | 128,91 / 1097,17 |
+| 50 | 53,1 / 72,8 | 39500–40240 | 95 | 5,778 | 417,21 / 5337,36 |
+
+¹ 100 %=un cœur ; moyenne pondérée par durée des trois périodes actives.
+² Enveloppe des échantillons des trois processus indépendants, pas une croissance
+continue entre passes. ³ Somme des attentes de verrous de la file sur les trois
+périodes actives ; les attentes de traitement des tâches sont une autre métrique.
+Les verrous items/fourneaux mesurés restent également très courts. Ces données
+ne désignent pas une contention de ces mutex comme cause dominante ; elles
+n'excluent pas toutes les autres attentes, notamment les buffers réseau.
+
+Les compteurs CPU globaux accessibles indiquent environ 9–18 % occupés, sans
+steal relevé dans ces échantillons. À 10–50 bots, l'IO wait global est de l'ordre
+de 4–5 % et la pression IO full de 9 % en moyenne pendant les phases actives.
+La pression mémoire reste nulle dans les relevés disponibles ; aucun indice
+de manque de RAM n'explique les pauses observées. Les autres processus visibles
+dans le conteneur sont peu actifs. Il reste impossible d'attribuer entièrement
+les variations du disque et des compteurs globaux à des voisins physiques non
+visibles. Une charge externe peut contribuer à la variance, mais elle ne remplace
+pas la preuve directe des attentes fsync dans les fonctions GoatCore.
+
+Le client Python approche lui-même un cœur à forte charge : sa sérialisation
+des lectures, la diffusion quadratique des updates et son logger influencent
+les latences et le débit de bout en bout. Les métriques ne constituent donc pas
+une capacité maximale du serveur avec un client sans coût. Le ramassage est
+réellement simulé et les items encore au sol sont comptés ; ils ne sont ni supprimés
+ni désactivés pour améliorer les chiffres.
+
+### Avant/après correction : même travail de blocs
+
+Une seconde campagne de 24 passes alterne le binaire du lot 2 et le correctif,
+avec les mêmes mondes, scripts, réglages et 100 cycles/bot. Trois répétitions
+par ligne, mêmes règles d'agrégation que ci-dessus. Chaque passe confirme
+100/100, 1000/1000, 2500/2500 ou 5000/5000 poses/casses, selon l'effectif ;
+zéro manquant, échec ou déconnexion prématurée.
+
+| Binaire | Bots | Durée médiane s | TPS agrégés | MSPT P50 / P95 / P99 ms | >50 ms / ticks | Max ms |
+|---|---:|---:|---:|---|---:|---:|
+| Avant | 1 | 4,937 | 19,97 | 0,258 / 3,294 / 4,384 | 0 / 296 | 29,824 |
+| Corrigé | 1 | 4,973 | 19,96 | 0,276 / 3,268 / 3,900 | 0 / 297 | 4,021 |
+| Avant | 10 | 14,991 | 14,29 | 46,407 / 104,018 / 172,878 | 296 / 636 | 230,102 |
+| Corrigé | 10 | 14,120 | 16,10 | 44,057 / 90,448 / 118,594 | 287 / 680 | 254,319 |
+| Avant | 25 | 36,700 | 8,72 | 46,769 / 190,037 / 309,729 | 450 / 932 | 1267,432 |
+| Corrigé | 25 | 30,982 | 10,63 | 37,085 / 140,566 / 192,876 | 431 / 994 | 1123,890 |
+| Avant | 50 | 98,635 | 6,31 | 16,454 / 374,884 / 1312,971 | 561 / 1885 | 6434,419 |
+| Corrigé | 50 | 78,142 | 9,71 | 14,497 / 278,707 / 374,636 | 585 / 2257 | 741,737 |
+
+Le débit de blocs est amélioré dans les passages 10/25/50, sans réduction du
+nombre de modifications confirmées. Les 20 TPS ne sont **toujours pas tenus**
+à ces effectifs. À 50 bots, davantage de ticks sont effectivement simulés en
+moins de temps ; le nombre absolu de ticks >50 ms ne baisse pas (585 contre
+561), même si leur proportion et les queues MSPT diminuent. Le maximum à
+10 bots est légèrement plus élevé après correction : aucune garantie universelle
+sur tous les maxima n'est déduite de ces échantillons.
+
+| Bots | fsync avant / après, trois phases actives | Temps fsync avant / après s | CPU processus avant / après % | Latence action moyenne avant / après ms |
+|---:|---:|---:|---:|---:|
+| 1 | 0 / 0 | 0 / 0 | 9,7 / 9,7 | 13,37 / 13,45 |
+| 10 | 854 / 732 | 20,119 / 17,721 | 32,7 / 35,0 | 59,09 / 55,12 |
+| 25 | 1518 / 772 | 31,844 / 17,825 | 44,7 / 47,1 | 143,55 / 122,60 |
+| 50 | 5488 / 812 | 100,286 / 17,323 | 48,5 / 69,7 | 432,27 / 331,41 |
+
+Le CPU relatif peut monter après réduction des attentes : le processus travaille
+davantage par seconde et simule plus de ticks. Ce n'est pas une augmentation
+artificielle de la fréquence du scheduler. Les flushs de chunks restent coûteux
+et inchangés. À 50 bots, les latences maximales client passent de 6712,32 à
+1219,56 ms dans cette campagne ; le client atteint environ 83 % d'un cœur après
+correction, ce qui limite encore la lecture de ce résultat.
+
+**Limite de comparaison des items :** les blocs sont à quantité strictement
+égale, mais l'entrelacement entre actions, physique et TTL produit un nombre
+différent de ramassages. Les premiers observateurs totalisent 2 744 événements
+de ramassage avant et 2 420 après à 50 bots. Les 5 488 fsync avant correspondent
+à deux appels par ramassage ; après, 812 appels sont répartis sur 2 420
+ramassages. Une partie du temps global dépend aussi de cette différence de
+simulation. L'ensemble du gain de débit ne peut donc pas être attribué au seul
+regroupement, et cette campagne ne remplace pas un contrôle ciblé à nombre de
+ramassages identique.
+
+### Profil CPU complémentaire et attribution des coûts
+
+Une passe séparée de 50 bots × 100 cycles utilise le lot 2 instrumenté `-pg -g
+-fno-omit-frame-pointer`, avec zlib statique pour rendre ses symboles visibles.
+Elle confirme 5000 poses et 5000 casses. Sa durée active de 109,335 s **n'entre
+pas dans les comparaisons normales** : les compteurs gprof coûtent du CPU et
+modifient fortement le profil d'exécution.
+
+| Fonction | Part du temps propre échantillonné attribué par gprof |
+|---|---:|
+| mc_paletted_container_get_block | 14,54 % |
+| cmp_nbt_tag_ptr_name | 11,51 % |
+| mc_chunk_get_block | 9,62 % |
+| handle_client_write | 5,72 % |
+| mc_chunk_destroy | 5,14 % |
+| mc_be_store_remove | 4,27 % |
+| mc_paletted_container_destroy | 3,04 % |
+| broadcast_item_entity_teleport | 2,53 % |
+| send_player_equipment | 2,17 % |
+| proto_play_sync_remote_player | 2,03 % |
+| deflate_slow | 2,03 % |
+
+Ces parts portent sur les **13,82 s de temps propre attribuées**, pas sur tout
+le CPU du processus, ni uniquement sur la période active. Le profil inclut
+préparation, repos et arrêt ; bibliothèques dynamiques, code inliné, mcount et
+limites de collecte multithread empêchent une attribution exhaustive et des
+comptages d'appels exacts. Les proportions ne doivent pas être converties en
+pourcentage du temps mural du serveur.
+Les destructions de chunks et de conteneurs incluent notamment le teardown ;
+leurs échantillons ne sont pas présentés comme un coût de la seule charge active.
+
+La lecture du code relie les getters chauds à build_section_block_states dans
+Anvil : reconstruction de 4096 valeurs pour chaque section lors d'une sauvegarde,
+y compris les sections uniformes. Les placements/destructions appellent
+mc_world_flush_block et reconstruisent ainsi fréquemment le NBT. Le tri des tags
+et la compression complètent ce chemin. Cette seconde source de CPU est donc
+étayée, sans être optimisée dans ce lot. Les getters servent aussi à d'autres
+lectures ; leur coût total ne peut pas être imputé exclusivement à Anvil.
+
+Les fonctions mc_stairs_is_state, mc_stairs_placement et mc_block_neighbor_state
+n'ont aucun temps propre échantillonné attribué dans cette passe de pierre.
+Cela signifie un coût non distingué à cette résolution et dans ce scénario,
+pas une preuve de coût nul ni une borne sur les chargements denses en escaliers.
+
+Une charge supplémentaire réellement composée d'escaliers (item oak_stairs 442)
+compare ac6b85a1 et le lot 2, trois répétitions à 10 bots × 100 cycles, sans
+correction de sauvegarde. Chaque passe confirme 1000 poses et 1000 destructions.
+Durées médianes : 14,879 / 14,793 s ; TPS agrégés : 14,56 / 14,11 ; P95/P99 :
+111,400/162,132 et 106,959/174,750 ms. Les temps fsync des trois passes sont
+21,023 et 20,351 s. Ces différences ne distinguent pas un surcoût systématique
+du calcul d'escalier du bruit d'E/S et de l'entrelacement des ramassages. La
+référence ac6b85a1 conserve son orientation erronée : cette charge compare le
+travail exécuté, pas la conformité de ses états.
+
+Le chemin des blocs ordinaires quitte rapidement le dispatcher de voisinage ;
+le recalcul d'angles ne s'applique qu'aux escaliers concernés et à quatre voisins,
+sans propagation récursive. Les intégrations de chunks utilisent un filtrage
+de palette. Des réexamens de chunks voisins peuvent se répéter en monde dense ;
+ce pire cas n'est pas validé par ces mondes plats et reste à mesurer. Aucun
+calcul de voisinage inutile dominant n'est établi dans les scénarios présents.
+
+### Contrôle ciblé : exactement 100 ramassages avant et après
+
+Pour isoler la correction de la variation du nombre d'items de la charge de
+blocs, test_pickup_save.py prépare 100 objets unitaires à la même position,
+orientés vers le sol, et attend les chunks. Deux piles sont réellement vidées,
+la fin des sauvegardes de préparation est confirmée par une lecture QA, et
+aucun objet ne doit encore avoir été ramassé au début de la période mesurée.
+Les deux clients observent ensuite **100 objets récupérés**. Une seconde lecture
+QA borne la fin de la passe et de son commit disque, avant toute déconnexion.
+Inventaire total 100 à la reconnexion, puis après arrêt/redémarrage, sur chaque
+version. Trois répétitions, ordre alterné, deux observateurs maintenus connectés.
+
+| Version | Ramassages confirmés par passe | fsync par passe | Durée active médiane s | Temps fsync médian s | Plus long tick des trois passes ms |
+|---|---:|---:|---:|---:|---:|
+| Lot 2 avant correction | 100 | 200 | 5,436 | 3,368 | 4006,740 |
+| Corrigé | 100 | 2 | 1,966 | 0,036 | 45,407 |
+
+Les trois temps corrigés sont 1,964 / 1,991 / 1,966 s, contre
+5,433 / 5,941 / 5,436 s avant. Le délai normal de ramassage est inclus dans ces
+durées ; les écritures de préparation, de logout et de restart en sont exclues.
+Les trois anciens ticks de ramassage dépassent 50 ms ; aucun des nouveaux ne
+le dépasse. Les six passes ont zéro erreur fsync. Cette réduction ne provient
+donc pas d'une diminution du nombre d'objets récupérés. Ce cas groupé ne promet
+pas le même gain pour des ramassages isolés ni pour toute la simulation.
+
+Le serveur officiel 26.1.1 passe aussi le scénario à 100 objets et retrouve
+l'inventaire total après redémarrage. La somme des quantités TakeItemEntity est
+comparée, car Vanilla peut fusionner les entités items. ASan+UBSan passe le même
+cas groupé sur le binaire corrigé. Le scénario initial à deux objets reste
+également passant sur GoatCore et Vanilla, y compris reconnexion et restart.
+
+### Validation fonctionnelle, sanitizers et preuves
+
+`GOATCORE_SOURCE_EXPORT=1 make -B precommit-check` a réussi, puis a été rejoué
+sur les sources finales : tous les tests C, génération, framing, réseau à
+1/2/4 workers, login et smoke distant passent. Le binaire reconstruit conserve
+exactement son SHA-256. Les 12 tests Python du stress et les 4 nouveaux tests
+de mesure continue passent. Ces derniers vérifient notamment le tick lent qui
+traverse la fin d'une phase, un tick recouvrant toute une phase, l'absence de
+plafonnement à 1000 ms et la détection d'une trace incomplète.
+
+Le test PVP étendu utilise un vrai monde et le player store, avec interception
+de fsync limitée au binaire de test. Trois absorptions produisent trois paquets
+d'inventaire et zéro écriture avant la barrière, puis exactement deux fsync et
+un fichier relu contenant les trois objets. Il vérifie aussi le chemin immédiat,
+une fermeture de socket, le refus Spectator, l'échec de fsync conservant le
+fichier précédent et le flag, puis une nouvelle tentative qui persiste le bon
+inventaire. Aucune interception ne fait partie du binaire serveur normal.
+
+Le binaire normal corrigé passe la matrice complète des escaliers et voisins
+contre une nouvelle exécution du JAR officiel : **192 observations identiques**
+et **8 états identiques après redémarrage**, également identiques à la fixture
+versionnée du lot 2. Deux observateurs, collision de placement, faces/moitiés,
+angles, source d'eau, coordonnées négatives et frontières restent couverts.
+La suite historique des 18 placements passe aussi, avec les quatre états et
+l'inventaire relus après restart : blocs pleins, bûches, dalles/fusion, refus,
+collisions partielles et BlockEvent shulker. Aucune logique de ces familles
+n'a été optimisée pour obtenir les chiffres.
+
+ASan+UBSan, compilation distante O1/g, `-fno-omit-frame-pointer -fno-pie`, lien
+`-no-pie`, `detect_leaks=1:halt_on_error=1`, `UBSAN_OPTIONS=halt_on_error=1` :
+test_pvp, test_stairs, test_world_consistency, test_anvil_roundtrip et
+test_player_nbt réussis. Les trois suites réseau pickup/escaliers/placements,
+chacune avec arrêt et relecture, réussissent aussi, ainsi que le cas de
+100 ramassages. Aucun diagnostic sanitizer relevé. Les logs d'échec disque
+`user=PickupBatch` et de fichier Anvil `world_corrupt` sont des injections
+volontaires validées par les assertions, pas des échecs de ces suites.
+
+TSan : nouvelle sonde minimale non-PIE échouant avant les tests avec
+`unexpected memory mapping`, code **66**. Aucune validation d'absence de races.
+La sonde fsync a été vérifiée sur un appel valide et sur un appel libc donnant
+EBADF, avec conservation du code de retour et d'errno. Un premier contrôle
+`os.fsync(-1)` était rejeté par Python avant libc ; il a été corrigé via ctypes.
+Les prototypes du profiler avaient aussi nécessité l'ajout de stdio.h et du
+callback de log du Bot avant les campagnes finales. Ces erreurs de harnais sont
+distinctes des résultats serveurs, et leurs essais ne sont pas comptés comme
+des mesures validées.
+
+Empreintes des binaires distants conservés :
+
+- ac6b85a1 + trace commune : `2d23f30521fe8aee9bd49fe63d0a1cd9c66ddb6c997f4323d0d405f19ab03091`.
+- 477c2b6b + trace commune : `8ce4a8944e929a69c2ad5f13615f0d197ea4697a16b16cf223f6ccc36ac5d344`.
+- **Final corrigé normal testé** : `2b78862df41da8e23cc0581cf40f8bdb9b4dd14be49c9740ab89bae60e315c7a`.
+- ASan+UBSan : `c8255cd4622742a0ecf4708a2c22ad27eb26c8ff6a6f9f4291fd22ef1fc6041b`.
+- Profil gprof/zlib statique, diagnostic seulement : `ec5e282625aff344e6dc83ad3960aab20b67b3e4ec20f4a5ae1f2513f28f6b88`.
+
+Résultats bruts dans tests/stress/results de la copie distante KTpn22, récupérés
+dans `tests/stress/results/tick-diagnostic/` local, ignorés par Git :
+profile-matrix, profile-correction, profile-stairs, profile-cpu, fixed-pickup-*,
+stairs-corrected, stairs-vanilla-technical, placement-corrected et asan-*-technical.
+Les CSV de tous les ticks et fsync, JSON des ressources/actions, snapshots,
+journaux serveur/bots, manifeste de monde, gmon.out, gprof.txt, logs de build,
+precommit et sanitizers permettent de vérifier les tableaux. analyze.py et les
+JSON d'agrégation locaux conservent le calcul des regroupements ; les rapports
+par passe restent disponibles sans sélection d'un meilleur essai.
+
+### Conclusions d'attribution et travail restant
+
+| Question | Conclusion étayée / limite |
+|---|---|
+| Ralentissements antérieurs au lot 2 ? | Oui, reproduits sur ac6b85a1, avec pauses multi-secondes dans les mêmes sauvegardes de ramassage. |
+| Coût mesurable propre aux escaliers ? | Pas de régression systématique distinguée dans les charges pierre/escaliers à 10 bots ; couverture insuffisante pour le pire cas dense. |
+| Voisinage calculé inutilement ? | Pas de propagation récursive ou de coût dominant observé ; réexamens de chunks denses encore à profiler. |
+| CPU, verrous, allocations ou IO ? | IO synchrones dominantes dans les longues pauses ; reconstruction/sérialisation Anvil et diffusion ont un coût CPU secondaire confirmé. Les verrous mesurés ne dominent pas. Pas d'attribution exhaustive des allocations. |
+| 25 moins bon que 50 sur certains indicateurs ? | Médianes et anciennes fenêtres trompeuses face aux rafales/queues ; le débit continu à 50 est inférieur à celui à 25. |
+| Ticks proches/supérieurs à une seconde ? | Accumulation de nombreux fsync dans une seule passe ; d'autres ralentissements de flush restent possibles après correction. |
+| Influence des autres processus ? | Client Python et infrastructure partagée influencent les résultats ; pas de manque CPU/RAM dominant visible, aucune maîtrise complète de l'hôte physique. |
+| Joueurs inactifs également affectés ? | Repos frais beaucoup moins coûteux ; items restants ajoutent du travail, mais les fortes pauses se concentrent sur modifications et ramassages. Repos courts seulement. |
+
+La correction n'est ni une validation globale de 20 TPS ni une suppression de
+tous les blocages. Priorités techniques suivantes : profilage ciblé de la
+reconstruction Anvil (notamment sections uniformes), coût et cadence des flushs
+en préservant le contrat de sauvegarde, puis séparation du coût client et du
+fanout réseau. Aucun de ces travaux supplémentaires, aucune porte/trappe,
+redstone, simulation parallèle ou autre phase de gameplay n'est commencé ici.
+La crash-consistance globale, les longs séjours, les clients Java réels et un
+TSan fonctionnel restent hors de la validation apportée par ce lot.
+
+### État final des services et fichiers du lot
+
+Contrôle final le 29 octobre à 21:06 UTC : **25565 actif, PID 140 ; 25587 inactif,
+sans PID**, comme au début de cette intervention. Aucun démarrage, arrêt,
+redémarrage, changement d'authentification/permissions ou remplacement de binaire
+principal n'a été effectué. Les SHA-256 du binaire partagé, des deux configs,
+des deux setups CPU et des unités systemd sont identiques avant/après. Les
+mondes principaux n'ont été ni utilisés par les tests, ni manipulés. Tous les
+processus de tests temporaires sont arrêtés ; 25589/25590 et les ports éphémères
+des campagnes sont libérés. Le binaire final reste dans la copie isolée.
+
+Fichiers modifiés : `Makefile`, `include/mc_net.h`, `include/mc_protocol.h`,
+`src/net/server.c`, `src/protocol/handlers/play.c`, `tests/test_pvp.c`,
+`tests/stress/profile_tick.py`, `tests/stress/profile_fsync.c`,
+`tests/stress/test_tick_profile.py`, `tests/stress/test_pickup_save.py`,
+`tests/stress/run_block_checks.py`, `tests/stress/README.md` et ce document.
+Les scripts Python sont invoqués avec python3 ; aucun changement de permission
+de script n'est requis. Aucun fichier personnel ni résultat brut n'entre dans
+le commit. Le contrat de persistance de fin de passe est explicitement exposé
+ci-dessus pour la revue avant toute éventuelle promotion ultérieure.

@@ -123,6 +123,7 @@ struct mc_conn {
     float last_hurt_amount;
     int32_t teleport_id;
     mc_player_data_t *player;
+    bool pickup_save_pending; /* tick-owned; committed at end of the item pass */
     int64_t keepalive_id;
     int64_t last_keepalive_sent_ms;
     bool awaiting_keepalive;

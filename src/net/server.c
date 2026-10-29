@@ -18,6 +18,7 @@
 #include "generated_registries.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <strings.h>
 #include <errno.h>
@@ -1400,7 +1401,7 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
                              (long long)now_ms(), c->username[0] ? c->username : "(unknown)", c->entity_id, item->entity_id,
                              item_name ? item_name : "(empty)", item_id, before_count, dist_sq, item->pickup_delay_ticks);
                 }
-                int pickup_rc = proto_play_try_pickup_ground_slot(c, &item->slot);
+                int pickup_rc = proto_play_pickup_ground_slot_deferred(c, &item->slot);
                 if (pickup_rc < 0) {
                     conn_close(c);
                     continue;
@@ -1440,6 +1441,13 @@ static void item_entities_tick(mc_server_t *s, int64_t now) {
         if (perf) pickup_us += mc_now_us() - phase_start_us;
         idx++;
     }
+    /* Keep inventory and entity packet ordering inside the loop. Only repeated
+     * disk commits are coalesced, bounded by this authoritative item pass. */
+    int64_t save_start_us = perf ? mc_now_us() : 0;
+    for (mc_conn_t *c = s->conns; c; c = c->next) {
+        if (proto_play_flush_pickup_save(c) != 0) conn_close(c);
+    }
+    if (perf) pickup_us += mc_now_us() - save_start_us;
     if (perf && inspected > 0) {
         int64_t elapsed_us = mc_now_us() - tick_start_us;
         if (elapsed_us >= mc_perf_slow_us()) {
@@ -1847,6 +1855,16 @@ static bool server_container_is_open_unlocked(void *ctx, mc_container_kind_t kin
 
 static void *tick_thread_main(void *arg) {
     mc_server_t *s = (mc_server_t *)arg;
+    /* Opt-in continuous diagnostics. Buffered output and clocks are absent
+     * from normal execution; this never changes the scheduler or task order. */
+    const char *trace_path = getenv("MC_PERF_TRACE_PATH");
+    FILE *trace = mc_perf_enabled() && trace_path && *trace_path ? fopen(trace_path, "w") : NULL;
+    if (trace_path && *trace_path && !trace) log_error("cannot open tick trace (requires MC_PERF=1)");
+    int64_t previous_end_cpu_us = trace ? tick_thread_cpu_us() : 0;
+    if (trace) {
+        setvbuf(trace, NULL, _IOFBF, 65536);
+        fprintf(trace, "idx,start_us,end_us,cpu_us,interval_cpu_us,fast_us,tasks_us,world_us,proto_us,items_us,remote_us,updates_us,evict_us,handlers_us,flush_us,world_save_us,integrate_us,items_lock_us,furnace_lock_us,task_wait_max_us,ready,items,task_depth,task_peak,push_wait_us,drain_wait_us,task_rejected\n");
+    }
     const int64_t tick_us = 50000;
     int64_t next_tick_us = mc_now_us();
     uint64_t tick_index = 0;
@@ -2087,6 +2105,23 @@ static void *tick_thread_main(void *arg) {
         }
 
         int64_t tick_end_us = mc_now_us();
+        if (trace) {
+            int64_t cpu_end_us = tick_thread_cpu_us();
+            mc_task_queue_stats_t qs = {0};
+            mc_task_queue_get_stats(&s->task_queue, &qs);
+            fprintf(trace, "%llu,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%zu,%zu,%zu,%zu,%llu,%llu,%llu\n",
+                    (unsigned long long)tick_index, (long long)tick_start_us, (long long)tick_end_us,
+                    (long long)(cpu_end_us - tick_start_cpu_us), (long long)(cpu_end_us - previous_end_cpu_us),
+                    (long long)s->fast_pass_us, (long long)task_us, (long long)world_tick_us,
+                    (long long)proto_tick_us, (long long)item_entities_us, (long long)remote_sync_us,
+                    (long long)update_broadcast_us, (long long)evict_us, (long long)s->task_handler_us,
+                    (long long)world_stats.flush_us, (long long)world_stats.save_us, (long long)world_stats.integrate_us,
+                    (long long)items_lock_wait_us, (long long)furnace_lock_wait_us, (long long)task_wait_max_us,
+                    play_ready_count, s->item_entities_len, qs.depth, qs.peak_depth,
+                    (unsigned long long)qs.push_wait_us, (unsigned long long)qs.drain_wait_us,
+                    (unsigned long long)qs.rejected);
+            previous_end_cpu_us = cpu_end_us;
+        }
         int64_t candidate_next_tick_us = next_tick_us + tick_us;
         if (tick_end_us > candidate_next_tick_us + tick_us) {
             schedule_resync = true;
@@ -2290,6 +2325,7 @@ static void *tick_thread_main(void *arg) {
         task = next;
     }
     server_process_departures(s);
+    if (trace && fclose(trace) != 0) log_error("failed to close tick trace");
     return NULL;
 }
 

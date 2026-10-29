@@ -2223,7 +2223,7 @@ static int quick_move_container_crafting_result(mc_conn_t *c, mc_container_insta
     return save_player_data(c);
 }
 
-int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot) {
+static int pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot, bool defer_save) {
     if (!c || !ground_slot) return -1;
     if (c->closing || c->state != MC_STATE_PLAY || !c->player || !c->play_ready || c->dead) return 0;
     if (c->gamemode == GAMEMODE_SPECTATOR) return 0;
@@ -2240,9 +2240,27 @@ int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot) {
                  item_id, before_count, absorbed, after_count);
     }
     if (absorbed <= 0) return absorbed;
+    if (defer_save) c->pickup_save_pending = true;
     if (sync_inventory_full(c) != 0) return -1;
-    if (save_player_data(c) != 0) return -1;
+    if (!defer_save && save_player_data(c) != 0) return -1;
     return absorbed;
+}
+
+int proto_play_try_pickup_ground_slot(mc_conn_t *c, mc_slot_t *ground_slot) {
+    return pickup_ground_slot(c, ground_slot, false);
+}
+
+int proto_play_pickup_ground_slot_deferred(mc_conn_t *c, mc_slot_t *ground_slot) {
+    return pickup_ground_slot(c, ground_slot, true);
+}
+
+int proto_play_flush_pickup_save(mc_conn_t *c) {
+    if (!c || !c->pickup_save_pending) return 0;
+    /* Also persist already accepted items if a socket closed during the pass.
+     * Retain the flag on failure so the normal departure save can retry. */
+    if (save_player_data(c) != 0) return -1;
+    c->pickup_save_pending = false;
+    return 0;
 }
 
 static void world_spawn_values(double *x, double *y, double *z, float *yaw, float *pitch) {
