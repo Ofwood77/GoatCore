@@ -14,13 +14,52 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
+import gzip
 
 ROOT=Path(__file__).resolve().parents[2]
+
+
+def region_payloads(path):
+    data=path.read_bytes()
+    assert len(data)>=8192 and len(data)%4096==0
+    payloads={}
+    for i in range(1024):
+        entry=int.from_bytes(data[i*4:i*4+4],'big')
+        if not entry:continue
+        offset,count=entry>>8,entry&255
+        assert offset>=2 and count and (offset+count)*4096<=len(data)
+        pos=offset*4096;length=int.from_bytes(data[pos:pos+4],'big');kind=data[pos+4]
+        assert 1<=length<=count*4096-4 and kind in (1,2,3), (path,i,kind)
+        raw=data[pos+5:pos+4+length]
+        if kind==1:raw=gzip.decompress(raw)
+        if kind==2:raw=zlib.decompress(raw)
+        payloads[i]=hashlib.sha256(raw).hexdigest()
+    return payloads
+
+
+def rewrite_regions(runtime, probe, output):
+    rows=[]
+    region_dir=runtime/'world/dimensions/minecraft/overworld/region'
+    if not region_dir.is_dir():region_dir=runtime/'world/region'
+    for path in sorted(region_dir.glob('*.mca')):
+        before=region_payloads(path)
+        if not before:continue
+        slot=next(iter(before))
+        done=subprocess.run([str(probe.resolve()),'rewrite-region',str(path),str(slot%32),str(slot//32)],
+                            capture_output=True,text=True,timeout=120,check=True)
+        after=region_payloads(path)
+        assert before==after, path
+        rows.append(dict(region=path.name,slot=slot,chunks=len(before),payload_sha256=after,
+                         writer=json.loads(done.stdout)))
+    assert rows, 'no native Vanilla region rewritten'
+    output.write_text(json.dumps(rows,indent=2))
 
 
 def run(args):
     if args.port in (25565,25587): raise ValueError("main service ports are forbidden")
     if args.fsync_probe and not args.fsync_probe.is_file():raise ValueError("fsync probe library not found")
+    if args.anvil_rewriter and args.kind!='vanilla':raise ValueError("native region rewrite requires a disposable Vanilla world")
     (ROOT/"tests/stress/results").mkdir(parents=True,exist_ok=True)
     result=args.result_dir.resolve() if args.result_dir else Path(tempfile.mkdtemp(prefix="blocks-",dir=ROOT/"tests/stress/results"))
     if args.result_dir:result.mkdir(parents=True,exist_ok=False)
@@ -41,6 +80,8 @@ def run(args):
                  MC_SETUP_FILE=str(ROOT/"tests/stress/network/one.conf"),MC_QA_MODE="1",MC_ADMIN_USERNAME="Ofwood_")
         command=[str(args.server_binary.resolve())]
     for phase in ["edit", "verify"] + [f"verify-{i}" for i in range(2, args.verify_restarts + 1)]:
+        if phase!='edit' and args.anvil_rewriter:
+            rewrite_regions(runtime,args.anvil_rewriter,result/f'anvil-rewrite-{phase}.json')
         phase_env=env.copy()
         if args.fsync_probe and args.kind=="goatcore":
             phase_env.update(MC_PERF="1",MC_PERF_TRACE_PATH=str(result/f"ticks-{phase}.csv"),
@@ -94,5 +135,6 @@ if __name__=="__main__":
     parser.add_argument("--result-dir",type=Path)
     parser.add_argument("--pickup-count",type=int,default=2,choices=(2,100))
     parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
+    parser.add_argument("--anvil-rewriter",type=Path,help="rewrite native Vanilla regions with mc_save_bench before each verification restart")
     parser.add_argument("--fsync-probe",type=Path,help="optional test-only fsync library and per-phase tick traces")
     run(parser.parse_args())

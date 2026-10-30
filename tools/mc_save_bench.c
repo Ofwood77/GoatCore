@@ -39,7 +39,38 @@ int main(int argc, char **argv) {
     }
     const char *mode = argv[1], *path = argv[2];
     int ops = atoi(argv[3]), n = atoi(argv[4]);
+    if (!strcmp(mode, "rewrite-region")) {
+        assert(ops>=0 && ops<32 && n>=0 && n<32);
+        uint8_t *raw=NULL; size_t size=0;
+        assert(mc_anvil_read_chunk_nbt(path,ops,n,&raw,&size)==0);
+        int rc=mc_anvil_write_chunk_nbt(path,ops,n,raw,size);
+        free(raw);
+        printf("{\"result\":%d,\"nbt_bytes\":%zu}\n",rc,size);
+        return rc ? 1 : 0;
+    }
     assert(ops > 0 && n > 0 && n <= 256);
+    if (!strcmp(mode, "inspect-region")) {
+        mc_block_entity_store_t store;
+        mc_be_store_init(&store);
+        char region_path[2048];
+        snprintf(region_path, sizeof(region_path), "%s/r.-1.-1.mca", path);
+        printf("{\"chunks\":[");
+        for (int i = 0; i < n; i++) {
+            mc_chunk_t chunk;
+            mc_arena_t arena;
+            assert(mc_chunk_init(&chunk, -32 + i % 16, -32 + i / 16, 0) == 0);
+            assert(mc_arena_init(&arena, 2u * 1024u * 1024u) == 0);
+            int rc = mc_anvil_load_chunk(region_path, chunk.cx, chunk.cz, &chunk, &store, &arena);
+            printf("%s{\"read_rc\":%d,\"state\":%u,\"sentinel\":%u}", i ? "," : "", rc,
+                   rc ? 0 : mc_chunk_get_block(&chunk, 0, 64, 15),
+                   rc ? 0 : mc_chunk_get_block(&chunk, 1, 64, 15));
+            mc_arena_destroy(&arena);
+            mc_chunk_destroy(&chunk);
+        }
+        puts("]}");
+        mc_be_store_destroy(&store);
+        return 0;
+    }
     if (!strcmp(mode, "inspect") || !strcmp(mode, "recover")) {
         mc_block_entity_store_t store;
         mc_be_store_init(&store);
@@ -63,7 +94,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     int verify = !strncmp(mode, "verify", 6), update = !strncmp(mode, "update", 6);
-    int region = !strncmp(mode, "region", 6);
+    int region = strstr(mode, "region") != NULL;
     if (!verify && !update) {
         assert(mkdir(path, 0755) == 0);
     }

@@ -1919,3 +1919,413 @@ Fichiers du commit : `.gitignore`, `Makefile`, `include/mc_util.h`,
 `tools/check_repo_hygiene.sh` et ce document. Les Python sont invoqués par
 python3 ; aucun changement de permission n'est nécessaire. Un seul commit
 local, sans push : `Profile and optimize Anvil persistence bottlenecks`.
+
+## Phase 2 — sauvegardes atomiques et interruptions (30 octobre 2026)
+
+### État initial et périmètre de la correction
+
+HEAD initial : `8fd89fccc69a3ab0fde783d69c43ca0d6d068e89`, état suivi propre.
+`.vscode/`, `src/main.py` et `start-aider.sh` restent personnels, non suivis.
+L'exception de maintenance autorise explicitement les essais locaux de ce lot ;
+les règles permanentes et les trois skills ne sont pas modifiés. Aucun accès
+SSH, démarrage, reconfiguration ou déploiement sur 10.0.4.66 n'est tenté.
+
+Le risque avait deux chemins :
+
+- Le store **actif** `chunk_store.c` ouvrait `chunks/c_CX_CZ.bin` en `wb`, donc détruisait l'ancien flux zlib dès l'ouverture, avant toute nouvelle écriture. Il contient du NBT de chunk, pas un fichier de région.
+- L'API autonome `anvil.c` ouvrait `.mca` en `r+b`, réécrivait en place les secteurs du chunk puis l'en-tête. Elle réessayait en `w+b` après n'importe quelle erreur d'ouverture. Ses fflush/fclose finaux n'étaient pas vérifiés. Elle n'est toujours pas le store utilisé par world.c.
+
+La correction protège **les deux**, sans migrer les mondes ni modifier NBT,
+DataVersion, registres, codec réseau, placement, voisins ou concurrence de la
+simulation. Le raccourci des sections uniformes du lot précédent est conservé.
+
+La reproduction locale avant correction utilise le backend du commit 8fd89fcc,
+une région `r.-1.-1.mca` de trois chunks aux coordonnées distinctes et le traceur
+mc_trace_io. Le premier write est limité à 32 octets, puis le processus est tué
+avant toute reprise par libc. Avant : les trois chunks se lisent. Après : le
+chunk modifié renvoie -1, les deux autres restent lisibles. L'image initiale,
+l'image interrompue, les états et les syscalls sont conservés sous
+`tests/stress/results/atomic-persistence/stage/tests/stress/results/baseline`.
+Le binaire de référence serveur est exactement celui du lot précédent, pas une
+réimplémentation approchée du défaut.
+
+### Protocole d'écriture et acquittement
+
+`src/util/atomic_file.c` fournit la séquence partagée :
+
+1. Ouvrir et conserver un FD sur le répertoire parent. Vérifier le type du fichier existant sans suivre un lien symbolique final.
+2. Créer un temporaire unique `NOM.tmp.PID.SEQUENCE` dans ce répertoire avec openat `O_CREAT|O_EXCL|O_CLOEXEC`. Les collisions ne sont jamais tronquées ou supprimées. Le nom et le FD appartiennent uniquement à cette transaction.
+3. Préparer intégralement le nouveau contenu. write/pwrite/pread bouclent sur les transferts courts et EINTR ; un transfert nul prématuré devient EIO. Les modes Unix ordinaires et uid/gid existants sont conservés si l'opération est permise ; un échec préserve l'ancien fichier. Les nouveaux fichiers sont créés en 0600.
+4. Effectuer fsync sur le temporaire, puis vérifier sa fermeture.
+5. Effectuer renameat entre noms relatifs au **même FD de répertoire**, ce qui exclut un déplacement inter-filesystems et publie une seule image complète.
+6. Effectuer fsync sur le répertoire, puis vérifier sa fermeture. Le succès 0 n'est retourné qu'après toutes ces étapes.
+
+Le lien entre fsync du fichier et persistance de l'entrée de répertoire suit
+[fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html). Le remplacement
+atomique et la stabilité des anciens FD ouverts suivent
+[rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html). close n'est pas
+réessayé après EINTR sur Linux, pour ne pas fermer un FD déjà réutilisé par un
+autre thread ; voir [close(2)](https://man7.org/linux/man-pages/man2/close.2.html).
+
+| Résultat | Signification et traitement |
+|---|---|
+| 0 | fsync du fichier, fermeture, remplacement et fsync/fermeture du répertoire terminés. Le monde peut retirer le marquage sale. |
+| -1 | Échec avant publication dans le contrat des systèmes de fichiers locaux utilisés. Le fichier cible n'est ni tronqué ni restauré. Le temporaire propre à l'opération est supprimé si possible ; un échec de nettoyage est journalisé. |
+| `MC_SAVE_DURABILITY_UNCERTAIN` (-2) | Remplacement visible, mais confirmation finale en échec. Le log nomme explicitement l'incertitude ; aucun rollback et aucune suppression du nouveau fichier. Le monde reste sale. |
+
+Les erreurs EIO, ENOSPC et EDQUOT ne sont pas transformées en succès, y compris
+lors d'un fsync ou close. EINTR est réessayé pour les opérations où cela est sûr.
+L'errno initial est conservé à travers les nettoyages. Une erreur secondaire de
+nettoyage ne donne jamais un acquittement positif. Après un échec ou une
+incertitude, le prochain flush repart de **l'état courant du tick**, pas d'un
+ancien tampon gardé en attente.
+
+La création des répertoires du monde synchronise leur hiérarchie avant le
+démarrage des workers. Le store normal utilise alors ces répertoires préparés.
+Les utilisateurs directs du store doivent préparer `world/chunks` avec
+mc_persistence_mkdirs et réessayer cette préparation après un échec de création
+ou de synchronisation. Les répertoires de stockage fournis par des acteurs
+externes doivent eux-mêmes être durablement établis. Ce contrat ne couvre pas
+la destruction ou le déplacement concurrent du répertoire par un autre outil.
+
+### Régions, écrivains, lecteurs et versions
+
+L'API `.mca` prend un flock exclusif sur un **fichier `.mca.lock` persistant**
+avant de lire la région et le conserve jusqu'à la fin de la publication. Il ne
+faut jamais supprimer ce fichier de verrou pendant que des écrivains peuvent
+fonctionner. Chaque appel ouvre son propre FD de verrou : les utilisateurs du
+même processus sont également sérialisés, conformément à
+[flock(2)](https://man7.org/linux/man-pages/man2/flock.2.html).
+
+Le writer valide taille, en-tête, bornes et chevauchements de secteurs, longueurs
+et marqueurs de compression. Une erreur de lecture ou un format non pris en
+charge interrompt la sauvegarde. Seul ENOENT autorise une création de région.
+La région existante est copiée par blocs de 64 KiB dans le temporaire, puis le
+secteur du chunk et ses seules entrées offset/timestamp sont modifiés. Les
+payloads et tags NBT des **autres** chunks restent identiques octet par octet.
+L'algorithme de secteurs existant est conservé ; son erreur d'allocation ne
+peut plus être interprétée comme une autorisation d'écraser le secteur 2.
+Aucun compactage ou changement de format n'est introduit.
+
+Les lecteurs conservent soit leur ancien inode complet, soit ouvrent le nouveau
+fichier complet. Les nouvelles régions et les agrandissements de chunks passent
+par le même protocole. Deux writers de chunks distincts d'une même région ne
+peuvent plus publier chacun une copie qui oublie la modification de l'autre.
+Les tests synchronisent précisément un deuxième writer pendant la préparation
+du premier, puis vérifient les deux modifications et l'ancien FD ; deux
+processus distincts sont également exercés.
+
+La propriété mémoire reste celle du projet : tick autoritaire pour les chunks
+vivants, worker pour son chunk privé avant publication. Les sauvegardes restent
+synchrones. Il n'existe donc pas de nouvelle file de snapshots dont un ancien
+résultat pourrait arriver après un nouveau. Le test du monde vérifie qu'un
+flush échoué/incertain garde le chunk sale, puis qu'une modification de revision
+plus récente est bien sauvegardée au retry. L'API brute de région ne contient
+pas de version logique permettant de reconnaître un **snapshot périmé fourni
+volontairement par un appelant externe** : les appelants doivent posséder des
+snapshots immuables et ordonner leurs mises à jour. Le verrou est coopératif ;
+partager un monde avec un writer qui modifie les fichiers en place sans ce
+verrou reste hors contrat.
+
+### Références externes et protection à la lecture
+
+La lecture `.mcc` n'était pas implémentée. Une région contenant un marqueur
+externe 0x80 est désormais refusée **entièrement**, même si l'édition vise un
+autre chunk. Aucun `.mcc` n'est créé, écrasé, déplacé ou supprimé. Les codecs
+hors 1/2/3 et les nouveaux chunks dépassant les 255 secteurs sont aussi refusés.
+Le test conserve les images `.mca` et les octets du fichier externe lors du
+refus. Il ne prétend pas valider un import Vanilla externe complet. Une
+transaction `.mca` + `.mcc` demandera un chantier distinct.
+
+Une seconde dépendance indispensable concernait le chargeur actif : il
+régénérait un chunk après toute erreur, puis pouvait écraser un **fichier valide
+qui avait seulement subi un EIO de lecture transitoire**. Il ne génère désormais
+que pour une absence. Après une erreur de lecture/décodage, il conserve le
+fichier, détruit seulement son résultat privé incomplet, journalise l'erreur et
+laisse le slot indisponible jusqu'au redémarrage après diagnostic/réparation.
+Aucun état incomplet n'est remis au tick. Il n'y a pas de récupération ou retry
+automatique dans ce lot. La suite historique qui attendait une régénération
+après corruption a été modifiée pour exiger la conservation des quatre octets
+endommagés. Un test distinct injecte EIO sur un fichier valide, vérifie son
+intégrité après arrêt et le recharge correctement au redémarrage sans injection.
+
+### Matrice d'interruptions et d'erreurs
+
+Les wrappers de syscalls sont liés uniquement au nouveau test C ; le serveur
+n'a aucun hook d'injection. Douze interruptions C (six par format) et six
+interruptions supplémentaires d'une **vraie instance GoatCore** exercent les
+mêmes étapes. Les fichiers interrompus sont conservés avant relecture.
+
+| Étape | .bin actif | Région .mca de trois chunks | Relecture après SIGKILL |
+|---|---|---|---|
+| A : avant création du temporaire | C + serveur | C | Ancien fichier identique, tous les anciens états conservés. |
+| B : pendant une écriture partielle du temporaire | C + serveur | C | Ancien fichier identique ; temporaire incomplet non publié. |
+| C : après écriture, avant fsync du temporaire | C + serveur | C | Ancien fichier identique ; aucune promotion au redémarrage. |
+| D : après fsync et fermeture, avant rename | C + serveur | C | Ancien fichier identique ; temporaire complet ignoré. |
+| E : après rename, avant fsync du répertoire | C + serveur | C | Nouveau fichier complet dans ces essais ; états/NBT lisibles et voisins préservés. La durabilité du nom n'est pas encore acquittée. |
+| F : après fsync du répertoire | C + serveur | C | Nouveau fichier complet relu ; les barrières du protocole ont réussi. |
+
+G comprend 80 cas déterministes de transferts courts/nuls, EINTR, EIO, ENOSPC et
+EDQUOT selon l'opération : création du temporaire, write/pwrite/pread, fsync
+fichier/répertoire, rename, close fichier/répertoire, fstat et flock. S'y
+ajoutent deux échecs calloc, dont le bitmap d'allocation de secteurs, et cinq
+régions aux offsets/longueurs/chevauchements/codec ou marqueur externe invalides.
+Les erreurs pré-publication conservent l'image précédente. Les erreurs après
+publication retournent -2 et conservent le nouveau contenu cohérent. Les
+écritures courtes et EINTR récupérables terminent normalement ; close(EINTR)
+échoue avec le FD consommé. Les nombres de temporaires sont inchangés après
+les erreurs ordinaires. Les opérations ne suppriment jamais un temporaire créé
+par un autre écrivain.
+
+Les tests couvrent aussi : région neuve, un ou plusieurs chunks, modifications
+répétées, agrandissement de payload, champs NBT opaques, anciennes lectures par
+FD, modes Unix, coordonnées négatives, frontière entre régions -1 et 0,
+concurrence par threads/processus, dirty/revision au retry et échec de lecture.
+Les temporaires laissés par SIGKILL sont délibérément ignorés et conservés,
+jamais promus ni effacés automatiquement ; un nettoyage hors ligne devra
+s'assurer qu'aucun writer ne les utilise.
+
+La preuve porte sur les **interruptions de processus et erreurs injectées**.
+SIGKILL conserve le cache noyau ; il ne simule pas une coupure électrique. La
+durabilité après retour 0 repose sur les garanties du système de fichiers local
+et sur un matériel qui respecte les commandes de synchronisation. Une panne
+du contrôleur, un cache RAID non protégé ou qui ment, la perte du filesystem ou
+la corruption physique ne sont pas exclus par ces tests. Aucun arrêt brutal du
+PC n'est effectué. Les ACL/xattrs et métadonnées spéciales hors modes Unix et
+uid/gid ne font pas partie de la validation apportée.
+
+L'acquittement concerne un fichier. Les fichiers joueurs gardent leur protocole
+existant ; aucune transaction globale joueur/inventaire/monde/objets au sol
+n'est introduite et les items au sol restent non persistés. Les garanties du
+présent lot ne doivent pas être étendues à ces ensembles multi-fichiers.
+
+### Mesures avant/après sur le binaire final
+
+Matériel **local uniquement** : Ryzen 7 7840HS, NVMe du volume du dépôt,
+Linux 7.0, C11/O2, même configuration réseau 1 worker/chunks 2 workers,
+simulation_workers inchangé/désactivé. Référence 8fd89fcc et candidat sont
+alternés sur trois répétitions. Les mondes initiaux et le travail sont fixes ;
+préparation, échauffement et phases actives sont séparés. Les temps ptrace sont
+exclus des performances ; ils servent seulement aux comptes système et crashes.
+Aucune comparaison directe au Xeon/HDD RAID du datacenter n'est faite.
+
+Backend, durées actives médianes de trois passes, ms :
+
+| Scénario | Référence | Candidat | Travail identique |
+|---|---:|---:|---|
+| B : un chunk | 40,951 | 267,553 | 200 sauvegardes, 70 200 octets compressés |
+| C : 16 chunks, même région logique | 39,178 | 260,173 | 200 sauvegardes, 70 639 octets |
+| D : 16 régions logiques | 39,637 | 270,086 | 200 sauvegardes, 70 437 octets |
+| API .mca : 1 chunk présent | 15,425 | 135,802 | 100 modifications du même chunk |
+| API .mca : 16 chunks présents | 14,955 | 143,204 | 100 modifications du même chunk |
+| API .mca : 256 chunks présents | 14,513 | 223,305 | 100 modifications du même chunk |
+
+A : aucun chunk sauvegardé et aucune écriture pendant le repos mesuré après
+chargement ; les synchronisations de préparation sont hors de cette période.
+Les `.bin` sont identiques octet par octet entre les deux versions. Les états
+de tous les blocs des scénarios B/C/D et des régions sont relus et comparés.
+
+B/C/D : toujours 200 write, mais désormais **400 fsync, 200 renameat et 400
+openat/close**, contre zéro fsync/rename et 200 ouvertures/fermetures avant.
+Chaque sauvegarde acquittée ajoute le fsync du fichier et celui du répertoire ;
+les synchronisations d'initialisation des répertoires sont hors charge.
+
+Pour 100 modifications `.mca`, lecture/écriture au noyau :
+
+| Entrées présentes | Lecture avant | Lecture après | Écriture avant | Écriture après |
+|---:|---:|---:|---:|---:|
+| 1 | 819 200 | 2 048 500 | 1 228 800 | 2 457 600 |
+| 16 | 819 200 | 8 200 000 | 1 228 800 | 8 601 600 |
+| 256 | 819 200 | 106 624 000 | 1 228 800 | 106 905 600 |
+
+Le candidat effectue 200 fsync et 100 renameat par passe `.mca`. Les lectures
+incluent validation d'en-tête/enregistrements et copie ; les écritures incluent
+copie complète, payload et nouvel en-tête. Les volumes sont les octets acceptés
+par read/pread/write/pwrite, pas les écritures physiques amplifiées par ext4 ou
+le contrôleur. La copie complète est un **nouveau coût de sécurité**, pas une
+optimisation ; elle croît avec la taille du fichier, y compris ses secteurs
+inutilisés. La mesure sur HDD RAID est indispensable avant un déploiement.
+
+Scénario B, 600 sauvegardes par version ; temps muraux P50/P95/P99, en µs :
+
+| Phase | Référence | Candidat | CPU moyen µs réf. → cand. |
+|---|---:|---:|---:|
+| Construction NBT | 54 / 62 / 72 | 54 / 69 / 79 | 54,5 → 57,7 |
+| Compression | 57 / 70 / 88 | 63 / 89 / 104 | 58,8 → 66,7 |
+| Total sauvegarde | 191 / 219 / 425 | 1 358 / 1 689 / 1 747 | 194,6 → 251,8 |
+| fsync du temporaire | absent | 602 / 760 / 816 | 35,9 candidat |
+| renameat | absent | 22 / 34 / 41 | 23,6 candidat |
+| fsync du répertoire | absent | 552 / 709 / 752 | 5,3 candidat |
+
+La construction NBT optimisée précédemment reste présente. Le maximum total
+backend est 5 989 µs avant, 1 825 après dans ces échantillons : ce résultat
+ponctuel ne signifie pas une amélioration des pauses, car les longues attentes
+varient avec le stockage. La médiane de sauvegarde augmente nettement.
+
+### Charge continue avec bots
+
+100 poses et 100 casses confirmées par bot, trois répétitions à 1/10/25/50,
+même monde copié, 5 s d'échauffement et 5 s de repos de chaque côté. Toutes les
+441 réceptions de chunks par client sont terminées avant la charge. Chaque
+version exécute **25 800 poses et 25 800 destructions** au total. Propositions,
+entrées de traitement et confirmations concordent ; zéro opération manquante,
+erreur ou déconnexion inattendue. Tous les ticks chevauchant la charge active
+sont conservés, sans sélection d'une fenêtre de 100 ticks ni clipping des
+percentiles. TPS = ticks réellement commencés / durée réelle regroupée.
+
+| Bots | Version | Durée active totale s | TPS | MSPT P50 / P95 / P99 ms | Ticks >50 ms | Maximum ms |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | Référence | 12,964 | 19,978 | 0,329 / 0,516 / 0,539 | 0 | 0,666 |
+| 1 | Candidat | 14,568 | 20,044 | 0,096 / 2,517 / 34,847 | 0 | 35,901 |
+| 10 | Référence | 24,135 | 19,971 | 2,450 / 3,250 / 3,931 | 0 | 7,115 |
+| 10 | Candidat | 27,616 | 19,989 | 3,958 / 5,321 / 6,407 | 0 | 35,229 |
+| 25 | Référence | 14,698 | 20,002 | 8,486 / 12,448 / 15,404 | 0 | 18,504 |
+| 25 | Candidat | 20,741 | 20,009 | 9,931 / 23,672 / 29,037 | 0 | 39,497 |
+| 50 | Référence | 68,165 | 19,908 | 12,626 / 34,498 / 50,570 | 14 | 99,540 |
+| 50 | Candidat | 65,565 | 18,257 | 24,193 / 69,429 / 92,838 | 203 | 133,415 |
+
+Ces MSPT portent sur les ticks planifiés. Les passes rapides sur le même thread
+restent mesurées séparément : à 50 bots, P99 du coût planifié + passes rapides
+associées **75,889 → 134,928 ms**, maximum **112,706 → 163,866 ms**. La fréquence
+légèrement supérieure à 20 dans des phases courtes n'est pas une nouvelle cible
+du scheduler. **20 TPS ne sont pas maintenus à 50 bots dans cette campagne
+locale**, et aucune stabilité distante n'est revendiquée.
+
+| Bots | Chunks sauvegardés réf. → cand. | chunk_total mural cumulé s | fsync mesurés réf. → cand. | CPU serveur % réf. → cand. | CPU client % réf. → cand. |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 433 → 437 | 0,288 → 1,913 | 0 → 874 | 1,8 → 2,0 | 1,7 → 1,6 |
+| 10 | 3 447 → 3 540 | 1,121 → 5,992 | 672 → 7 814 | 9,3 → 8,6 | 8,3 → 6,4 |
+| 25 | 7 708 → 7 877 | 2,710 → 13,245 | 564 → 16 408 | 65,5 → 53,1 | 79,9 → 57,0 |
+| 50 | 16 027 → 15 905 | 5,644 → 27,276 | 752 → 32 674 | 85,4 → 85,2 | 99,0 → 93,2 |
+
+CPU : moyenne par passe, 100 % = un cœur logique. RSS maximale à 50 bots :
+42 020 → 41 980 KiB ; pas de croissance anormale démontrée sur ces essais
+courts. Pics de file 54 → 58, sous la limite 8 192. Latences client P95 à
+50 bots par passe : 105,06/89,37/101,98 ms avant et 99,46/99,11/119,52 après.
+Volumes de chunks compressés à 50 : 6 010 256 → 5 983 400 octets. Les compteurs
+IO de processus, schedstat, wchan, pression hôte et timings individuels restent
+dans les JSON/CSV bruts.
+
+Les petites variations du nombre de sauvegardes et de ramassages résultent de
+la cadence des dirty flush et de la simulation pendant ces durées différentes.
+Les fsync joueurs restent distincts des deux nouvelles barrières par chunk.
+Le scénario est fermé par confirmations ; le client Python limite encore le
+rythme, notamment avant correction. La durée plus courte à 50 bots ne représente
+**aucun gain de capacité** : la cadence des ticks et leurs pauses se dégradent.
+La comparaison contrôlée à 200 sauvegardes et octets identiques montre le
+surcoût propre à la sécurité. Aucune garantie de durabilité n'est retirée pour
+le réduire, et aucune deuxième optimisation n'est ajoutée.
+
+### Tests fonctionnels, format natif et sanitizers
+
+`make -B precommit-check` réussit sur la copie de sources locale finale :
+**24 suites C**, démarrage isolé, réseau multi-epoll 1/2/4 workers, affinité sur
+un CPU, arrêt sous charge, login/reconnexion/UUID/refus online et tests Python.
+Le registre complet et les identifiants réseau des blocs sont régénérés et
+comparés aux rapports officiels disponibles. Les autres sources brutes
+recettes/loot/composants absentes limitent leur generated-check à la présence
+des fichiers. Le binaire reconstruit est identique par cmp au candidat des
+mesures. Aucune validation positive Mojang n'est annoncée.
+
+| Scénario | Binaire normal | ASan+UBSan | Comparaison |
+|---|---|---|---|
+| Escaliers et voisins, collisions, orientations, deux observateurs | 192 observations, puis 8 états après chacun de 3 redémarrages | 192 + 8 après redémarrage | Nouvelle capture officielle 26.1.1 et fixture versionnée identiques. |
+| Blocs pleins, bûches, dalles/fusion, refus, inventaires, shulker BlockEvent | 18 scénarios, 4 états et slot 36 après chacun de 3 redémarrages | Même suite + relecture | Identique à la fixture Vanilla existante ; comportement de placement inchangé. |
+| Ramassage | 100 objets, observateurs concordants, inventaire après reconnexion et 3 redémarrages | 100 objets, reconnexion et redémarrage | Aucune duplication/perte dans les scénarios terminés normalement. |
+| Anvil/NBT et monde | Versions 4788/4785, limites, états, dirty/revision, erreurs et concurrence | Suites C pertinentes et nouveau test atomique | NBT/chunks relus, pas uniquement fichiers présents. |
+
+Une validation supplémentaire réécrit les **fichiers natifs d'un vrai monde
+Vanilla** via mc_save_bench `rewrite-region`, entre arrêt et redémarrage du
+serveur officiel. Le runner compare les SHA-256 des NBT décompressés de chaque
+slot avant/après. Sur chacune des trois passes : **4 régions, 1 294 chunks,
+empreintes toutes identiques**, 4 publications acquittées, puis relecture des
+8 états par Vanilla. Les 192 observations de cette nouvelle exécution sont
+également identiques à la fixture. Les fichiers entities/poi ne sont pas
+réécrits. Le chemin 26.1.1 observé est
+`world/dimensions/minecraft/overworld/region`, sans extrapolation d'un ancien
+layout. Le marqueur externe 128 a été vérifié dans le bytecode RegionFile du
+JAR officiel 26.1.1 ; son SHA-256 interne reste
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+La validation structurelle du writer n'est pas un outil de réparation ni une
+certification de tous les payloads déjà corrompus ; le contenu non modifié est
+copié, et le test natif vérifie indépendamment la décompression et les hashes.
+
+ASan+UBSan : compilation O1/g non-PIE, `-fsanitize=address,undefined`,
+`-fno-omit-frame-pointer`, lien `-no-pie`,
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1`,
+`UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. **Onze suites C** passent :
+test_pvp, test_stairs, test_world_consistency, test_anvil_roundtrip,
+test_atomic_persistence, test_player_nbt, test_chunk_network_codec,
+test_paletted_container, test_perf_config, test_block_registry et test_nbt.
+Les trois suites réseau du tableau passent aussi. Aucun diagnostic mémoire ou
+UB dans les passes finales. Les messages d'erreur des injections sont attendus
+et leurs assertions vérifient la préservation des données.
+
+TSan local : test_perf_config, test_world_consistency et
+**test_atomic_persistence**, compilés non-PIE avec `-fsanitize=thread`, terminent
+avec **code 0**, sans diagnostic. Cela concerne ces trois tests, pas l'ensemble
+du serveur réseau, et ne valide pas le runtime distant précédemment en échec
+`unexpected memory mapping`. Aucun test TSan distant n'est tenté pendant la
+maintenance.
+
+Incidents de harnais conservés et corrigés : une première compilation avait un
+include avant `_GNU_SOURCE`, masquant sched_getaffinity/CPU_COUNT ; l'ordre a
+été rétabli. Le premier passage ASan de l'injection EIO ne consommait pas la
+panne, car glibc Fortify appelait `__fread_chk` : le wrapper de test couvre
+maintenant fread **et** sa variante fortifiée, sans désactiver cette protection,
+et les onze suites ont été rejouées. Le premier essai de réécriture native
+cherchait `world/region` et échouait avant de modifier un fichier ; il a été
+corrigé après inspection du layout exact 26.1.1, puis rejoué entièrement.
+La découverte du risque de régénération sur erreur de lecture a entraîné une
+correction supplémentaire de sécurité et une reprise des mesures sur le
+binaire final. Les pilotes antérieurs ne figurent pas dans les tableaux.
+
+### Livrables, limites opérationnelles et reprise distante
+
+SHA-256 du binaire normal final testé :
+`48f9830fe1271f165329ac884f78872cad5224f194a0cd351f5de426f3c876c0`.
+Référence serveur 8fd89fcc :
+`c9eafc0e5f7616f584b35f8010be4a898dbe784c34bceea387051c72461d14c1`.
+Binaire ASan+UBSan :
+`320744204ae88e382ec75495b3e2231bebee5b5003682c81bfdb189e5129967a`.
+
+Les services **25565 et 25587 n'ont subi aucune modification** : aucun
+redémarrage, changement de configuration/authentification/permissions, transfert
+de binaire ou accès à leurs mondes. Leur état actuel n'est pas contrôlé durant
+la maintenance. Aucun déploiement n'est réalisé. Les processus Minecraft locaux
+temporaires sont arrêtés et leurs ports libérés à la fin des validations.
+
+Artefacts bruts, ignorés par Git, sous
+`tests/stress/results/atomic-persistence/` :
+
+- `stage/tests/stress/results/baseline` : preuve `.mca` avant/après corruption historique, états et syscalls.
+- `stage/tests/stress/results/final-atomic-unit` : images, temporaires interrompus, données NBT et régions testées ; `atomic-nvme-final.log` en décrit les assertions.
+- `stage/tests/stress/results/final-server-crashes` : six SIGKILL de vrais serveurs temporaires, snapshots originaux et relectures.
+- `stage/tests/stress/results/final-backend` : 42 passes chronométrées, 14 comptes syscall, relectures et images ; `final-bots` : 24 passes, tous les ticks/fsync/actions/ressources, manifestes et résumés.
+- `stairs-final`, `vanilla-final`, `placement-final`, `pickup-final`, `vanilla-native-final` sous ce même répertoire : captures, hashes natifs et redémarrages.
+- Logs de build/precommit, `analysis.txt`, sources de calcul et sortie javap ; les résultats ASan/UBSan/TSan initialement en RAM sont copiés dans `sanitizers` sur NVMe.
+
+Fichiers du lot : `Makefile`, `include/mc_atomic_file.h`, `include/mc_anvil.h`,
+`include/mc_chunk_store.h`, `src/util/atomic_file.c`, `src/world/anvil.c`,
+`src/world/chunk_store.c`, `src/world/world.c`, `tests/test_atomic_persistence.c`,
+`tests/test_anvil_roundtrip.c`, `tests/stress/profile_persistence.py`,
+`tests/stress/run_block_checks.py`, `tests/stress/README.md`,
+`tools/mc_save_bench.c`, `tools/mc_trace_io.c` et ce document. Les scripts restent
+invoqués par python3 ; aucun changement de permission n'est nécessaire.
+Un seul commit local est prévu, sans push :
+`Implement atomic durable chunk and Anvil region saves`.
+
+La condition d'intégrité est démontrée dans les scénarios couverts : aucune
+interruption de processus pendant la préparation ne détruit l'ancienne image
+valide, et aucune image partiellement écrite n'est publiée. L'incertitude après
+remplacement est signalée ; les erreurs de lecture ne déclenchent plus un
+effacement par régénération. Les limites de matériel, de versions externes,
+d'ACL/xattrs, de fichiers `.mcc` et de transactions multi-fichiers restent
+explicites. Il ne s'agit pas d'une garantie universelle contre toute panne.
+
+Avant toute promotion, **répéter intégration, injections, sauvegardes et charges
+sur le Xeon/HDD RAID après maintenance**. Le budget de tick et le coût des
+barrières devront être examinés sans revenir à une écriture destructive ni
+supprimer les fsync. La reprise des familles de blocs Vanilla peut suivre cette
+validation de sécurité et de capacité ; aucune porte, trappe, redstone, phase 3
+ou simulation parallèle n'est commencée ici. La phase 2 reste ouverte.

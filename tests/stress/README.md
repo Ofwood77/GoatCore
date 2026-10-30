@@ -347,3 +347,92 @@ une autre installation isolée du JAR officiel, préciser `--vanilla-root` et
 `--java /chemin/java25`. Vérifier le version.json du JAR interne et son empreinte
 avant de comparer : le même protocole 775 ne suffit pas à distinguer 26.1 de
 26.1.1. Les résultats sur tmpfs, NVMe local et LVM distant doivent rester séparés.
+
+### Remplacement atomique et erreurs de sauvegarde
+
+Le nouveau `test_atomic_persistence` fait partie de `make test`. Les wrappers
+système sont liés **uniquement** à ce test ; le serveur ne contient aucun
+commutateur d'injection. Il vérifie les interruptions A–F sur les stores `.bin`
+et `.mca`, EINTR/écritures courtes/EIO/ENOSPC/EDQUOT, les erreurs de fsync,
+rename, close, lecture, allocation et verrouillage, les lecteurs avec ancien FD,
+les écrivains concurrents, les données NBT opaques et les erreurs de région.
+Pour conserver les fichiers de chaque cas sur un volume précis :
+
+```sh
+mkdir -p tests/stress/results/atomic-unit
+MC_ATOMIC_TEST_ROOT="$PWD/tests/stress/results/atomic-unit" ./test_atomic_persistence
+python3 tests/stress/profile_persistence.py --crash --atomic \
+  --binary candidate=./mc_save_bench.candidate --server candidate=./mc_server.candidate \
+  --result-dir tests/stress/results/atomic-server-new
+```
+
+Cette seconde commande crée six instances temporaires successives ; elle vérifie
+les états autoritaires avant l'action et les états relus après chaque SIGKILL.
+Les nouvelles étapes de mc_trace_io sont `temp-create-before`,
+`temp-write-partial`, `temp-sync-before`, `rename-before`, `dir-sync-before` et
+`dir-sync-after`. Les quatre premières doivent conserver l'ancien fichier
+identique ; les deux dernières doivent exposer le nouveau fichier complet dans
+ces essais de processus. Le cache noyau survit au SIGKILL : cela ne simule pas
+une panne électrique, et l'étape avant fsync du répertoire n'acquitte pas la
+durabilité. Les fichiers interrompus sont conservés avant la relecture.
+
+Pour reproduire le défaut historique sur un exécutable du commit 8fd89fcc,
+mc_save_bench accepte `region` (création de la fixture), `update-region`
+(modification sans réinitialisation) et `inspect-region` (états rechargés).
+Utiliser mc_trace_io `write-partial` sur `r.-1.-1.mca` : l'injection limite le
+premier write à 32 octets puis tue l'enfant, avant que libc puisse réessayer.
+Conserver l'image `.mca` initiale et comparer les trois chunks après le crash.
+Cette reproduction ne doit jamais cibler le candidat corrigé comme s'il
+utilisait encore l'ancien protocole d'écriture en place.
+
+Une sauvegarde retourne 0 seulement après fsync du temporaire, fermeture
+vérifiée, renameat et fsync du répertoire. Le statut
+`MC_SAVE_DURABILITY_UNCERTAIN` (-2) indique un remplacement visible avec une
+confirmation finale en échec. Le monde reste sale et le log identifie cette
+incertitude ; il ne faut ni restaurer un ancien fichier ni effacer le nouveau.
+Les retries utilisent le dernier état possédé par le tick. close(EINTR) n'est
+pas réessayé sur Linux, pour éviter de fermer un FD réutilisé par un autre thread.
+
+Les écrivains de régions utilisent un fichier `.mca.lock` persistant et flock,
+qui couvre lecture, copie, modification et publication. Ne jamais supprimer ce
+verrou pendant que des écrivains peuvent fonctionner. Les lecteurs continuent
+sur leur ancien inode ou ouvrent le nouveau. Tous les écrivains doivent
+coopérer : partager un même monde avec un autre serveur qui modifie les régions
+en place reste hors contrat. Les snapshots en mémoire doivent être immuables
+pendant leur sauvegarde et soumis dans l'ordre autoritaire ; aucun nouveau
+worker de sauvegarde n'a été introduit.
+
+Les `.tmp.PID.SEQUENCE` laissés par un SIGKILL sont ignorés, jamais promus ni
+supprimés automatiquement. Les erreurs ordinaires tentent leur suppression et
+signalent un échec de nettoyage. La copie utilise O_EXCL et ne réutilise aucun
+fichier temporaire d'un autre écrivain. Une région contenant un marqueur `.mcc`
+ou un codec non pris en charge est refusée avant publication ; aucun fichier
+externe n'est modifié. Les en-têtes invalides ou secteurs en chevauchement sont
+également refusés. Le NBT des autres chunks est copié octet par octet, sans
+normalisation ni effacement des tags inconnus.
+
+Pour les performances, garder les mêmes binaires/options, mondes initiaux,
+charges et répétitions que profile_tick.py/profile_persistence.py. La nouvelle
+API `.mca` copie **tout le fichier** à chaque remplacement ; son volume et son
+coût croissent donc avec la région. Les nouveaux fsync ne doivent pas être
+retirés pour retrouver l'ancien débit. La maintenance autorise exceptionnellement
+les essais locaux de ce lot ; elle ne change pas les règles permanentes.
+Reproduire les mesures sur Xeon/HDD RAID après maintenance avant tout déploiement.
+
+Le chargement du store actif ne traite plus une erreur de lecture/décodage comme
+une absence : il conserve le fichier, journalise l'échec et laisse le chunk
+indisponible jusqu'au redémarrage après diagnostic/réparation. La génération
+reste autorisée uniquement pour un fichier absent. test_anvil_roundtrip vérifie
+qu'un fichier corrompu reste inchangé ; test_atomic_persistence injecte aussi
+un EIO de lecture sur un fichier valide, vérifie sa conservation, puis le relit
+correctement après redémarrage sans injection.
+
+Pour vérifier les fichiers natifs du serveur officiel, sans importer son monde
+dans GoatCore, le runner accepte `--anvil-rewriter ./mc_save_bench` avec
+`--kind vanilla --suite stairs --verify-restarts 3`. Après l'arrêt du processus
+et avant chaque redémarrage, il réécrit un slot par région via l'API atomique,
+vérifie les SHA-256 des NBT décompressés de **tous** les chunks, puis fait relire
+les états par Vanilla. En 26.1.1, le répertoire observé est
+`world/dimensions/minecraft/overworld/region` ; les régions entities/poi sont
+exclues. La fixture est toujours créée dans le résultat privé du runner.
+mc_save_bench expose à cet effet `rewrite-region FICHIER LOCAL_X LOCAL_Z`.

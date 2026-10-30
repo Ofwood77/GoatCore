@@ -4,6 +4,7 @@
 #include "block_entity_store.h"
 #include "mc_chunk.h"
 #include "mc_nbt.h"
+#include "mc_atomic_file.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -41,7 +42,12 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
                               mc_arena_t *temp_arena);
 
 /* Writes one chunk's raw NBT payload into a region file (r.X.Z.mca), using zlib compression (type=0x02).
- * local_x/local_z are in [0..31]. Returns 0 on success, -1 on error. */
+ * local_x/local_z are in [0..31]. Atomic replacement under a persistent advisory
+ * .lock shared by cooperating writers. 0 acknowledges file+directory fsync;
+ * -1 means no replacement; MC_SAVE_DURABILITY_UNCERTAIN means replacement is
+ * visible but its final acknowledgement failed. Never roll back that result.
+ * External .mcc and unsupported compression cause a fail-closed rejection.
+ * Caller owns an immutable NBT snapshot and the durable storage directory. */
 int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len);
 int mc_anvil_write_chunk(const char *region_path, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store);
 int mc_anvil_encode_chunk_nbt(const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store, uint8_t **out_raw, size_t *out_raw_len);

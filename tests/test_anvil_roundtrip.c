@@ -1409,7 +1409,7 @@ int main(void) {
     }
     mc_world_destroy(wp2);
 
-    /* Corruption fallback: bad snapshot should fall back to generated terrain, then rewrite clean snapshot. */
+    /* Corruption is not absence: retain evidence and refuse automatic generation. */
     char world4[1024];
     if (snprintf(world4, sizeof(world4), "%s/world_corrupt", dir) >= (int)sizeof(world4)) return fail("world4 path");
     mc_world_t *wc = mc_world_create(world4, 0);
@@ -1441,19 +1441,23 @@ int main(void) {
 
     mc_world_t *wc2 = mc_world_create(world4, 0);
     if (!wc2) return fail("mc_world_create corrupt reload");
-    if (wait_block_equals(wc2, 0, 80, 0, id_air) != 0) {
-        mc_world_destroy(wc2);
-        return fail("corrupt snapshot fallback mismatch");
+    for (int attempt = 0; attempt < 100; attempt++) {
+        int32_t unavailable = -1;
+        mc_world_tick(wc2, 0);
+        if (mc_world_get_block_ready(wc2, 0, 80, 0, &unavailable) == 0) {
+            mc_world_destroy(wc2);
+            return fail("corrupt snapshot must not be regenerated");
+        }
+        struct timespec delay = {0, 1000000}; nanosleep(&delay, NULL);
     }
-    if (wait_chunk_saved(wc2, 0, 0) != 0) {
-        mc_world_destroy(wc2);
-        return fail("corrupt snapshot rewrite save");
-    }
-    if (verify_chunkstore_block_equals(world4, 0, 0, 0, 80, 0, id_air) != 0) {
-        mc_world_destroy(wc2);
-        return fail("corrupt snapshot rewrite verify");
-    }
+    if (mc_world_flush_block(wc2, 0, 80, 0) == 0) return fail("corrupt snapshot flush must fail");
     mc_world_destroy(wc2);
+    FILE *preserved = fopen(store4, "rb");
+    if (!preserved) return fail("corrupt evidence missing");
+    char evidence[5] = {0};
+    size_t evidence_len = fread(evidence, 1, sizeof(evidence), preserved);
+    fclose(preserved);
+    if (evidence_len != 4 || memcmp(evidence, "bad!", 4)) return fail("corrupt evidence overwritten");
 
     /* Retro-compat: write a chunk with PADDED block_states.data and ensure loader can read it. */
     char world5[1024];

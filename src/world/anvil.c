@@ -6,6 +6,10 @@
 #include "mc_packed.h"
 #include "mc_world.h"
 #include "mc_util.h"
+#include "mc_atomic_file.h"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <errno.h>
 #include <limits.h>
@@ -685,26 +689,16 @@ static int write_be32(uint8_t *p, uint32_t v) {
     return 0;
 }
 
-static int write_zeros(FILE *f, size_t n) {
-    if (!f) return -1;
-    static uint8_t zeros[4096];
-    while (n > 0) {
-        size_t chunk = n > sizeof(zeros) ? sizeof(zeros) : n;
-        if (fwrite(zeros, 1, chunk, f) != chunk) return -1;
-        n -= chunk;
-    }
-    return 0;
-}
 
 static uint32_t find_free_sector_run(const uint8_t *header, int skip_idx, uint32_t skip_off, uint8_t skip_cnt, uint8_t required_cnt, uint64_t file_size) {
-    if (!header || required_cnt == 0) return 0;
+    if (!header || required_cnt == 0) { errno = EINVAL; return UINT32_MAX; }
 
     uint32_t sector_cap = (uint32_t)((file_size + (MC_ANVIL_SECTOR_BYTES - 1)) / MC_ANVIL_SECTOR_BYTES);
     if (sector_cap < 2) sector_cap = 2;
 
     size_t used_len = (size_t)sector_cap;
     uint8_t *used = (uint8_t *)calloc(used_len, sizeof(*used));
-    if (!used) return 0;
+    if (!used) return UINT32_MAX;
 
     used[0] = 1;
     used[1] = 1;
@@ -722,7 +716,7 @@ static uint32_t find_free_sector_run(const uint8_t *header, int skip_idx, uint32
             uint8_t *next = (uint8_t *)realloc(used, new_len);
             if (!next) {
                 free(used);
-                return 0;
+                return UINT32_MAX;
             }
             memset(next + used_len, 0, new_len - used_len);
             used = next;
@@ -1274,159 +1268,130 @@ cleanup:
     return rc;
 }
 
-int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len) {
-    if (!region_path || !nbt) return -1;
-    if (local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) return -1;
-
-    mc_save_clock_t total_span = mc_save_profile_begin(), span = total_span;
-    FILE *f = fopen(region_path, "r+b");
-    bool new_file = false;
-    if (!f) {
-        f = fopen(region_path, "w+b");
-        new_file = true;
-    }
-    if (!f) return -1;
-
-    if (new_file) {
-        uint8_t header[MC_ANVIL_HEADER_BYTES];
-        memset(header, 0, sizeof(header));
-        if (fwrite(header, 1, sizeof(header), f) != sizeof(header)) {
-            fclose(f);
-            return -1;
+/* Reject malformed allocation tables and unsupported external payloads before
+ * touching a replacement. Other chunks are copied byte-for-byte, never decoded
+ * and rebuilt, so unknown NBT fields and compression bytes are preserved. */
+static int validate_region(int fd, const uint8_t *header, uint64_t size) {
+    if (size < MC_ANVIL_HEADER_BYTES || size % MC_ANVIL_SECTOR_BYTES) { errno = EINVAL; return -1; }
+    uint64_t sectors = size / MC_ANVIL_SECTOR_BYTES;
+    if (sectors > 0xFFFFFFu + 255u) { errno = EFBIG; return -1; }
+    uint8_t *used = calloc((size_t)sectors, 1);
+    if (!used) return -1;
+    used[0] = used[1] = 1;
+    int result = -1;
+    for (int i = 0; i < 1024; i++) {
+        uint32_t entry = read_be32(header + i * 4);
+        uint32_t off = entry >> 8, count = entry & 255u;
+        if (!entry) continue;
+        if (off < 2 || !count || (uint64_t)off + count > sectors) { errno = EINVAL; goto done; }
+        for (uint32_t j = 0; j < count; j++) {
+            if (used[off + j]) { errno = EINVAL; goto done; }
+            used[off + j] = 1;
         }
+        uint8_t record[5];
+        if (mc_file_pread_all(fd, record, sizeof(record), (off_t)off * MC_ANVIL_SECTOR_BYTES) != 0) goto done;
+        uint32_t length = read_be32(record);
+        if (!length || (uint64_t)length + 4 > (uint64_t)count * MC_ANVIL_SECTOR_BYTES) { errno = EINVAL; goto done; }
+        /* External .mcc transactions are not implemented. Refuse the entire
+         * region, including edits to other slots, and leave every file intact. */
+        if ((record[4] & 0x80u) || record[4] < 1 || record[4] > 3) { errno = EOPNOTSUPP; goto done; }
     }
+    result = 0;
+done:
+    free(used);
+    return result;
+}
 
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return -1;
+int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len) {
+    if (!region_path || !nbt || local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) {
+        errno = EINVAL; return -1;
     }
-    long file_size_l = ftell(f);
-    if (file_size_l < 0) {
-        fclose(f);
-        return -1;
-    }
-    uint64_t file_size = (uint64_t)file_size_l;
-    if (file_size < MC_ANVIL_HEADER_BYTES) {
-        fclose(f);
-        return -1;
-    }
-
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return -1;
-    }
-    uint8_t header[MC_ANVIL_HEADER_BYTES];
-    if (fread(header, 1, sizeof(header), f) != sizeof(header)) {
-        fclose(f);
-        return -1;
-    }
-
-    mc_save_profile_end("region_open_header", local_x, local_z, span, sizeof(header), 0);
-    span = mc_save_profile_begin();
+    mc_save_clock_t total_span = mc_save_profile_begin(), span = total_span;
+    int result = -1, source = -1;
+    int lock = mc_atomic_file_lock(region_path);
+    if (lock < 0) return -1;
+    mc_atomic_file_t file = {.dir_fd = -1, .temp_fd = -1, .path = region_path};
     uint8_t *comp = NULL;
     size_t comp_len = 0;
-    if (deflate_buffer_zlib(nbt, nbt_len, &comp, &comp_len) != 0) {
-        fclose(f);
-        return -1;
-    }
-
+    uint8_t header[MC_ANVIL_HEADER_BYTES] = {0};
+    uint64_t size = MC_ANVIL_HEADER_BYTES;
+    size_t written = 0;
+    do { source = open(region_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); } while (source < 0 && errno == EINTR);
+    if (source >= 0) {
+        struct stat st;
+        int stat_rc;
+        do { stat_rc = fstat(source, &st); } while (stat_rc < 0 && errno == EINTR);
+        if (stat_rc != 0) goto done;
+        if (!S_ISREG(st.st_mode) || st.st_size < MC_ANVIL_HEADER_BYTES) { errno = EINVAL; goto done; }
+        size = (uint64_t)st.st_size;
+        if (mc_file_pread_all(source, header, sizeof(header), 0) != 0 || validate_region(source, header, size) != 0) goto done;
+    } else if (errno != ENOENT) goto done;
+    mc_save_profile_end("region_read_validate", local_x, local_z, span, sizeof(header), 0);
+    span = mc_save_profile_begin();
+    if (deflate_buffer_zlib(nbt, nbt_len, &comp, &comp_len) != 0) goto done;
     mc_save_profile_end("region_compress", local_x, local_z, span, comp_len, 0);
-    span = mc_save_profile_begin();
-    if (comp_len + 5 > MC_ANVIL_MAX_CHUNK_NBT) {
-        free(comp);
-        fclose(f);
-        return -1;
-    }
-
-    size_t total = comp_len + 5; /* len(4) + type(1) + payload */
+    if (comp_len > MC_ANVIL_MAX_CHUNK_NBT - 5) { errno = EFBIG; goto done; }
+    size_t total = comp_len + 5;
     size_t required = (total + MC_ANVIL_SECTOR_BYTES - 1) / MC_ANVIL_SECTOR_BYTES;
-    if (required == 0) required = 1;
-    if (required > 255) {
-        free(comp);
-        fclose(f);
-        return -1;
-    }
-    uint8_t required_sectors = (uint8_t)required;
-
+    if (!required || required > 255) { errno = EFBIG; goto done; }
     int idx = local_x + local_z * 32;
-    const uint8_t *ent = header + (idx * 4);
-    uint32_t entry = read_be32(ent);
+    uint32_t entry = read_be32(header + idx * 4);
     uint32_t old_off = entry >> 8;
-    uint8_t old_cnt = (uint8_t)(entry & 0xFF);
-
-    uint32_t new_off = 0;
-    uint8_t new_cnt = required_sectors;
-
-    if (old_off != 0 && old_cnt != 0 && old_cnt >= required_sectors) {
-        new_off = old_off;
-    } else {
-        new_off = find_free_sector_run(header, idx, old_off, old_cnt, required_sectors, file_size);
-        if (new_off < 2) new_off = 2;
-        if (new_off > 0xFFFFFFu) {
-            free(comp);
-            fclose(f);
-            return -1;
-        }
+    uint8_t old_count = (uint8_t)entry;
+    uint32_t offset = old_off;
+    span = mc_save_profile_begin();
+    if (!old_off || old_count < required) {
+        offset = find_free_sector_run(header, idx, old_off, old_count, (uint8_t)required, size);
+        if (offset == UINT32_MAX) goto done;
+        if (offset < 2 || offset > 0xFFFFFFu) { errno = EFBIG; goto done; }
     }
-
     mc_save_profile_end("region_allocate", local_x, local_z, span, 0, 0);
+    if (mc_atomic_file_begin(&file, region_path) != 0) goto done;
     span = mc_save_profile_begin();
-    uint64_t chunk_off_bytes = (uint64_t)new_off * MC_ANVIL_SECTOR_BYTES;
-    if (fseek(f, (long)chunk_off_bytes, SEEK_SET) != 0) {
-        free(comp);
-        fclose(f);
-        return -1;
-    }
-
-    uint8_t chunk_hdr[5];
-    write_be32(chunk_hdr, (uint32_t)(comp_len + 1));
-    chunk_hdr[4] = 0x02; /* zlib */
-    if (fwrite(chunk_hdr, 1, sizeof(chunk_hdr), f) != sizeof(chunk_hdr)) {
-        free(comp);
-        fclose(f);
-        return -1;
-    }
-    if (comp_len > 0 && fwrite(comp, 1, comp_len, f) != comp_len) {
-        free(comp);
-        fclose(f);
-        return -1;
-    }
+    if (source >= 0) {
+        uint8_t buffer[65536];
+        for (uint64_t pos = 0; pos < size;) {
+            size_t amount = size - pos > sizeof(buffer) ? sizeof(buffer) : (size_t)(size - pos);
+            if (mc_file_pread_all(source, buffer, amount, (off_t)pos) != 0 ||
+                mc_file_write_all(file.temp_fd, buffer, amount) != 0) goto done;
+            pos += amount;
+        }
+        int fd = source; source = -1;
+        if (close(fd) != 0) goto done;
+    } else if (mc_file_write_all(file.temp_fd, header, sizeof(header)) != 0) goto done;
+    written += (size_t)size;
+    mc_save_profile_end("region_copy", local_x, local_z, span, (size_t)size, 0);
+    span = mc_save_profile_begin();
+    off_t pos = (off_t)offset * MC_ANVIL_SECTOR_BYTES;
+    uint8_t record[5];
+    write_be32(record, (uint32_t)(comp_len + 1)); record[4] = 2;
+    if (mc_file_pwrite_all(file.temp_fd, record, sizeof(record), pos) != 0 ||
+        mc_file_pwrite_all(file.temp_fd, comp, comp_len, pos + 5) != 0) goto done;
+    uint8_t zeros[MC_ANVIL_SECTOR_BYTES] = {0};
+    size_t pad = required * MC_ANVIL_SECTOR_BYTES - total;
+    if (mc_file_pwrite_all(file.temp_fd, zeros, pad, pos + (off_t)total) != 0) goto done;
+    write_be32(header + idx * 4, (offset << 8) | (uint32_t)required);
+    time_t timestamp = time(NULL);
+    if (timestamp == (time_t)-1) goto done;
+    write_be32(header + MC_ANVIL_OFFSETS_BYTES + idx * 4, (uint32_t)timestamp);
+    if (mc_file_pwrite_all(file.temp_fd, header, sizeof(header), 0) != 0) goto done;
+    written += required * MC_ANVIL_SECTOR_BYTES + sizeof(header);
+    mc_save_profile_end("region_temporary_update", local_x, local_z, span, required * MC_ANVIL_SECTOR_BYTES + sizeof(header), 0);
+    result = mc_atomic_file_commit(&file);
+done:;
+    int saved = errno;
+    if (source >= 0 && close(source) != 0) log_error("region source cleanup close failed path=%s errno=%d", region_path, errno);
     free(comp);
-
-    size_t pad = (size_t)new_cnt * MC_ANVIL_SECTOR_BYTES - total;
-    if (pad > 0) {
-        if (write_zeros(f, pad) != 0) {
-            fclose(f);
-            return -1;
+    errno = saved;
+    mc_atomic_file_abort(&file);
+    if (close(lock) != 0) {
+        if (result == 0) {
+            result = MC_SAVE_DURABILITY_UNCERTAIN;
+            saved = errno;
+            log_error("region replacement committed, lock close failed path=%s errno=%d", region_path, saved);
         }
     }
-
-    mc_save_profile_end("region_payload", local_x, local_z, span, (size_t)new_cnt * MC_ANVIL_SECTOR_BYTES, 0);
-    span = mc_save_profile_begin();
-    /* Update header offsets entry (3 bytes offset + 1 byte sector count). */
-    header[idx * 4 + 0] = (uint8_t)((new_off >> 16) & 0xFF);
-    header[idx * 4 + 1] = (uint8_t)((new_off >> 8) & 0xFF);
-    header[idx * 4 + 2] = (uint8_t)(new_off & 0xFF);
-    header[idx * 4 + 3] = new_cnt;
-
-    /* Update timestamp (seconds since epoch, BE). */
-    uint32_t ts = (uint32_t)time(NULL);
-    uint8_t *tsp = header + MC_ANVIL_OFFSETS_BYTES + (idx * 4);
-    write_be32(tsp, ts);
-
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return -1;
-    }
-    if (fwrite(header, 1, sizeof(header), f) != sizeof(header)) {
-        fclose(f);
-        return -1;
-    }
-    mc_save_profile_end("region_header", local_x, local_z, span, sizeof(header), 0);
-    span = mc_save_profile_begin();
-    fflush(f);
-    fclose(f);
-    mc_save_profile_end("region_flush_close", local_x, local_z, span, 0, 0);
-    mc_save_profile_end("region_total", local_x, local_z, total_span, (size_t)new_cnt * MC_ANVIL_SECTOR_BYTES + sizeof(header), 0);
-    return 0;
+    errno = saved;
+    mc_save_profile_end("region_total", local_x, local_z, total_span, written, result);
+    return result;
 }

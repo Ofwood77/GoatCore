@@ -87,6 +87,8 @@ static const char *name(long n) {
         return "ftruncate";
     case SYS_lseek:
         return "lseek";
+    case SYS_renameat:
+        return "renameat";
     default:
         return NULL;
     }
@@ -98,8 +100,10 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[5], "--"))
         return 2;
-    const char *stages[] = {"none",          "open-before", "open-truncate", "write-before",
-                            "write-partial", "write-after", "close-after"};
+    const char *stages[] = {
+        "none",          "open-before",     "open-truncate",      "write-before",       "write-partial",
+        "write-after",   "close-after",     "temp-create-before", "temp-write-partial", "temp-sync-before",
+        "rename-before", "dir-sync-before", "dir-sync-after"};
     int valid_stage = 0;
     for (size_t i = 0; i < sizeof(stages) / sizeof(stages[0]); i++)
         if (!strcmp(argv[4], stages[i]))
@@ -115,6 +119,14 @@ int main(int argc, char **argv) {
     fprintf(out, "thread,start_us,end_us,call,fd,requested,result,path\n");
     fflush(out);
     const char *match = argv[2], *target = argv[3], *stage = argv[4];
+    char target_directory[2048] = {0};
+    if (target[0]) {
+        snprintf(target_directory, sizeof(target_directory), "%s", target);
+        char *slash = strrchr(target_directory, '/');
+        if (slash)
+            *slash = 0;
+    }
+    int published = 0;
     pid_t leader = fork();
     if (leader < 0)
         return 2;
@@ -185,6 +197,10 @@ int main(int argc, char **argv) {
                     string_at(pid, (unsigned long)info.entry.args[1], t->path, sizeof(t->path));
                     t->flags = (int)info.entry.args[2];
                     t->bytes = 0;
+                } else if (t->nr == SYS_renameat) {
+                    string_at(pid, (unsigned long)info.entry.args[3], t->path, sizeof(t->path));
+                    t->fd = (long)info.entry.args[2];
+                    t->bytes = 0;
                 } else if (name(t->nr)) {
                     char fdpath[80];
                     snprintf(fdpath, sizeof(fdpath), "/proc/%d/fd/%ld", pid, t->fd);
@@ -193,6 +209,50 @@ int main(int argc, char **argv) {
                         t->path[n] = 0;
                     else
                         t->path[0] = 0;
+                }
+                /* Resolve the pinned directory used by atomic openat/renameat. */
+                if ((t->nr == SYS_openat || t->nr == SYS_renameat) && t->path[0] && t->path[0] != '/') {
+                    char fdpath[80], parent[2048], relative[2048];
+                    snprintf(relative, sizeof(relative), "%s", t->path);
+                    if (t->fd == AT_FDCWD)
+                        snprintf(fdpath, sizeof(fdpath), "/proc/%d/cwd", pid);
+                    else
+                        snprintf(fdpath, sizeof(fdpath), "/proc/%d/fd/%ld", pid, t->fd);
+                    ssize_t n = readlink(fdpath, parent, sizeof(parent) - 1);
+                    if (n >= 0 && (size_t)n + 1 + strlen(relative) < sizeof(t->path)) {
+                        parent[n] = 0;
+                        memcpy(t->path, parent, (size_t)n);
+                        t->path[n] = '/';
+                        strcpy(t->path + n + 1, relative);
+                    } else
+                        t->path[0] = 0;
+                }
+                int is_temporary = target[0] && !strncmp(t->path, target, strlen(target)) &&
+                                   !strncmp(t->path + strlen(target), ".tmp.", 5);
+                if (!killed && target[0]) {
+                    int stop = (!strcmp(stage, "temp-create-before") && is_temporary && t->nr == SYS_openat &&
+                                (t->flags & O_EXCL)) ||
+                               (!strcmp(stage, "temp-sync-before") && is_temporary && t->nr == SYS_fsync) ||
+                               (!strcmp(stage, "rename-before") && t->nr == SYS_renameat &&
+                                !strcmp(t->path, target)) ||
+                               (!strcmp(stage, "dir-sync-before") && published && t->nr == SYS_fsync &&
+                                !strcmp(t->path, target_directory));
+                    if (stop) {
+                        kill(leader, SIGKILL);
+                        killed = 1;
+                    }
+                    if (!killed && !strcmp(stage, "temp-write-partial") && is_temporary &&
+                        (t->nr == SYS_write || t->nr == SYS_pwrite64)) {
+                        struct user_regs_struct regs;
+                        if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+                            abort();
+                        regs.rdx = regs.rdx > 1 ? regs.rdx / 2 : 1;
+                        if (regs.rdx > 32)
+                            regs.rdx = 32;
+                        if (ptrace(PTRACE_SETREGS, pid, 0, &regs) < 0)
+                            abort();
+                        partial_tid = pid;
+                    }
                 }
                 if (!killed && target[0] && !strcmp(t->path, target) && !strcmp(stage, "open-before") &&
                     t->nr == SYS_openat && (t->flags & O_TRUNC)) {
@@ -209,6 +269,8 @@ int main(int argc, char **argv) {
                         if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
                             abort();
                         regs.rdx = regs.rdx > 1 ? regs.rdx / 2 : 1;
+                        if (regs.rdx > 32)
+                            regs.rdx = 32;
                         if (ptrace(PTRACE_SETREGS, pid, 0, &regs) < 0)
                             abort();
                         partial_tid = pid;
@@ -221,6 +283,15 @@ int main(int argc, char **argv) {
                     fprintf(out, "%d,%lld,%lld,%s,%ld,%llu,%lld,%s\n", pid, (long long)t->start,
                             (long long)now(), call, t->fd, (unsigned long long)t->bytes,
                             (long long)info.exit.rval, t->path);
+                if (t->nr == SYS_renameat && target[0] && !strcmp(t->path, target) && !info.exit.rval)
+                    published = 1;
+                if (!killed && ((!strcmp(stage, "dir-sync-after") && published && t->nr == SYS_fsync &&
+                                 !strcmp(t->path, target_directory) && !info.exit.rval) ||
+                                (!strcmp(stage, "temp-write-partial") && partial_tid == pid &&
+                                 (t->nr == SYS_write || t->nr == SYS_pwrite64)))) {
+                    kill(leader, SIGKILL);
+                    killed = 1;
+                }
                 if (!killed && target[0] && !strcmp(t->path, target)) {
                     int stop = (!strcmp(stage, "open-truncate") && t->nr == SYS_openat &&
                                 (t->flags & O_TRUNC) && info.exit.rval >= 0) ||

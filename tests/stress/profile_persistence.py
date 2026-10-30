@@ -114,7 +114,10 @@ def inspect(binary, world, recover=False):
 
 async def crash_server(args, label, server, seed, bench):
     results = []
-    for stage in ('open-before', 'open-truncate', 'write-before', 'write-partial', 'write-after', 'close-after'):
+    stages = ('temp-create-before', 'temp-write-partial', 'temp-sync-before', 'rename-before',
+              'dir-sync-before', 'dir-sync-after') if args.atomic else (
+              'open-before', 'open-truncate', 'write-before', 'write-partial', 'write-after', 'close-after')
+    for stage in stages:
         folder = args.result_dir/f'{label}-{stage}'
         runtime = folder/'runtime'
         runtime.mkdir(parents=True)
@@ -168,6 +171,12 @@ async def crash_server(args, label, server, seed, bench):
         row = dict(label=label, stage=stage, old_bytes=len(before), new_bytes=len(snapshot),
                    old_sha256=hashlib.sha256(before).hexdigest(), new_sha256=hashlib.sha256(snapshot).hexdigest(),
                    decoded=decoded, recovery=recovery, server_returncode=proc.returncode)
+        if args.atomic:
+            expected = args.log if stage in ('dir-sync-before','dir-sync-after') else args.stone
+            assert decoded['read_rc']==recovery['read_rc']==0
+            assert decoded['state']==recovery['state']==expected
+            assert decoded['sentinel']==recovery['sentinel']==args.log
+            if expected==args.stone: assert snapshot==before
         if stage == 'open-before': assert snapshot == before and decoded['read_rc'] == 0
         if stage in ('open-truncate', 'write-before', 'write-partial'): assert decoded['read_rc'] == -1
         if stage in ('write-after', 'close-after'): assert decoded['read_rc'] == 0 and decoded['state'] == args.log
@@ -200,6 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--result-dir', type=Path, required=True)
     parser.add_argument('--repetitions', type=int, default=3)
     parser.add_argument('--crash', action='store_true')
+    parser.add_argument('--atomic', action='store_true', help='interrupt temp/fsync/rename and require preserved old or new data')
     parser.add_argument('--server', action='append', help='label=server binary, only for isolated crash experiments')
     args = parser.parse_args()
     assert args.repetitions >= 1

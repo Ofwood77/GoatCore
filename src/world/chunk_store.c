@@ -1,6 +1,7 @@
 #include "mc_chunk_store.h"
 
 #include "mc_anvil.h"
+#include "mc_atomic_file.h"
 #include "mc_util.h"
 
 #include <errno.h>
@@ -12,28 +13,13 @@
 #include <zlib.h>
 
 static int mkdir_p_local(const char *path, mode_t mode) {
-    char tmp[1024];
-    size_t n;
-
-    if (!path || !*path) {
-        errno = EINVAL;
-        return -1;
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) return 0;
+        errno = ENOTDIR; return -1;
     }
-    n = strlen(path);
-    if (n >= sizeof(tmp)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    memcpy(tmp, path, n + 1);
-
-    for (size_t i = 1; i < n; i++) {
-        if (tmp[i] != '/') continue;
-        tmp[i] = '\0';
-        if (tmp[0] != '\0' && mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
-        tmp[i] = '/';
-    }
-    if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
-    return 0;
+    if (errno != ENOENT) return -1;
+    return mc_persistence_mkdirs(path, mode);
 }
 
 static int chunks_dir_path(char *buf, size_t cap, const char *world_path) {
@@ -270,26 +256,15 @@ int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk, const 
     if (deflate_buffer_zlib_local(raw, raw_len, &compressed, &compressed_len) != 0) goto cleanup;
     mc_save_profile_end("chunk_compress", chunk->cx, chunk->cz, span, compressed_len, 0);
 
+    mc_atomic_file_t file;
+    if (mc_atomic_file_begin(&file, chunk_path) != 0) goto cleanup;
     span = mc_save_profile_begin();
-    FILE *f = fopen(chunk_path, "wb");
-    if (!f) goto cleanup;
-    mc_save_profile_end("chunk_open_truncate", chunk->cx, chunk->cz, span, 0, 0);
-    span = mc_save_profile_begin();
-    if (compressed_len > 0 && fwrite(compressed, 1, compressed_len, f) != compressed_len) {
-        fclose(f);
+    if (mc_file_write_all(file.temp_fd, compressed, compressed_len) != 0) {
+        mc_atomic_file_abort(&file);
         goto cleanup;
     }
-    mc_save_profile_end("chunk_fwrite", chunk->cx, chunk->cz, span, compressed_len, 0);
-    span = mc_save_profile_begin();
-    if (fflush(f) != 0) {
-        fclose(f);
-        goto cleanup;
-    }
-    mc_save_profile_end("chunk_fflush", chunk->cx, chunk->cz, span, 0, 0);
-    span = mc_save_profile_begin();
-    if (fclose(f) != 0) goto cleanup;
-    mc_save_profile_end("chunk_fclose", chunk->cx, chunk->cz, span, 0, 0);
-    rc = 0;
+    mc_save_profile_end("chunk_temporary_write", chunk->cx, chunk->cz, span, compressed_len, 0);
+    rc = mc_atomic_file_commit(&file);
 
 cleanup:
     free(raw);

@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "mc_atomic_file.h"
 /*
  * World/chunk runtime, async chunk loading, and persistence glue.
  *
@@ -327,46 +328,8 @@ static int coords_to_chunk(int32_t x, int32_t z, int32_t *out_cx, int32_t *out_c
 }
 
 static int mkdir_p(const char *path, mode_t mode) {
-    if (!path || !*path) return -1;
-
-    char tmp[1024];
-    size_t n = strlen(path);
-    if (n >= sizeof(tmp)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    memcpy(tmp, path, n + 1);
-
-    while (n > 1 && tmp[n - 1] == '/') {
-        tmp[n - 1] = '\0';
-        n--;
-    }
-
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p != '/') continue;
-        *p = '\0';
-        struct stat st;
-        if (stat(tmp, &st) != 0) {
-            if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
-                *p = '/';
-                return -1;
-            }
-        } else if (!S_ISDIR(st.st_mode)) {
-            *p = '/';
-            errno = ENOTDIR;
-            return -1;
-        }
-        *p = '/';
-    }
-
-    struct stat st;
-    if (stat(tmp, &st) != 0) {
-        if (mkdir(tmp, mode) != 0 && errno != EEXIST) return -1;
-    } else if (!S_ISDIR(st.st_mode)) {
-        errno = ENOTDIR;
-        return -1;
-    }
-    return 0;
+    /* Establish durable directory ancestry once, before publishing workers. */
+    return mc_persistence_mkdirs(path, mode);
 }
 
 static int ensure_world_dirs(const char *world_path) {
@@ -721,8 +684,9 @@ static int save_chunk_to_store_with_entities(const mc_world_t *w, const mc_chunk
     int rc = mc_chunk_store_write(w->world_path, chunk, be_store ? be_store : &w->block_entities);
     if (rc != 0) {
         int e = errno;
-        log_error("chunk store save failed chunk=(%d,%d) world=%s (errno=%d %s)", chunk->cx, chunk->cz,
-                  w->world_path ? w->world_path : "(null)", e, strerror(e));
+        log_error("chunk store save %s chunk=(%d,%d) world=%s (errno=%d %s)",
+                  rc == MC_SAVE_DURABILITY_UNCERTAIN ? "durability uncertain after replacement" : "failed before replacement",
+                  chunk->cx, chunk->cz, w->world_path ? w->world_path : "(null)", e, strerror(e));
     } else if (w->debug_containers && w->debug_container_pos_set) {
         int32_t cx = 0, cz = 0;
         int lx = 0, lz = 0;
@@ -853,13 +817,17 @@ static void *worker_main(void *arg) {
                 chunk->dirty = (w->world_path && *w->world_path);
                 generated = true;
             } else {
-                log_error("anvil load failed for chunk (%d,%d) world=%s", job.cx, job.cz, w->world_path ? w->world_path : "(null)");
-                if (debug_target_chunk(w, job.cx, job.cz)) {
-                    log_info("chunk reload debug: worker chunk=(%d,%d) source=generate reason=load_error", job.cx, job.cz);
-                }
-                mc_world_generate_chunk(w, chunk);
-                chunk->dirty = (w->world_path && *w->world_path);
-                generated = true;
+                /* A read failure is not proof of absence. Generating here can
+                 * erase a valid file after a transient EIO, or destroy evidence
+                 * needed to recover an already damaged snapshot. Keep this slot
+                 * unavailable until an operator repairs/restarts the world. */
+                int saved = errno;
+                log_error("chunk store load failed; file preserved, chunk unavailable until restart chunk=(%d,%d) world=%s errno=%d",
+                          job.cx, job.cz, w->world_path ? w->world_path : "(null)", saved);
+                mc_chunk_destroy(chunk);
+                free(chunk);
+                mc_be_store_destroy(&loaded_block_entities);
+                continue;
             }
         }
         if (normalize_chunk_container_states(chunk)) {
