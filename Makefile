@@ -42,7 +42,7 @@ SRC = \
     src/world/chunk_store.c \
     src/world/chunk.c \
     src/world/container_store.c \
-    src/world/anvil.c \
+    src/world/anvil.c src/world/region_storage.c \
     src/world/nbt.c \
     src/world/packed.c \
     src/world/block_entity_store.c \
@@ -66,7 +66,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench
 
 TEST_BINS = \
     test_varint \
@@ -85,6 +85,7 @@ TEST_BINS = \
     test_paletted_container \
     test_chunk_network_codec \
     test_anvil_roundtrip \
+    test_region_storage \
     test_atomic_persistence \
     test_player_nbt \
     test_mining \
@@ -204,10 +205,10 @@ mc_server: generated_headers generated_sources $(OBJ)
 mc_recorder: tools/mc_recorder.c src/net/buffer.c src/protocol/varint.c src/protocol/framing.c src/protocol/crypto_stub.c src/util/mc_util.c src/generated/generated_minecraft_ids.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-mc_anvil_dump: tools/mc_anvil_dump.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c | generated_sources
+mc_anvil_dump: tools/mc_anvil_dump.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/paletted_container.c src/world/block_registry.c src/util/arena.c src/util/mc_util.c src/generated/generated_registries.c | generated_sources
+mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/paletted_container.c src/world/block_registry.c src/util/arena.c src/util/mc_util.c src/generated/generated_registries.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_varint: tests/test_varint.c src/protocol/varint.c
@@ -233,7 +234,7 @@ test_framing_crypto: tests/test_framing_crypto.c src/net/buffer.c src/protocol/v
 
 test_pvp: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 
-test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync
 
 test_nbt: tests/test_nbt.c src/world/nbt.c src/util/arena.c
@@ -257,10 +258,10 @@ test_paletted_container: tests/test_paletted_container.c src/world/paletted_cont
 test_chunk_network_codec: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 test_anvil_roundtrip: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 
-test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_player_nbt: tests/test_player_nbt.c tests/fixtures/vanilla-26.1.1-player.dat src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
@@ -272,7 +273,7 @@ test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_b
 test_block_drops: tests/test_block_drops.c src/gameplay/block_drops.c src/gameplay/mining.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_minecraft_ids.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_world_consistency: tests/test_world_consistency.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_world_consistency: tests/test_world_consistency.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_setup: tests/test_setup.c src/util/setup.c
@@ -339,11 +340,17 @@ distclean: clean
 -include $(OBJ:.o=.d)
 
 # Isolated remote persistence microbenchmark (no server listener).
-mc_save_bench: tools/mc_save_bench.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+mc_save_bench: tools/mc_save_bench.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 mc_trace_io: tools/mc_trace_io.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-test_atomic_persistence: tests/test_atomic_persistence.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_atomic_persistence: tests/test_atomic_persistence.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fread,--wrap=__fread_chk,--wrap=openat,--wrap=write,--wrap=pwrite,--wrap=pread,--wrap=fsync,--wrap=renameat,--wrap=close,--wrap=fstat,--wrap=flock,--wrap=calloc
+
+test_region_storage: tests/test_region_storage.c src/world/region_storage.c src/util/atomic_file.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+mc_region_bench: tools/mc_region_bench.c src/world/region_storage.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c | generated_sources
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS)

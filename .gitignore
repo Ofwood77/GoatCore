@@ -54,3 +54,5 @@ assets/*
 !assets/chunk_0_0_26_1_1.bin
 .aider*
 *Zone.Identifier
+
+/mc_region_bench

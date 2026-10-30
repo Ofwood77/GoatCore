@@ -5,6 +5,7 @@
 #include "mc_chunk.h"
 #include "mc_nbt.h"
 #include "mc_atomic_file.h"
+#include "mc_region_storage.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,6 +17,8 @@
  *   0 on success
  *   1 if the chunk is not present in the region file
  *  -1 on error */
+/* Reuses a pinned region index; no repeated header scan. Same output contract. */
+int mc_anvil_read_chunk_indexed(mc_region_file_t *file, unsigned slot, uint8_t **out, size_t *out_len);
 int mc_anvil_read_chunk_nbt(const char *region_path, int local_x, int local_z, uint8_t **out, size_t *out_len);
 
 /* Loads one Anvil chunk directly into an initialized mc_chunk_t.

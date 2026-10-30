@@ -473,7 +473,7 @@ int main(void) {
         }
     }
     /* Failure of the free-sector bitmap must not select another live chunk. */
-    for (int skip = 0; skip < 2; skip++) {
+    for (int skip = 0; skip < 3; skip++) {
         restore(region, region_before);
         fault = ALLOCATE;
         injected_errno = ENOMEM;

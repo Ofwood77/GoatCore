@@ -257,95 +257,39 @@ static int inflate_buffer(const uint8_t *src, size_t src_len, uint8_t **out, siz
     return 0;
 }
 
-int mc_anvil_read_chunk_nbt(const char *region_path, int local_x, int local_z, uint8_t **out, size_t *out_len) {
+int mc_anvil_read_chunk_indexed(mc_region_file_t *file, unsigned slot, uint8_t **out, size_t *out_len) {
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
-    if (!region_path || !out || !out_len) return -1;
-    if (local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) return -1;
-
-    FILE *f = fopen(region_path, "rb");
-    if (!f) {
-        if (errno == ENOENT) return 1;
-        return -1;
-    }
-
-    uint8_t header[MC_ANVIL_HEADER_BYTES];
-    size_t n = fread(header, 1, sizeof(header), f);
-    if (n != sizeof(header)) {
-        fclose(f);
-        return -1;
-    }
-
-    int idx = local_x + local_z * 32;
-    const uint8_t *ent = header + (idx * 4);
-    uint32_t entry = read_be32(ent);
-    uint32_t sector_off = entry >> 8;
-    uint8_t sector_count = (uint8_t)(entry & 0xFF);
-    if (sector_off == 0 || sector_count == 0) {
-        fclose(f);
-        return 1;
-    }
-
-    uint64_t chunk_off_bytes = (uint64_t)sector_off * MC_ANVIL_SECTOR_BYTES;
-    if (fseek(f, (long)chunk_off_bytes, SEEK_SET) != 0) {
-        fclose(f);
-        return -1;
-    }
-
-    uint8_t chunk_header[5];
-    if (fread(chunk_header, 1, sizeof(chunk_header), f) != sizeof(chunk_header)) {
-        fclose(f);
-        return -1;
-    }
-
-    uint32_t chunk_len = read_be32(chunk_header);
-    uint8_t compression_type = chunk_header[4];
-    if (chunk_len < 1) {
-        fclose(f);
-        return -1;
-    }
-
-    size_t max_payload = (size_t)sector_count * MC_ANVIL_SECTOR_BYTES;
-    if (chunk_len + 4 > max_payload) {
-        fclose(f);
-        return -1;
-    }
-
-    size_t comp_len = (size_t)chunk_len - 1;
-    uint8_t *comp = NULL;
-    if (comp_len > 0) {
-        comp = (uint8_t *)malloc(comp_len);
-        if (!comp) {
-            fclose(f);
-            return -1;
-        }
-        if (fread(comp, 1, comp_len, f) != comp_len) {
-            free(comp);
-            fclose(f);
-            return -1;
-        }
-    }
-    fclose(f);
-
-    if (compression_type == 3) {
-        *out = comp;
-        *out_len = comp_len;
+    if (!file || !out || !out_len || slot >= MC_REGION_SLOTS) { errno = EINVAL; return -1; }
+    const mc_region_entry_t *e = mc_region_entry(mc_region_file_index(file), slot);
+    uint8_t *record = NULL;
+    size_t n = 0;
+    int rc = mc_region_read_record(file, slot, &record, &n);
+    if (rc != 0) return rc;
+    if (!e->decodable) { free(record); errno = EOPNOTSUPP; return -1; }
+    if (e->compression == 3) {
+        memmove(record, record + 5, n - 5);
+        *out = record; *out_len = n - 5;
         return 0;
     }
+    rc = inflate_buffer(record + 5, n - 5, out, out_len);
+    free(record);
+    return rc;
+}
 
-    if (compression_type != 1 && compression_type != 2) {
-        free(comp);
-        return -1;
-    }
-
-    uint8_t *inflated = NULL;
-    size_t inflated_len = 0;
-    int rc = inflate_buffer(comp, comp_len, &inflated, &inflated_len);
-    free(comp);
-    if (rc != 0) return -1;
-    *out = inflated;
-    *out_len = inflated_len;
-    return 0;
+int mc_anvil_read_chunk_nbt(const char *path, int lx, int lz, uint8_t **out, size_t *out_len) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!path || !out || !out_len || lx < 0 || lx > 31 || lz < 0 || lz > 31) { errno = EINVAL; return -1; }
+    mc_region_file_t *file = NULL;
+    int rc = mc_region_open(path, &file);
+    if (rc != 0) return rc;
+    rc = mc_anvil_read_chunk_indexed(file, (unsigned)(lx + lz * 32), out, out_len);
+    int saved = errno;
+    int close_rc = mc_region_close(file);
+    if (rc >= 0 && close_rc != 0) { free(*out); *out = NULL; *out_len = 0; return -1; }
+    errno = saved;
+    return rc;
 }
 
 int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
@@ -1271,35 +1215,18 @@ cleanup:
 /* Reject malformed allocation tables and unsupported external payloads before
  * touching a replacement. Other chunks are copied byte-for-byte, never decoded
  * and rebuilt, so unknown NBT fields and compression bytes are preserved. */
-static int validate_region(int fd, const uint8_t *header, uint64_t size) {
-    if (size < MC_ANVIL_HEADER_BYTES || size % MC_ANVIL_SECTOR_BYTES) { errno = EINVAL; return -1; }
-    uint64_t sectors = size / MC_ANVIL_SECTOR_BYTES;
-    if (sectors > 0xFFFFFFu + 255u) { errno = EFBIG; return -1; }
-    uint8_t *used = calloc((size_t)sectors, 1);
-    if (!used) return -1;
-    used[0] = used[1] = 1;
-    int result = -1;
-    for (int i = 0; i < 1024; i++) {
-        uint32_t entry = read_be32(header + i * 4);
-        uint32_t off = entry >> 8, count = entry & 255u;
-        if (!entry) continue;
-        if (off < 2 || !count || (uint64_t)off + count > sectors) { errno = EINVAL; goto done; }
-        for (uint32_t j = 0; j < count; j++) {
-            if (used[off + j]) { errno = EINVAL; goto done; }
-            used[off + j] = 1;
-        }
-        uint8_t record[5];
-        if (mc_file_pread_all(fd, record, sizeof(record), (off_t)off * MC_ANVIL_SECTOR_BYTES) != 0) goto done;
-        uint32_t length = read_be32(record);
-        if (!length || (uint64_t)length + 4 > (uint64_t)count * MC_ANVIL_SECTOR_BYTES) { errno = EINVAL; goto done; }
-        /* External .mcc transactions are not implemented. Refuse the entire
-         * region, including edits to other slots, and leave every file intact. */
-        if ((record[4] & 0x80u) || record[4] < 1 || record[4] > 3) { errno = EOPNOTSUPP; goto done; }
-    }
-    result = 0;
-done:
-    free(used);
-    return result;
+static int validate_region(int fd, uint8_t *header, uint64_t size) {
+    mc_region_index_t *index = NULL;
+    if (mc_region_index_load(fd, &index) != 0) return -1;
+    const mc_region_stats_t *stats = mc_region_stats(index);
+    int rc = 0;
+    if (stats->file_bytes != size) { errno = ESTALE; rc = -1; }
+    else if (stats->external || stats->unsupported) { errno = EOPNOTSUPP; rc = -1; }
+    else memcpy(header, mc_region_header(index), MC_ANVIL_HEADER_BYTES);
+    int saved = errno;
+    mc_region_index_free(index);
+    errno = saved;
+    return rc;
 }
 
 int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len) {
@@ -1324,7 +1251,7 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         if (stat_rc != 0) goto done;
         if (!S_ISREG(st.st_mode) || st.st_size < MC_ANVIL_HEADER_BYTES) { errno = EINVAL; goto done; }
         size = (uint64_t)st.st_size;
-        if (mc_file_pread_all(source, header, sizeof(header), 0) != 0 || validate_region(source, header, size) != 0) goto done;
+        if (validate_region(source, header, size) != 0) goto done;
     } else if (errno != ENOENT) goto done;
     mc_save_profile_end("region_read_validate", local_x, local_z, span, sizeof(header), 0);
     span = mc_save_profile_begin();

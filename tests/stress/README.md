@@ -436,3 +436,46 @@ les états par Vanilla. En 26.1.1, le répertoire observé est
 `world/dimensions/minecraft/overworld/region` ; les régions entities/poi sont
 exclues. La fixture est toujours créée dans le résultat privé du runner.
 mc_save_bench expose à cet effet `rewrite-region FICHIER LOCAL_X LOCAL_Z`.
+
+## S1 : index de régions et allocation en mémoire
+
+`make test_region_storage mc_region_bench` construit le test C et le lecteur de
+régions. Le test utilise uniquement des fichiers temporaires. Le plan
+`mc_region_plan_*` ne réalise aucune écriture : croissance et réservations sont
+virtuelles, les anciens secteurs restent occupés après `retire`.
+
+Le contrôle indépendant ci-dessous ne lance aucun serveur, ne modifie pas les
+régions sources et refuse un répertoire de sortie déjà existant :
+
+```sh
+python3 tests/stress/check_region_storage.py \
+  --binary ./mc_region_bench \
+  --region-dir /chemin/monde-reference/dimensions/minecraft/overworld/region \
+  --repetitions 30 \
+  --result-dir tests/stress/results/region-index-neuf
+```
+
+Il génère une région synthétique (gzip, zlib, brut, LZ4/custom/inconnu opaques,
+référence externe), compare chaque entrée et bit d'occupation, puis compare
+**tous les octets NBT décompressés** avec un lecteur Python indépendant. Les
+empreintes des fichiers sources doivent rester identiques. Aucun `.mcc` n'est
+ouvert. Les NBT décodés et les mesures JSONL sont conservés dans la sortie.
+Les erreurs structurelles et les invariants d'allocation sont couverts en C.
+
+`mc_region_bench REGION REPETITIONS [REPERTOIRE_NBT_NEUF]` mesure séparément
+open, lecture d'en-tête, index complet, lookup (un million par passe), lecture
+brute/décodée d'un chunk et décodage de tous les chunks. Les durées JSONL sont
+celles de la **phase entière** ; diviser uniquement le lookup par son nombre
+d'opérations pour obtenir un coût par recherche. La première passe avec dump
+est nommée séparément et exclue des statistiques de décodage sans sortie.
+Le pilote lit/hash le fichier avant la mesure : cache chaud, aucun drop_caches.
+Les P95/P99 sont des quantiles empiriques, pas des bornes de latence HDD.
+
+Pour une nouvelle référence native, utiliser le runner Vanilla existant sur une
+instance isolée autorisée, puis ces régions après arrêt propre. La comparaison
+S1 a réutilisé les quatre régions historiques (1 294 chunks) et a également
+réécrit les quatre régions d'une nouvelle exécution officielle entre trois
+redémarrages. Le rapport détaillé est dans `docs/vanilla-compatibility.md`.
+Le backend atomique reste celui utilisé par défaut ; aucun journal ni writer
+incrémental n'est activé. Les règles habituelles d'exécution distante restent
+applicables hors de l'exception de maintenance explicitement autorisée.

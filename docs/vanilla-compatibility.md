@@ -2329,3 +2329,325 @@ barrières devront être examinés sans revenir à une écriture destructive ni
 supprimer les fsync. La reprise des familles de blocs Vanilla peut suivre cette
 validation de sécurité et de capacité ; aucune porte, trappe, redstone, phase 3
 ou simulation parallèle n'est commencée ici. La phase 2 reste ouverte.
+
+## Stockage Vanilla S1 — index natif et préparation de l'allocation (30 octobre 2026)
+
+### Portée et état initial
+
+HEAD initial vérifié : `4997ad9ef0a9642a1364dd3a358261933c7ee7cf`.
+L'arbre suivi était propre ; `.vscode/`, `src/main.py` et `start-aider.sh`
+étaient non suivis et restent exclus du lot. Aucun push. L'autorisation
+explicite de maintenance permet les tests locaux dans des exports, ports et
+mondes jetables. Aucun accès, déploiement ou changement des services distants
+25565/25587 ; leur état actuel n'est pas vérifié pendant l'indisponibilité.
+Les règles permanentes AGENTS/skills ne sont pas modifiées.
+
+S1 ajoute une fondation de lecture, d'indexation et de **planification en
+mémoire**. Le backend de remplacement atomique du lot précédent reste utilisé
+par défaut. Aucune écriture incrémentale, migration de monde, nouvelle file de
+sauvegarde, modification de gameplay, simulation parallèle ou refonte du tick.
+La phase 2 et le chantier de stockage restent ouverts.
+
+### Référence exacte : format, algorithme Vanilla, garanties GoatCore
+
+Référence : JAR interne officiel 26.1.1, protocole 775, DataVersion 4788,
+SHA-256 `3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Les sorties `javap -p -c` de RegionFile, RegionFileStorage, RegionBitmap,
+IOWorker, RegionFileVersion et ChunkAccess sont conservées dans les artefacts
+S1. Il s'agit du bytecode de cette version, pas d'un algorithme extrapolé.
+
+- **Format** : secteurs de 4 096 octets ; deux secteurs d'en-tête ; 1 024
+  emplacements big-endian (offset 24 bits, compte 8 bits), puis 1 024 timestamps.
+  Un record contient une longueur big-endian, un octet de compression et son
+  payload. La longueur comprend le codec, pas son préfixe de quatre octets.
+  Codecs déclarés dans le JAR : 1 gzip, 2 deflate/zlib (défaut), 3 none,
+  4 LZ4, 127 custom ; bit 128 pour un flux externe `.mcc`.
+- **Algorithme Vanilla** : RegionBitmap utilise un BitSet et recherche une
+  plage contiguë libre ; les secteurs d'en-tête sont réservés. RegionFile.write
+  réserve de nouveaux secteurs, écrit le payload, actualise offsets/timestamp
+  et écrit l'en-tête, exécute l'opération externe éventuelle, puis libère
+  l'ancienne plage. Les records de 256 secteurs ou plus passent par un fichier
+  externe et un stub interne. `flush` appelle FileChannel.force(true).
+  RegionFileStorage conserve au plus 256 régions dans son cache, évince/ferme
+  la dernière, et relaie lecture NBT/écriture et flush.
+- **Ordonnancement Vanilla** : IOWorker utilise un PriorityConsecutiveExecutor,
+  une SequencedMap de PendingStore et des CompletableFuture. Une nouvelle
+  demande du même chunk actualise les données encore en attente ; la vidange
+  retire la première entrée et programme la suivante, les lectures consultent
+  les écritures en attente. ChunkAccess possède un indicateur unsaved ;
+  markUnsaved le positionne et tryMarkSaved le teste/remet à zéro. Ces éléments
+  sont une référence pour les lots ultérieurs, pas une file ajoutée à GoatCore.
+- **Durabilité GoatCore** : la compatibilité du format n'exige pas de copier
+  une mise à jour d'en-tête en place. Le writer actuel conserve lock coopératif,
+  temporaire unique du même répertoire, écritures complètes avec EINTR,
+  fsync du fichier, rename atomique et fsync du répertoire. Seul 0 acquitte la
+  sauvegarde ; -1 indique l'échec avant publication et
+  MC_SAVE_DURABILITY_UNCERTAIN la publication visible non acquittée. Aucune
+  restauration hasardeuse. S1 ne supprime ni ne déplace ces barrières.
+
+### Audit des chemins et du contenu des mondes
+
+| Données | Vanilla 26.1.1 observé | GoatCore actuel |
+|---|---|---|
+| Chunks terrain | dimensions/minecraft/overworld/region/r.X.Z.mca | chunks/c_CX_CZ.bin, zlib + NBT de chunk ; writer .mca disponible séparément |
+| Entités et POI | dimensions/minecraft/overworld/entities et poi | Pas d'équivalent complet ; pas d'import natif de ces régions |
+| Joueurs | players/data/UUID.dat | Chemin actuel identique ; lecture de secours playerdata/UUID.dat |
+| Progrès/statistiques | players/advancements et players/stats | Pas de producteurs équivalents complets |
+| Métadonnées globales | level.dat, level.dat_old, session.lock | Pas de writer level.dat complet compatible avec un monde Vanilla |
+| Conteneurs | NBT/block entities et stockage natif concerné | Données prises en charge + fichiers containers/*.mct spécifiques GoatCore |
+
+Le monde officiel temporaire S1 confirme ces chemins, dont les sous-répertoires
+region/entities/poi de l'overworld. GoatCore crée encore un répertoire region
+historique, mais son chargeur de monde utilise les `.bin` et ne bascule pas
+sur `.mca`. Les `.bin` ne sont ni des caches jetables ni des régions natives :
+les supprimer détruirait le stockage actif. Les sauvegardes nouvelles restent
+4788 et les anciens chunks GoatCore 4785 restent lisibles.
+
+**Migration future non destructive** : inventorier hors ligne les sources,
+versions, fichiers externes et empreintes ; conserver une sauvegarde immuable ;
+produire un monde candidat séparé, avec level.dat/dimensions/seed et contenu
+explicitement compatibles ; exporter les chunks sans perdre les champs opaques,
+entités et données associées ; vérifier NBT, états, inventaires et relecture
+Vanilla avant une bascule explicite réversible. Aucun renommage automatique ni
+migration n'a lieu dans S1. La compatibilité des fichiers Anvil n'est pas une
+compatibilité complète du monde ou de ses fonctionnalités.
+
+### Architecture de la fondation
+
+`mc_region_storage.h` / `region_storage.c` définissent trois objets opaques :
+
+1. **Index immuable** : en-tête complet, 1 024 entrées et timestamps, longueur,
+   codec/external/decodable, statistiques et bitmap d'occupation à un bit par
+   secteur. Lecture par pread, validation de toute la table, offsets/comptes,
+   longueurs, secteurs d'en-tête, chevauchements, bornes et troncatures.
+   L'occupation inclut les deux secteurs d'en-tête. Les fichiers non réguliers,
+   inférieurs à 8 Kio, non alignés ou dépassant les limites représentables sont
+   refusés ; aucune réparation ou modification implicite.
+2. **Lecteur indexé** : fd O_RDONLY/O_NOFOLLOW épinglé, lecture opaque des
+   records, puis décodage gzip/zlib/brut via mc_anvil_read_chunk_indexed. Une
+   ouverture peut servir tous les chunks. Les anciens appels Anvil passent
+   désormais par cette validation complète ; lire un seul chunk via l'API par
+   chemin reconstruit l'index, il faut réutiliser le lecteur pour l'amortir.
+   fstat avant/après détecte les changements de taille/mtime en place et renvoie
+   ESTALE. Un rename n'invalide pas le lecteur de l'ancien inode ; ctime/nlink
+   ne sont donc pas utilisés comme identité de contenu. Cela suppose un monde
+   exclusivement possédé ou des écrivains coopératifs, pas un writer hostile.
+3. **Plan d'allocation sans I/O** : copie indépendante du bitmap et des entrées,
+   recherche contiguë, réservation explicite, croissance virtuelle jusqu'aux
+   limites du format. Tickets uniques au processus ; seule une réservation
+   non publiée appartenant au plan peut être annulée. Les secteurs encore
+   référencés ne deviennent jamais libres par `retire` : une liste conserve
+   slot/plage/epoch. `protect` épingle les plages d'une future récupération
+   avant toute réservation, même si elles paraissent libres dans l'en-tête.
+   Aucun reclaim/commit/unpin ou write en place n'est exposé en S1.
+
+Le snapshot expose device/inode/taille/mtime et CRC32 d'en-tête pour diagnostic
+et future vérification de source. **Ce CRC32 n'est ni une génération durable,
+ni une preuve cryptographique, ni un journal.** Les plans sont à propriétaire
+unique, sans nouveau thread. Les coordonnées sont floor-div/mod 32, y compris
+INT32_MIN/MAX. Les index ne contiennent aucun état mutable du monde vivant.
+
+Le writer atomique réutilise le validateur natif, tout en gardant sa propre
+allocation dans une **nouvelle image temporaire** et son protocole de
+publication existant. Réutiliser des secteurs de l'ancien chunk dans cette
+nouvelle image est sûr ; le futur writer incrémental ne bénéficie pas de cette
+propriété et le plan S1 conserve donc les anciennes plages occupées.
+Les échecs d'allocation du nouveau validateur et de l'ancien allocateur sont
+injectés séparément dans le test atomique (trois allocations).
+
+### Données opaques et restrictions
+
+Les records et NBT décompressés sont retournés sans filtrer leurs champs. Le
+writer atomique copie les chunks non modifiés octet pour octet. La comparaison
+indépendante contrôle tous les octets NBT, y compris les champs non interprétés.
+Cela ne promet pas que charger puis reconstruire un chunk via le modèle de
+jeu conserve tout NBT Vanilla inconnu : un import natif complet devra définir
+cette conservation explicitement avant activation.
+
+LZ4 (4), custom (127), autres codecs et références `.mcc` sont indexés et
+signalés. Leurs records internes restent lisibles comme octets opaques ; leur
+décodage n'est pas simulé. Les plans et le writer atomique refusent toute région
+contenant ces données non prises en charge, y compris une modification d'un
+autre slot. Aucun `.mcc` n'est ouvert, écrasé ou supprimé. Une transaction
+atomique multi-fichiers n'est pas implémentée. Une indexation réussie valide la
+structure, pas le sens de tout NBT ni l'intégrité d'un codec inconnu.
+
+### Tests exécutés et preuves conservées
+
+Compilation C11/O2 avec les options habituelles, dans un export isolé sur le
+NVMe local. Le SDK curl déjà extrait lors du lot précédent a été fourni via
+C_INCLUDE_PATH/LIBRARY_PATH, sans installation système. Un premier lien sans
+ces variables échouait sur `-lcurl` ; le build final les utilise correctement.
+`make -B precommit-check` a été rejoué sur les sources finales après nettoyage
+de l'export : **succès**, 25 suites C, smoke, multi-epoll, intégration login,
+générateurs et tests Python existants. Vérification d'hygiène Git locale séparée
+réussie. Aucune nouvelle règle de gameplay.
+
+| Scénario | Résultat S1 |
+|---|---|
+| Index, bitmap et allocation | test_region_storage : **3 344 assertions** ; région vide, un/plusieurs chunks, 1 024 slots présents, trous, timestamps, bounds, en-têtes/records tronqués, chevauchements et longueurs invalides refusés |
+| Coordonnées/allocation | Coordonnées négatives et INT32_MIN/MAX ; recherche contiguë, croissance virtuelle, limite d'offset 24 bits/255 secteurs ; pins conservés, retirement sans libération, tickets périmés/étrangers refusés |
+| Inodes et erreurs | Lecteur de l'ancien inode après rename intact ; nouvelle ouverture lit la nouvelle image ; troncature en place détectée ESTALE ; lectures et plans non supportés refusés proprement |
+| Compression et données opaques | Région synthétique gzip/zlib/brut + LZ4/custom/inconnu + stub externe ; égalité NBT intégrale et fichiers sources inchangés, entrées et bitmap contrôlés par Python indépendant |
+| Quatre régions historiques Vanilla | **1 294 chunks** ; chaque offset/compte/timestamp/longueur/codec et chaque secteur vérifiés ; tous les NBT décodés identiques octet pour octet ; SHA-256 des sources inchangés |
+| Backend atomique existant | **80 injections système**, **12 interruptions de processus**, **3 échecs calloc** ; lectures, durabilité incertaine, nettoyage et écrivains coopératifs threads/processus restent couverts |
+| Monde/NBT/ancien GoatCore | Suites Anvil, NBT, chunks réseau, monde et persistance : 4788 en écriture, lecture 4785, états, négatifs/frontières, régions multiples, dirty/revision et refus de régénérer une donnée illisible |
+| Escaliers/deux observateurs | **192 observations** finales identiques à une nouvelle capture officielle 26.1.1 et à la fixture versionnée ; **8 états** identiques après chacun des **3 redémarrages** |
+| Régions réécrites puis lues par Vanilla | Nouveau monde officiel isolé : **4 régions, 1 328 chunks** à chacune des trois passes ; NBT décompressés inchangés, publication atomique acquittée, relecture officielle des états réussie |
+| Placement/dalles/inventaires | **18 scénarios**, 4 états sauvegardés et inventaire après chacun des 3 redémarrages ; contrôlés contre la fixture Vanilla existante |
+| Ramassage/reconnexion | Scénarios de **2 puis 100 objets**, observateur concordant, inventaire après reconnexion et trois redémarrages ; pas de perte/duplication dans ces scénarios |
+
+Les 1 328 chunks du nouveau monde ne remplacent pas les 1 294 fichiers de
+référence historiques : ce sont deux captures distinctes. La suite native
+réécrit uniquement les fichiers terrain, pas entities/poi. Les 12 interruptions
+C sont des crashes de processus contrôlés, **pas une simulation de coupure
+électrique** ; les garanties matérielles et multi-fichiers restent celles du
+lot atomique précédent. Aucun protocole incrémental à tester en crash n'est
+activé en S1.
+
+**ASan + UBSan** : douze suites C passent, dont le nouvel index, atomic
+persistence, Anvil, NBT, monde, PvP/inventaires, escaliers, registre, palettes,
+codec réseau, joueurs et configuration. Le lecteur natif relit également les
+quatre régions/1 294 chunks sous sanitizers, avec comparaison Python.
+Compilation O1/g non-PIE, address+undefined, frame pointers, leak detection et
+halt_on_error. Les suites réseau escaliers (192 observations), placement
+(18 cas), ramassage (2 puis 100 objets), reconnexion et un redémarrage passent
+sur le serveur instrumenté. Aucun diagnostic mémoire/UB dans ces exécutions.
+
+**TSan local** : test_region_storage, test_perf_config, test_world_consistency
+et test_atomic_persistence terminent avec code 0, sans diagnostic, compilés
+non-PIE avec thread sanitizer et halt_on_error. Cela ne valide pas toutes les
+interactions réseau du serveur et ne constitue pas un résultat TSan distant.
+Le runtime Xeon historiquement en échec `unexpected memory mapping` n'est pas
+retenté pendant la maintenance.
+
+### Microbenchmarks locaux — aucune amélioration de TPS annoncée
+
+Matériel : Ryzen 7 7840HS, 16 CPU logiques, NVMe/ext4. Options O2 identiques,
+processus de test et compilations terminés avant les **mesures finales**.
+Cache chaud : le pilote hash/lit chaque région avant les chronomètres ; pas
+de drop_caches. Trente répétitions par région, lookup de 1 000 000 entrées par
+passe ; 29 échantillons de lecture complète sans dump (première passe avec
+sortie NBT mesurée séparément). JSONL bruts, octets, opérations et quantiles
+empiriques conservés. Les queues extrêmes ne sont pas caractérisées par
+seulement trente répétitions.
+
+| Région officielle | Chunks | Métadonnées index (octets) | Index complet P50/P95/P99 (µs) | Lecture + décodage région entière P50/P95/P99 (ms) |
+|---|---:|---:|---|---|
+| r.-1.-1 | 341 | 24 720 | 181,0 / 208,1 / 221,5 | 2,372 / 2,496 / 2,870 |
+| r.-1.0 | 342 | 24 720 | 196,8 / 232,7 / 251,5 | 2,481 / 2,769 / 2,938 |
+| r.0.-1 | 306 | 24 712 | 173,1 / 217,8 / 249,8 | 2,067 / 2,469 / 2,599 |
+| r.0.0 | 305 | 24 712 | 159,0 / 203,4 / 286,1 | 2,141 / 2,469 / 2,712 |
+
+Pour ces quatre régions, P50 : open seul **2,11–2,39 µs**, en-tête seul
+**0,99–1,24 µs**, lookup dans l'index chaud environ **1–2 ns par recherche**
+(boucle et checksum compris), lecture du premier record brut **1,34–1,43 µs**,
+premier chunk décompressé **5,10–31,41 µs** selon son contenu. Le constructeur
+d'index comprend la lecture d'en-tête, les 5 octets de chaque record, la
+validation et le bitmap ; son coût n'est pas une simple allocation en RAM.
+Mémoire affichée : structure + en-tête + entrées + bitmap, hors surcoût malloc,
+fd et éventuel plan indépendant. À la limite du format le bitmap est d'environ
+2 Mio ; il ne représente pas un cache des payloads.
+
+La reconstruction actuelle est mesurée face au parent 4997ad9e, sans changer
+le protocole d'écriture : **42 passes chronométrées**, trois répétitions par
+cas et version, ordre alterné ; **14 passes ptrace séparées** pour les syscalls.
+Les durées tracées ne servent pas à comparer la vitesse. Même nombre de
+sauvegardes acquittées, tous les états relus ; sorties `.bin` identiques octet
+pour octet. Référence serveur du parent :
+`48f9830fe1271f165329ac884f78872cad5224f194a0cd351f5de426f3c876c0`.
+
+| Travail fixé | Parent, durée médiane (ms) | S1, durée médiane (ms) | Sauvegardes / fsync mesurés par passe |
+|---|---:|---:|---|
+| Inactif, 16 chunks, 40 intervalles | 2 002,963 | 2 002,619 | 0 / 0 |
+| `.bin`, 200 changements, un chunk | 253,059 | 268,108 | 200 / 400 |
+| `.bin`, 200 changements, 16 chunks proches | 276,680 | 281,818 | 200 / 400 |
+| `.bin`, 200 changements, plusieurs régions logiques | 265,058 | 266,749 | 200 / 400 |
+| `.mca`, 100 sauvegardes, région d'un chunk | 139,771 | 142,823 | 100 / 200 |
+| `.mca`, 100 sauvegardes, région de 16 chunks | 144,137 | 142,814 | 100 / 200 |
+| `.mca`, 100 sauvegardes, région de 256 chunks | 230,803 | 235,948 | 100 / 200 |
+
+Les variations ne constituent pas un gain de sauvegarde : notamment le cas
+`.bin` à un chunk est **5,9 % plus lent** dans cette campagne, malgré un chemin
+`.bin` inchangé. Trois répétitions sur un PC actif ne suffisent pas à attribuer
+ce delta au nouveau code. Aucune réduction de fsync, de volume écrit ou du
+nombre d'actions n'est revendiquée. Les distributions détaillées et chaque
+répétition restent disponibles pour distinguer variation et régression future.
+
+Pour 256 chunks, une passe réécrit toujours **105 676 800 octets par write +
+1 228 800 par pwrite**, soit **106 905 600 octets** pour 100 sauvegardes :
+1 700 write, 400 pwrite et 200 fsync. Les autres occupations réécrivent
+2 457 600 octets (1 chunk) et 8 601 600 (16 chunks). Ce sont les octets soumis
+aux syscalls, pas l'amplification matérielle du SSD. Même volume sur les deux
+versions. S1 ne traite donc pas encore le coût de reconstruction.
+
+Sur les **300 sauvegardes** du cas 256 chunks, temps du chemin `.mca` seul :
+
+| Phase | Parent P50/P95/P99 (µs) | S1 P50/P95/P99 (µs) |
+|---|---|---|
+| Lecture/validation région | 118 / 153 / 171 | 125 / 164 / 180 |
+| Copie complète | 242 / 324 / 358 | 242 / 318 / 356 |
+| Total, barrières comprises | 2 222 / 2 520 / 2 632 | 2 221 / 2 662 / 2 962 |
+
+Maxima total observés : 2,984 ms parent, 6,581 ms S1. Le total cumulé S1 est
+679,114 ms murales contre 204,688 ms CPU pour ces 300 écritures : l'attente
+reste importante. Ces durées de backend ne sont **pas des MSPT**. Aucun nouveau
+benchmark de TPS/charge bots n'est présenté comme un gain : aucun writer
+incrémental ni nouvel ordonnanceur n'est activé. Le NVMe local ne représente
+pas le Xeon/HDD RAID ; mesures et durabilité devront être rejouées sur ce
+matériel avant tout déploiement.
+
+### Préparation de S2 et limites de sécurité
+
+S2 devra définir un journal de récupération **versionné, borné et vérifiable**,
+avec générations/identité durable de région, ancien et nouvel emplacement,
+longueurs/empreintes, ordre des transactions et points d'acquittement. L'ordre
+à démontrer est : verrou/propriété et validation de la source ; récupération
+et protection de toutes les plages encore référencées ; réservation hors
+plages protégées ; écriture complète et synchronisation des nouveaux payloads ;
+journal/métadonnées récupérables durablement ordonnés ; publication ;
+acquittement seulement après les barrières nécessaires. La libération des
+anciens secteurs doit attendre l'expiration de **toutes** les références de
+récupération. Un simple fsync d'un en-tête potentiellement déchiré ne suffit pas.
+Les tickets S1 et epochs en RAM ne sont pas des identifiants de transaction
+persistants. Revalider la source et sa génération avant toute publication.
+
+Matrice minimale S2 à définir/tester avant activation : crash avant journal,
+pendant payload, après sync des données, pendant en-tête/journal, après
+publication avant acquittement, pendant checkpoint/libération et au replay
+répété ; EIO/ENOSPC/EDQUOT/EINTR, journal tronqué/corrompu, séquences anciennes,
+transactions successives même région, snapshots de chunks obsolètes, plusieurs
+régions et références `.mcc`. Pas d'atomicité multi-régions ou
+inventaire/objets/joueurs promise. Aucun journal ni mécanisme de récupération
+incrémentale n'est livré dans S1, et les secteurs retirés ne sont jamais
+réutilisés par ses plans.
+
+Fichiers du lot : `.gitignore`, `Makefile`, `include/mc_region_storage.h`,
+`include/mc_anvil.h`, `src/world/region_storage.c`, `src/world/anvil.c`,
+`tests/test_region_storage.c`, `tests/test_atomic_persistence.c`,
+`tools/mc_region_bench.c`, `tests/stress/check_region_storage.py`,
+`tools/check_repo_hygiene.sh`, `tests/stress/README.md` et ce document.
+Les scripts Python restent invoqués par python3, sans changement de permissions.
+
+Artefacts bruts conservés et ignorés par Git sous
+`tests/stress/results/storage-s1/` : sorties javap, manifest.json,
+precommit-final.log, export stage et binaires, native-benchmark-final
+(en-têtes, bitmap, JSONL, NBT décompressés, hashes), backend-final (42 mesures,
+14 comptes de syscalls, CSV et mondes), analysis.json/analyze.py,
+stairs-final/placement-final/pickup-final/pickup100-final, vanilla-final
+(captures et hashes des trois réécritures), sanitizers et exécutions asan-*.
+Les pilotes antérieurs ne sont pas utilisés dans les tableaux finaux.
+
+SHA-256 du binaire normal final testé :
+`349f1e3d41dd6361edce2d731c988e5a02a8283f0b73f7b0140e6fea613a0583`.
+Binaire ASan+UBSan :
+`24cc8ee8a76c80c7b3d0a79a0b77bb0b5ab6d7e734b93406f030222cf0cb5fc7`.
+Outil de lecture/benchmark :
+`2a1440945fb0596062e243e403d0e4ba934b69627547bb1bd207f86550379c0c`.
+Un seul commit local pour S1, sans push :
+`Introduce native Anvil region indexing and sector allocation`.
+
+S1 fournit une fondation testée ; la réduction des réécritures et le coût
+minimal sur le tick restent des objectifs des lots suivants. Priorité à S2 :
+protocole de récupération et preuves de résistance aux interruptions, puis
+revalidation Xeon/HDD RAID. Aucune porte, trappe, redstone ou phase 3 commencée.
