@@ -38,15 +38,25 @@ def region_payloads(path):
     return payloads
 
 
-def rewrite_regions(runtime, probe, output):
+def rewrite_regions(runtime, probe, output, s2_experimental=False):
     rows=[]
     region_dir=runtime/'world/dimensions/minecraft/overworld/region'
     if not region_dir.is_dir():region_dir=runtime/'world/region'
+    if s2_experimental:
+        # This runtime was freshly created by this runner; never a supplied world.
+        marker=region_dir/'.goatcore-s2-disposable'
+        if not marker.exists():
+            with marker.open('x') as file:
+                file.write('GoatCore S2 disposable tests only\n');file.flush();os.fsync(file.fileno())
+            directory=os.open(region_dir,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC)
+            try:os.fsync(directory)
+            finally:os.close(directory)
     for path in sorted(region_dir.glob('*.mca')):
         before=region_payloads(path)
         if not before:continue
         slot=next(iter(before))
-        done=subprocess.run([str(probe.resolve()),'rewrite-region',str(path),str(slot%32),str(slot//32)],
+        prefix=[str(probe.resolve())]+(['--experimental-disposable'] if s2_experimental else [])
+        done=subprocess.run(prefix+['rewrite-region',str(path),str(slot%32),str(slot//32)],
                             capture_output=True,text=True,timeout=120,check=True)
         after=region_payloads(path)
         assert before==after, path
@@ -59,6 +69,7 @@ def rewrite_regions(runtime, probe, output):
 def run(args):
     if args.port in (25565,25587): raise ValueError("main service ports are forbidden")
     if args.fsync_probe and not args.fsync_probe.is_file():raise ValueError("fsync probe library not found")
+    if args.s2_experimental and not args.anvil_rewriter:raise ValueError('S2 requires an explicit experimental rewriter')
     if args.anvil_rewriter and args.kind!='vanilla':raise ValueError("native region rewrite requires a disposable Vanilla world")
     (ROOT/"tests/stress/results").mkdir(parents=True,exist_ok=True)
     result=args.result_dir.resolve() if args.result_dir else Path(tempfile.mkdtemp(prefix="blocks-",dir=ROOT/"tests/stress/results"))
@@ -81,7 +92,7 @@ def run(args):
         command=[str(args.server_binary.resolve())]
     for phase in ["edit", "verify"] + [f"verify-{i}" for i in range(2, args.verify_restarts + 1)]:
         if phase!='edit' and args.anvil_rewriter:
-            rewrite_regions(runtime,args.anvil_rewriter,result/f'anvil-rewrite-{phase}.json')
+            rewrite_regions(runtime,args.anvil_rewriter,result/f'anvil-rewrite-{phase}.json',args.s2_experimental)
         phase_env=env.copy()
         if args.fsync_probe and args.kind=="goatcore":
             phase_env.update(MC_PERF="1",MC_PERF_TRACE_PATH=str(result/f"ticks-{phase}.csv"),
@@ -135,6 +146,7 @@ if __name__=="__main__":
     parser.add_argument("--result-dir",type=Path)
     parser.add_argument("--pickup-count",type=int,default=2,choices=(2,100))
     parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
+    parser.add_argument("--s2-experimental",action="store_true",help="arm S2 only inside this fresh isolated Vanilla runtime")
     parser.add_argument("--anvil-rewriter",type=Path,help="rewrite native Vanilla regions with mc_save_bench before each verification restart")
     parser.add_argument("--fsync-probe",type=Path,help="optional test-only fsync library and per-phase tick traces")
     run(parser.parse_args())

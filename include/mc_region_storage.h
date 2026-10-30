@@ -47,6 +47,10 @@ typedef struct {
  * changing in-place files. Unknown codecs and .mcc stubs remain inspectable.
  * Readers/writers still require exclusive world ownership or cooperation. */
 int mc_region_index_load(int fd, mc_region_index_t **out);
+/* Recovery-only read-only validation of a saved header against existing payloads.
+ * logical_bytes bounds the old image; fd may include a newer uncommitted tail. */
+int mc_region_index_load_snapshot(int fd, const uint8_t header[MC_REGION_HEADER_BYTES],
+                                  uint64_t logical_bytes, mc_region_index_t **out);
 void mc_region_index_free(mc_region_index_t *index);
 const mc_region_entry_t *mc_region_entry(const mc_region_index_t *index, unsigned slot);
 const mc_region_stats_t *mc_region_stats(const mc_region_index_t *index);

@@ -35,7 +35,7 @@ flag_bad() {
 
 while IFS= read -r path; do
     case "$path" in
-        *.o|*.d|mc_server|mc_recorder|mc_anvil_dump|mc_gen_bench|mc_save_bench|mc_trace_io|mc_region_bench|test_*)
+        *.o|*.d|mc_server|mc_recorder|mc_anvil_dump|mc_gen_bench|mc_save_bench|mc_trace_io|mc_region_bench|mc_region_txn|test_*)
             flag_bad "tracked build artifact" "$path"
             ;;
         .codex|world/*|data/*|mc_vania_asset/*|"erreur reseau"/*|llm/*|reports/*)

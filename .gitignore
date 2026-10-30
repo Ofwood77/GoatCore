@@ -56,3 +56,5 @@ assets/*
 *Zone.Identifier
 
 /mc_region_bench
+
+/mc_region_txn

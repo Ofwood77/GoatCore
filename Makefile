@@ -66,7 +66,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn
 
 TEST_BINS = \
     test_varint \
@@ -86,6 +86,7 @@ TEST_BINS = \
     test_chunk_network_codec \
     test_anvil_roundtrip \
     test_region_storage \
+    test_region_txn \
     test_atomic_persistence \
     test_player_nbt \
     test_mining \
@@ -354,3 +355,11 @@ test_region_storage: tests/test_region_storage.c src/world/region_storage.c src/
 
 mc_region_bench: tools/mc_region_bench.c src/world/region_storage.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c | generated_sources
 	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS)
+
+# Experimental only: intentionally absent from SRC and mc_server.
+REGION_TXN_SRC = src/world/region_txn.c src/world/region_storage.c src/world/anvil.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c
+mc_region_txn: tools/mc_region_txn.c $(REGION_TXN_SRC) | generated_sources
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto
+
+test_region_txn: tests/test_region_txn.c $(REGION_TXN_SRC) | generated_sources
+	$(CC) $(CFLAGS) -DMC_REGION_TXN_TESTING -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--wrap=write,--wrap=pwrite,--wrap=fsync,--wrap=unlinkat,--wrap=ftruncate,--wrap=realloc,--wrap=close,--wrap=renameat -o $@ $^ $(LDFLAGS) -lcrypto

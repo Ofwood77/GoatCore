@@ -2651,3 +2651,493 @@ S1 fournit une fondation testée ; la réduction des réécritures et le coût
 minimal sur le tick restent des objectifs des lots suivants. Priorité à S2 :
 protocole de récupération et preuves de résistance aux interruptions, puis
 revalidation Xeon/HDD RAID. Aucune porte, trappe, redstone ou phase 3 commencée.
+
+## Stockage Vanilla S2 — écriture incrémentale et récupération (30 octobre 2026)
+
+Parent audité : e9a2f61eb7d9fee820be5daace6ca2083f3ec24a. Arbre suivi propre ;
+les trois fichiers/répertoires personnels non suivis sont préservés. Maintenance
+et exception locale maintenues, aucun accès aux services principaux.
+
+### Choix et garanties du protocole
+
+Comparaison des stratégies : le remplacement atomique existant fournit une
+image directement cohérente mais recopie toute la région ; un redo exige de
+conserver durablement assez de nouvelles données pour reconstruire tout commit
+incomplet ; un undo de données en place exigerait des copies de payloads anciens.
+**Choix S2 : copy-on-write des secteurs et journal de métadonnées (undo avant commit, redo après commit).** Les
+anciens payloads restent intacts et les nouveaux sont écrits ailleurs. Un batch
+est trié par slot ; doublons et suppressions sont refusés. L'ancien en-tête
+complet suffit à annuler le batch, même si un secteur d'en-tête est déchiré.
+Aucune atomicité de pwrite, quatre octets ou secteur, n'est supposée.
+
+Le journal est immuable et publié par le helper atomique existant avant toute
+mutation de la région. Après fsync des payloads puis de l'en-tête, un petit
+état auxiliaire par région est remplacé atomiquement et durablement : il porte
+UUID, génération monotone, identité device/inode, issue COMMIT et SHA-256 du
+journal. Cette publication valide la transaction. Le journal est ensuite
+supprimé et le répertoire synchronisé ; le retour 0 exige aussi ce nettoyage.
+Une erreur après publication peut donc laisser un commit durable non acquitté.
+
+Un journal de génération G est admissible si l'état est G-1 (transaction en
+attente : undo), ou G avec la même empreinte et une issue COMMIT (redo) ou
+ABORT (undo idempotent). Tout autre cas bloque la région. Le rollback restaure
+et synchronise l'ancien en-tête, puis publie l'issue ABORT de génération G
+avant nettoyage. Un ancien journal ne peut ainsi ni annuler un commit ultérieur,
+ni revenir sur son propre commit déjà durable. Aucune génération n'est avancée
+avant que le journal soit prêt : seule une transaction peut être en attente.
+
+Les deux formats sont versionnés et SHA-256 protégés. Une identité incohérente,
+un fichier ambigu, tronqué ou corrompu bloque les écritures ; aucun journal
+utile n'est effacé pour régénérer un chunk. Les empreintes détectent une
+corruption, elles n'authentifient pas un écrivain malveillant.
+
+Ordre : propriété exclusive du répertoire de test, verrou de région,
+récupération préalable, index S1 et réservations sans toucher aux anciens
+secteurs ; journal durable ; croissance/écriture COW ; fsync des données ;
+écriture d'en-tête ; fsync de région ; état COMMIT durable ; unlink journal ;
+fsync répertoire ; acquittement. Les anciens secteurs ne deviennent réutilisables
+qu'à la reconstruction suivante du bitmap, après disparition durable du journal.
+La récupération vérifie les anciens records et, pour COMMIT, les nouveaux
+records ; elle restaure l'en-tête choisi, fsync, publie ABORT si nécessaire,
+puis supprime/synchronise le journal. Une interruption à chaque étape reste
+récupérable et idempotente. Pas d'hypothèse d'atomicité du pwrite d'en-tête.
+
+Le backend est lié uniquement aux outils/tests explicitement expérimentaux. Un
+répertoire doit porter un marqueur de tests jetables et son propriétaire
+exclusif maintient un flock non bloquant pendant toute la session ; deux
+processus S2 indépendants ne peuvent pas posséder ce même répertoire. Le tick,
+les workers, `chunks/*.bin`, le writer atomique et les règles Minecraft restent
+inchangés. Le lecteur S1 ordinaire ne connaît pas le journal ; un lecteur
+concurrent non coordonné ou Vanilla ne doit pas ouvrir une région en cours de
+transaction. Après fermeture propre ou récupération achevée, le `.mca` est
+natif et n'a besoin ni du journal ni de l'état auxiliaire pour sa lecture par
+Vanilla. Copier une transaction inachevée vers un autre inode n'est pas une
+procédure de récupération : préserver les originaux et récupérer avant export.
+
+Limites : données externes `.mcc`, LZ4, custom/inconnu refusées sans
+modification ; aucune transaction multi-régions/inventaires ; aucun gain de TPS
+revendiqué. Les tests SIGKILL conservent le cache noyau et ne reproduisent pas
+une coupure électrique. Les garanties électriques sont conditionnelles au
+respect des fsync et de l'ordre des écritures par le système de fichiers et
+le matériel ; une corruption arbitraire du disque reste hors démonstration.
+
+### Implémentation et formats S2 version 1
+
+`region_txn.c` et `mc_region_txn.h` sont liés uniquement à `mc_region_txn` et au
+test C. Aucun symbole mc_region_txn_* n'apparaît dans mc_server (contrôle nm).
+Le changement commun à S1 est un constructeur d'index en lecture seule prenant
+un en-tête sauvegardé et sa taille logique. Il permet de vérifier les anciens
+payloads quand l'en-tête sur disque est déchiré ; le constructeur ordinaire garde
+ses contrôles. Cette vue historique ne constitue pas une base d'allocation
+courante hors du protocole de récupération.
+
+L'outil exige `--experimental-disposable` et le marqueur exact
+`.goatcore-s2-disposable`. `init` refuse un répertoire existant. Une session
+conserve `.s2-owner.lock` sous flock exclusif/non bloquant ; chaque région prend
+aussi le `.mca.lock` coopératif existant. Le thread ouvrant est l'unique
+propriétaire du handle ; un appel depuis un autre thread est refusé EPERM.
+Aucun worker, mutex de simulation ou choix de backend dans mc_server n'est
+ajouté. Les verrous sont consultatifs : ils ne peuvent pas protéger contre un
+outil externe non coopératif ou un lancement Vanilla simultané. Aucun partage
+de monde avec ces outils n'est autorisé par le contrat expérimental.
+
+Les updates sont des snapshots NBT immuables explicitement fournis par
+l'appelant, triés par slot, sans doublons. La sérialisation du modèle de jeu et
+les révisions des chunks vivants ne sont pas intégrées ici ; un appelant doit
+ordonner ses snapshots. Il n'y a aucune file dont un ancien résultat pourrait
+arriver tard. La génération interdit le rejeu d'anciennes transactions disque,
+pas un utilisateur qui fournirait volontairement un vieux NBT comme nouvelle
+mise à jour. S3 devra définir ce lien avec les revisions avant toute intégration.
+
+Les records modifiés sont préparés/compressés en zlib, les autres chunks ne
+sont pas reconstruits. Le plan S1 réserve des secteurs hors de toutes les plages
+encore vivantes ; même pour un batch de 1 024 updates, aucun ancien secteur
+n'est réutilisé. La région ne fait que grandir si nécessaire ; aucune troncature
+réduisant son contenu et aucun compactage ne sont réalisés. Un seul timestamp
+par batch est copié dans les entrées modifiées ; les autres timestamps restent
+identiques. Limites : 1–1 024 updates, 1–255 secteurs par record, NBT individuel
+au plus 64 Mio, total des secteurs nouveaux du batch au plus 64 Mio, offsets
+24 bits. Les suppressions et codecs externes/non pris en charge sont refusés.
+
+Les entiers des fichiers auxiliaires sont big-endian, sans dépendre du layout
+d'une structure C. Aucun pointeur, ticket RAM ou CRC32 S1 n'est utilisé comme
+identité transactionnelle durable.
+
+**`r.X.Z.mca.s2-state` (160 octets)** :
+
+| Offset | Contenu |
+|---:|---|
+| 0 / 8 / 12 | Magic GCS2STA1 (8), version 1 (u32), taille 160 (u32) |
+| 16 | UUID aléatoire de lignée de région (16 octets, getrandom vérifié) |
+| 32 / 40 / 48 | Dernière génération résolue, device, inode (u64) |
+| 56 / 60 | Coordonnées de région X/Z (bits i32) |
+| 64 / 68 | Issue : 0 initiale, 1 COMMIT, 2 ABORT (u32) ; 28 octets réservés nuls |
+| 96 | SHA-256 du journal résolu ; nul pour génération initiale 0 |
+| 128 | SHA-256 des 128 octets précédents |
+
+**`r.X.Z.mca.s2-journal` (16 584 à 98 464 octets)** :
+
+| Offset | Contenu |
+|---:|---|
+| 0 / 8 / 12 | Magic GCS2UND1 (8), version 1 (u32), longueur totale (u32) |
+| 16 / 32 | UUID (16), génération de transaction G (u64) |
+| 40 / 48 | Device/inode attendus de la région (u64) |
+| 56 / 64 | Tailles logique ancienne et nouvelle (u64) |
+| 72 / 76 | Coordonnées X/Z (bits i32) |
+| 80 / 84 / 88 | Nombre d'anciens chunks et d'updates (u32), 40 octets réservés nuls |
+| 128 | Ancien en-tête complet, 8 192 octets |
+| 8 320 | Nouvel en-tête complet, 8 192 octets |
+| 16 512 | Records triés : tous les anciens chunks puis tous les updates ; chacun slot u32, longueur u32, SHA-256 du record Anvil complet (40 octets) |
+| Fin − 32 | SHA-256 de tous les octets précédents |
+
+La longueur hashée d'un record comprend ses quatre octets de longueur, le
+codec et le payload, mais pas le padding. Les plages protégées comprennent
+bien tous les secteurs alloués, padding inclus. Des secteurs libres fragmentés
+sont utilisables seulement s'ils n'appartiennent à aucun ancien chunk.
+
+Le journal et l'état passent par le helper atomique (temporaire unique dans le
+même répertoire, fsync/close, rename, fsync/close parent). Le répertoire est
+épinglé par FD ; le helper est appelé via `/proc/self/fd/N/NOM`, ce qui suppose
+le procfs Linux disponible. Les noms de région/journal sont canoniques ; les
+coordonnées hors i32, doublons d'identité, liens symboliques finaux, hardlinks,
+fichiers spéciaux, versions inconnues et tailles non bornées sont refusés.
+Les lectures auxiliaires utilisent O_NONBLOCK avant leur contrôle de type.
+
+Les contrats Linux utilisés sont ceux de [fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html)
+(synchronisation distincte du fichier et de son répertoire),
+[rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html) (remplacement atomique)
+et [flock(2)](https://man7.org/linux/man-pages/man2/flock.2.html) (verrou consultatif
+lié à une description de fichier ouverte). Ils ne constituent pas une preuve
+que chaque contrôleur matériel respecte ces garanties.
+
+### Ordre effectif et récupération
+
+Pour une région déjà initialisée, un commit effectue **sept fsync** : deux pour
+le journal, un pour les données COW, un pour l'en-tête de région, deux pour
+l'état COMMIT et un pour la suppression du journal. L'initialisation d'une
+nouvelle région vide et de son état demande des barrières supplémentaires.
+Le bootstrap peut laisser une région vide valide en cas d'échec, jamais
+remplacer un ancien chunk par un état par défaut.
+
+1. Ouvrir le répertoire de tests et prendre sa propriété exclusive ; synchroniser le répertoire, scanner les journaux canoniques et terminer leur récupération avant d'admettre une écriture.
+2. Préparer les records et les secteurs via S1 ; lire/hash tous les anciens records ; préparer ancien/nouvel en-tête. Initialiser durablement l'état de lignée si absent, uniquement sans journal en attente.
+3. Publier le journal G = dernière génération résolue + 1 et synchroniser son répertoire. Rien dans la région n'est encore modifié.
+4. Agrandir seulement si nécessaire, écrire complètement les nouveaux secteurs, puis fsync de région. Les anciens secteurs restent intacts.
+5. Écrire les 8 Kio d'en-tête, fsync de région et fermer son FD en vérifiant le résultat. L'image nouvelle est complète, mais la transaction est encore annulable.
+6. Publier l'état G/COMMIT et l'empreinte du journal par remplacement atomique durable. C'est le point de validation logique.
+7. Supprimer le journal, fsync du répertoire et vérifier la fermeture du verrou ; seul le retour 0 acquitte l'opération. Une fermeture du verrou en échec ne devient pas un faux succès.
+
+Résultats : -1 avant modification de chunks existants ; -2 signifie absence
+d'acquittement et fermeture/récupération nécessaires. Ce dernier peut désigner
+un commit déjà durable dont le nettoyage n'est pas terminé, ou une transaction
+encore à annuler. Toutes les tentatives entrées dans le chemin d'écriture et
+échouées rendent la session inutilisable jusqu'à réouverture ; les arguments
+rejetés avant toute tentative ne modifient rien. Les logs donnent région,
+journal/incident et errno. EINTR et transferts courts sont traités ; close
+Linux n'est pas réessayé après EINTR. Les erreurs EIO/ENOSPC/EDQUOT/fsync/rename
+ne sont jamais acquittées. Aucun rollback improvisé sur le chemin d'erreur.
+
+À la récupération, vérifier intégralement journal, état, UUID/génération,
+identité inode/device, coordonnées, checksums, longueurs, tri et cohérence des
+deux tables. Le validateur S1 reçoit l'ancien en-tête sauvegardé sans faire
+confiance à l'en-tête actuel. Les nouvelles allocations sont vérifiées hors
+des anciens secteurs et dans les bornes. Toutes les empreintes anciennes sont
+vérifiées avant mutation ; pour COMMIT, toutes les nouvelles sont aussi
+vérifiées sur disque.
+
+- État G−1 : restaurer l'ancien en-tête, fsync, publier G/ABORT durablement.
+- État G/ABORT avec même journal : répéter la restauration ancienne.
+- État G/COMMIT avec même journal : restaurer le nouvel en-tête vérifié, sans annuler un commit durable.
+- Autre génération, autre empreinte, journal/état ambigu ou corrompu : bloquer l'ouverture expérimentale, conserver les fichiers et signaler l'incident.
+
+Après restauration durable et résolution de l'état, unlink et fsync du parent.
+La récupération ne raccourcit pas le fichier ; un tail non validé devient
+simplement libre dans l'index suivant. Si une croissance partielle a laissé
+une taille non alignée mais des anciens payloads complets, elle est seulement
+alignée vers le haut. Les temporaires abandonnés restent conservés et ne sont
+ni promus ni automatiquement effacés. Une seule transaction en attente par
+région, aucune transaction globale entre régions.
+
+### Compatibilité et procédure avant Vanilla
+
+| Moment de l'interruption | Image directement observée après SIGKILL | Décision de récupération |
+|---|---|---|
+| Avant journal, pendant son temporaire | Ancien en-tête et anciens chunks intacts | Ancien ; temporaire ignoré |
+| Journal durable, pendant/après nouveaux secteurs avant en-tête | Ancienne image cohérente, tail éventuellement inutilisé | Annulation de tout le batch |
+| Pendant écriture d'en-tête | Image potentiellement déchirée ou batch partiel ; aucune garantie directe | Restaurer ancien en-tête via journal |
+| En-tête écrit, avant fsync | Le cache peut montrer le nouvel en-tête ; aucune garantie électrique directe | Annulation si pas de COMMIT durable |
+| En-tête fsync, avant COMMIT durable | Nouvelle image cohérente mais transaction non validée | Annulation complète |
+| Pendant publication du COMMIT | Région nouvelle complète ; issue durable ancienne/nouvelle selon publication | Ancienne ou nouvelle selon état valide |
+| Après COMMIT durable, pendant nettoyage | Nouvelle image durable dans le modèle fsync | Rejeu nouveau puis nettoyage |
+| Pendant récupération | En-tête en restauration potentiellement partiel | Répéter la même décision grâce au journal conservé |
+
+Une coupure électrique peut perdre ou déchirer les écritures non synchronisées ;
+le cache conservé par SIGKILL ne prouve pas l'inverse. Ces invariants reposent
+sur des fichiers locaux, des remplacements atomiques et un stockage respectant
+les barrières. Les tests ne simulent ni panne physique du PC, ni tous les
+comportements possibles d'un RAID/firmware.
+
+**Procédure obligatoire** : arrêter tous les écrivains, conserver une sauvegarde
+des originaux, lancer sur le répertoire expérimental d'origine :
+
+```sh
+./mc_region_txn --experimental-disposable recover /chemin/tests-jetables
+```
+
+Exiger le code 0, puis vérifier l'absence de `*.s2-journal` et relire les NBT
+avec l'index/lecteur ou l'oracle indépendant. Fermer le backend avant Vanilla.
+Seulement ensuite exporter les `.mca` propres ou ouvrir ce monde isolé avec
+Minecraft 26.1.1. Ne pas armer un monde personnel en y ajoutant le marqueur.
+Un journal ou un état corrompu n'est jamais supprimé pour forcer l'ouverture.
+La récupération sur une copie d'inode différent est refusée : récupérer les
+originaux avant export, ou conserver les copies pour une réparation experte
+ultérieure ; S2 ne fournit pas de rebinding automatique.
+
+Les `.mca` propres sont natifs et directement lisibles ; les `.s2-state` et
+verrous ne sont pas nécessaires au lecteur Vanilla. Changer ensuite d'écrivain
+peut changer l'inode : S2 refusera de réutiliser une ancienne lignée incohérente.
+Les lecteurs S1 non coordonnés restent hors contrat pendant une transaction.
+LZ4/custom/inconnu et `.mcc` restent refusés avant modification, sans ouverture
+ou suppression de fichiers externes. Aucun import/migration de monde ni format
+nouveau dans le `.mca`, aucune garantie multi-fichiers d'entités/inventaires.
+
+### Validation exécutée
+
+`make -B precommit-check` réussit dans l'export local isolé : **26 suites C**,
+smoke, réseau multi-epoll, login/reconnexion/UUID, générateurs et tests Python.
+Le SDK curl déjà extrait est utilisé par C_INCLUDE_PATH/LIBRARY_PATH, sans
+installation système. Hygiène Git et diff vérifiés séparément. Le registre,
+4788 en écriture et lecture historique 4785 sont couverts par les suites
+existantes. Aucun changement de placement, collision, inventaire ou protocole.
+
+Le harnais transactionnel lie les hooks et wrappers de syscall **uniquement au
+test** ; ils sont absents de l'outil normal et du serveur. Les racines et images
+avant récupération sont conservées sous MC_REGION_TXN_TEST_ROOT. Les données
+modifiées dans ces tests comprennent une valeur NBT distincte de l'ancienne et
+un champ opaque ; elles sont relues intégralement, pas seulement par existence
+de fichier ou acquittement réseau.
+
+| Matrice S2 | Résultat |
+|---|---|
+| 15 interruptions d'écriture nommées | Avant journal, temporaire partiel, journal durable, secteurs partiels/terminés/synchronisés, avant/pendant/après en-tête, région synchronisée, avant COMMIT, COMMIT durable, nettoyage et acquittement final : issue attendue et relecture répétée identiques |
+| 14 interruptions de récupération | Sept étapes chacune pour undo et redo : début, en-tête partiel/terminé, fsync, état durable, unlink et fin ; même issue après nouvelle récupération |
+| 68 injections système nommées | EINTR/EIO/ENOSPC/EDQUOT selon write/pwrite/fsync/ftruncate/unlink/rename/close et ENOMEM sur réservation ; échecs conservés, EINTR réessayé sauf close, aucun faux acquittement |
+| 20 erreurs pendant récupération | Écriture d'en-tête, fsync, publication ABORT et nettoyage ; journal conservé tant qu'utile, nouvelle récupération réussie |
+| Cas supplémentaires | Transferts courts/nuls, fsync du répertoire après rename de journal/COMMIT, en-tête entièrement remplacé par 8 Kio corrompus, journal/état tronqués ou altérés, ancien journal après commit plus récent, même journal COMMIT rejoué, données anciennes endommagées refusées |
+| Allocation/intégrité | Régions vides/neuves, 1 024 emplacements, batch de 1 024 updates, trous fragmentés, croissance, transactions successives, plusieurs régions, coordonnées négatives/extrêmes, doublons et record >255 secteurs refusés |
+| Propriété | Deux handles du même processus et deux processus concurrents ne peuvent pas posséder la racine ; appels depuis un autre thread refusés ; version récente non écrasée par ancien journal |
+| Codecs | LZ4, custom, inconnu et externe : région inchangée octet pour octet après refus ; aucun chemin `.mcc` activé |
+
+Les tests de corruption volontaire échouent **comme attendu** : ils exigent le
+refus et la conservation, pas une réparation arbitraire. Les injections de
+fermeture consomment réellement le FD avant de simuler l'erreur Linux. Les
+quinze issues de crash vont à l'ancien batch avant COMMIT et au nouveau après
+COMMIT durable ; après un rename d'état non encore acquitté, SIGKILL observe
+la version visible, sans déduire sa persistance électrique. Les erreurs
+initialement injectées dans le protocole préliminaire ne servent pas de
+résultats finaux ; seules les passes du protocole décrit ici sont retenues.
+
+**Compatibilité officielle après fermeture propre (A)** : nouvelle instance
+Java 26.1.1 isolée, 192 observations d'escaliers identiques à la fixture et à
+GoatCore ; avant chacun des **trois redémarrages**, quatre régions natives sont
+réécrites avec l'outil S2 normal. **1 330 chunks par passe**, tous les SHA-256 des
+NBT décompressés inchangés ; huit états observables relus par Vanilla.
+
+**Compatibilité après récupération (B)** : seconde instance Vanilla isolée,
+même matrice de **192 observations** ; avant chacun des trois redémarrages,
+quatre écritures sont interrompues pendant le pwrite d'en-tête, puis récupérées
+**deux fois** avant lancement officiel. **1 295 chunks par passe**, NBT tous
+identiques, huit états relus. Cela fait douze interruptions de régions natives
+et douze récupérations répétées ; les mondes sont distincts, leurs nombres de
+chunks ne sont pas comparés comme une charge de performance. Il s'agit de
+réécritures de NBT officiels inchangés ; les tests C distincts prouvent les
+changements de contenu et l'annulation/rejeu de batches. Aucun test Vanilla
+n'ouvre une transaction en attente sans récupération.
+
+**Lecture directe (C)** : les limites du tableau précédent restent explicites.
+S2 ne fournit aucune atomicité de lecture native d'un batch pendant la
+réécriture d'en-tête. L'unité de garantie est la région après fermeture propre
+ou récupération reconnue. Aucune simulation exhaustive de panne électrique
+n'est annoncée.
+
+**Non-régression du backend actif** : GoatCore final passe les 192 observations,
+les 18 placements/dalles/fusions, deux observateurs, inventaires et reconnexion,
+puis respectivement 8 et 4 états après trois redémarrages. Le ramassage de
+100 objets est vu par deux joueurs et conserve exactement les quantités à la
+reconnexion et après trois redémarrages. Les états d'escaliers concordent avec
+les deux nouvelles exécutions officielles et la fixture. Ces sauvegardes restent
+dans `.bin`, jamais dans le backend S2. Aucune transaction globale inventaire,
+items et chunks n'est promise.
+
+**ASan+UBSan** : treize suites C passent : test_region_txn, test_region_storage,
+test_pvp, test_stairs, test_world_consistency, test_anvil_roundtrip,
+test_atomic_persistence, test_player_nbt, test_chunk_network_codec,
+test_paletted_container, test_perf_config, test_block_registry et test_nbt.
+Le lecteur relit également les quatre régions historiques/1 294 chunks avec
+l'oracle indépendant. Les trois suites réseau escaliers/placement/ramassage
+100 objets passent avec reconnexion et un redémarrage. Aucun diagnostic dans
+ces exécutions. Options O1/g, address+undefined, frame pointers, non-PIE,
+detect_leaks et halt_on_error ; les logs d'injection EIO sont attendus.
+
+**TSan local** : cinq suites terminent avec code 0, sans diagnostic :
+test_region_txn (dont thread propriétaire et processus concurrents),
+test_region_storage, test_perf_config, test_world_consistency et
+test_atomic_persistence. Non-PIE, thread sanitizer, halt_on_error. Ce résultat
+ne valide ni tout le serveur réseau ni le runtime distant historiquement en
+échec `unexpected memory mapping` ; aucun test distant n'est tenté.
+
+### Benchmarks locaux à travail égal
+
+Ryzen 7 7840HS, 16 CPU logiques, NVMe/ext4. Tous les serveurs temporaires et les
+compilations sont terminés avant les mesures. Un même outil O2 appelle soit
+l'API atomique inchangée, soit S2 : mêmes NBT, régions de même taille initiale,
+une plage libre d'un secteur, warmup d'une sauvegarde par région hors mesure.
+Trois répétitions, ordre alterné. Chaque passe effectue **100 sauvegardes
+acquittées**, puis relit tous les NBT ; les deux backends produisent les mêmes
+payloads. Au total **54 passes / 5 400 sauvegardes**, dont 2 700 par backend.
+Dix-huit passes ptrace séparées mesurent les syscalls ; leurs temps ne servent
+pas à comparer les performances.
+
+Les NBT de contrôle sont petits et comportent DataVersion, S2Value et un champ
+opaque ; ils isolent le stockage, sans représenter un chunk jouable complet.
+La sérialisation NBT est mesurée séparément dans le total ; les latences d'appel
+ci-dessous comprennent préparation/compression et transaction, hors cette
+sérialisation. La trace légère MC_SAVE_TRACE_PATH est activée sur les deux
+backends pour les phases ; ses coûts et la variabilité du PC restent inclus.
+Préparation, warmup, vérification et récupération sont hors période active.
+
+Durées **médianes** des trois passes de 100 sauvegardes, en ms :
+
+| Chunks par région | Répartition | Atomique | S2 |
+|---:|---|---:|---:|
+| 1 | Même chunk | 125,078 | 404,313 |
+| 1 | Slots répartis (un seul disponible) | 128,779 | 406,773 |
+| 1 | Quatre régions | 137,090 | 388,408 |
+| 256 | Même chunk | 229,238 | 409,136 |
+| 256 | Slots répartis | 229,169 | 455,594 |
+| 256 | Quatre régions | 236,444 | 441,157 |
+| 1 024 | Même chunk | 502,485 | 596,589 |
+| 1 024 | Slots répartis | 495,083 | 598,893 |
+| 1 024 | Quatre régions | 539,115 | 619,857 |
+
+Latences des **300 appels regroupés** du cas « même chunk », P50/P95/P99 et
+maximum, en ms :
+
+| Chunks | Atomique P50/P95/P99 ; max | S2 P50/P95/P99 ; max |
+|---:|---|---|
+| 1 | 1,227 / 1,377 / 1,490 ; 1,539 | 4,042 / 4,572 / 4,817 ; 5,032 |
+| 256 | 2,262 / 2,546 / 2,783 ; 9,169 | 4,087 / 4,868 / 5,063 ; 5,136 |
+| 1 024 | 4,892 / 5,621 / 6,319 ; 12,292 | 6,000 / 6,985 / 7,333 ; 8,949 |
+
+Volumes exacts acceptés par les syscalls pour 100 sauvegardes, identiques sur
+les trois répartitions de chaque occupation :
+
+| Chunks | Octets atomiques | Octets S2, journal/état compris | Secteurs `.mca` soumis A / S2 | fsync A / S2 |
+|---:|---:|---:|---:|---:|
+| 1 | 2 867 200 | 2 907 200 | 700 / 300 | 200 / 700 |
+| 256 | 107 315 200 | 3 927 200 | 26 200 / 300 | 200 / 700 |
+| 1 024 | 421 888 000 | 6 999 200 | 103 000 / 300 | 200 / 700 |
+
+S2 écrit trois secteurs natifs par update dans ces fixtures (record et en-tête),
+plus l'état de 160 octets et un journal de **16 624 / 26 824 / 57 544 octets**.
+Les fichiers temporaires sont inclus ; l'amplification physique ext4/SSD ne
+l'est pas. Baisse de volume total : **96,34 %** à 256 chunks, **98,34 %** à 1 024 ;
+à un chunk le journal augmente au contraire le volume de **1,40 %**. Aucun
+secteur encore utile à undo/redo n'est réutilisé.
+
+La latence augmente dans ces passes : même chunk, **3,23× / 1,78× / 1,19×**
+selon l'occupation. Les sept barrières, journal et état atomiques inclus,
+coûtent davantage que les deux du backend de remplacement. Les P99/max ne
+s'améliorent pas uniformément. **La réduction du volume n'est pas un gain de
+TPS ni une baisse démontrée du temps de sauvegarde.** Le backend actif ne
+change pas et ces mesures NVMe ne prédisent pas les résultats HDD RAID.
+
+Pour le même chunk, CPU médian par passe : atomique **18,326 / 61,996 /
+218,561 ms**, S2 **38,887 / 80,763 / 204,098 ms**. La différence mural−CPU est
+conservée par passe dans les résultats ; elle mesure le temps non CPU, incluant
+ordonnancement et attente, pas exclusivement le disque. Les médianes CPU et
+murales peuvent appartenir à des répétitions différentes et ne s'additionnent
+pas comme une décomposition d'une passe unique.
+
+La sérialisation totale des 100 petits NBT représente environ **60–93 µs**
+médians selon la passe. Compression/préparation record, P50 : atomique
+**44 / 43 / 58 µs**, S2 **52 / 52 / 56 µs**. La préparation S2 index/allocations/
+SHA de tous les anciens records monte de **18 à 426 puis 1 574 µs** P50
+(P99 **36 / 527 / 2 053 µs**). Les publications durables du journal et du COMMIT
+occupent chacune environ **1,1–1,3 ms** P50. Ces spans sont imbriqués avec les
+spans atomic_file_* ; ne pas les additionner deux fois. Le volume réduit
+supprime les copies complètes, mais les checksums et barrières demeurent
+coûteux ; aucune optimisation spéculative supplémentaire n'est appliquée.
+
+Après les passes, les régions des deux backends présentent une plage libre
+d'un secteur, une seule plage libre et une plage libre maximale de longueur 1.
+Les métadonnées et calculs indépendants de fragmentation après récupération
+sont conservés. Cette charge avec un record d'un secteur ne mesure pas la
+fragmentation de tailles variables ; les trous et allocations contiguës sont
+couverts séparément dans les suites C.
+
+**Récupération mesurée** : 27 interruptions supplémentaires sur les fichiers
+originaux de la campagne S2, après la mesure active ; 18 avant COMMIT et 9 après
+COMMIT durable. Même payload NBT réécrit, journal conservé avant récupération,
+relecture de tous les NBT et second passage idempotent, tous réussis. Par
+occupation, six échantillons undo et trois redo ; P95/P99 reflètent donc surtout
+le maximum, sans caractérisation fiable des queues :
+
+| Chunks | Undo P50 / max (ms) | Redo P50 / max (ms) |
+|---:|---|---|
+| 1 | 3,963 / 5,368 | 2,570 / 2,704 |
+| 256 | 4,246 / 4,481 | 3,220 / 3,247 |
+| 1 024 | 5,396 / 5,986 | 4,718 / 4,831 |
+
+Ces temps comprennent ouverture/propriété, contrôle des empreintes, restauration,
+barrières et nettoyage. Le second passage ne rejoue aucune modification.
+Aucun benchmark bots/TPS du backend S2 n'est présenté puisqu'il n'est pas
+intégré au monde actif. Les mesures HDD RAID après maintenance restent requises.
+
+### Livrables, limites et étape suivante
+
+Sources ajoutées : `include/mc_region_txn.h`, `src/world/region_txn.c`,
+`tests/test_region_txn.c`, `tools/mc_region_txn.c`,
+`tests/stress/profile_region_txn.py`. Modifications : `.gitignore`, `Makefile`,
+`include/mc_region_storage.h`, `src/world/region_storage.c`,
+`tools/check_repo_hygiene.sh`, `tests/stress/run_block_checks.py`,
+`tests/stress/README.md` et ce document. Aucun changement de permission de script.
+
+Artefacts ignorés, conservés sous `tests/stress/results/storage-s2/` : exports
+stage/asan/tsan, precommit.log, journaux de build/sanitizers, matrices C et
+images avant récupération, vanilla-clean/vanilla-recovered (hashes et captures),
+stairs-final/placement-final/pickup-final et asan-*, bench-final (54 mesures,
+18 traces, 27 récupérations, CSV et commandes), analysis.json/analyze.py,
+manifest.json. Les pilotes et prototypes sont conservés séparément et exclus
+des chiffres finaux. La mise au point du harnais a corrigé le repérage du parser
+du runner et l'attribution des écritures de régions temporaires dans les
+statistiques ; les volumes totaux bruts n'ont pas été remplacés par des estimations.
+
+SHA-256 du serveur normal final testé (S2 non lié) :
+`d1aad1c56b2d2e3524ff7f29cbb88cec7e7c423b91807404f53f06e677d334ad`.
+SHA-256 de l'outil S2 normal réellement utilisé dans les mesures et Vanilla :
+`b66dd4f10c4a4323d3cf7c3a8e8c04168904b1b3e560a7b272c963554769a669`.
+SHA-256 du serveur ASan+UBSan :
+`c9aa1d8f678a4f04c8d5d0fa2a20d031362c3fb809bca57f1e2a04769af49952`.
+
+25565/25587 : aucune action, copie de binaire, modification de configuration,
+authentification, permission ou données. Leur état distant n'est pas contrôlé
+pendant la maintenance. Aucun déploiement et aucun push. Les processus
+Minecraft locaux temporaires sont arrêtés. Les trois éléments personnels non
+suivis restent exclus. Un seul commit local prévu :
+`Implement experimental crash-recoverable incremental Anvil writes`.
+
+L'activation réelle reste interdite : S2 est un outil expérimental sur racines
+jetables. Restent hors démonstration : coupures électriques/firmware, matériel
+Xeon/HDD RAID, NFS, transactions multi-régions/joueurs/entités/items, `.mcc`,
+codecs non pris en charge, réparation d'une corruption physique ou adoption
+automatique d'une lignée sur inode copié, lecteurs non coordonnés, migration
+complète des mondes et gestion des snapshots vivants. La compatibilité de fichier
+après fermeture/récupération est démontrée dans les cas officiels décrits,
+pas une parité complète du contenu des mondes.
+
+Prochain lot recommandé : revalidation Xeon/HDD RAID dès disponibilité et
+étude mesurée des batches avec acquittements/révisions clairement définis,
+avant toute intégration à l'ordonnanceur ou migration. Ne pas supprimer des
+barrières pour masquer le surcoût. Le backend atomique et `.bin` restent les
+chemins par défaut ; aucune autre phase Minecraft n'est commencée.

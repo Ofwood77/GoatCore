@@ -61,7 +61,7 @@ static bool same(const mc_region_source_t *a, const struct stat *b) {
            a->file_bytes == (uint64_t)b->st_size && a->mtime_seconds == b->st_mtim.tv_sec &&
            a->mtime_nanoseconds == b->st_mtim.tv_nsec;
 }
-int mc_region_index_load(int fd, mc_region_index_t **out) {
+static int load_index(int fd, const uint8_t *snapshot, uint64_t logical_bytes, mc_region_index_t **out) {
     if (!out) {
         errno = EINVAL;
         return -1;
@@ -70,11 +70,13 @@ int mc_region_index_load(int fd, mc_region_index_t **out) {
     struct stat st;
     if (stat_fd(fd, &st) != 0)
         return -1;
-    if (!S_ISREG(st.st_mode) || st.st_size < MC_REGION_HEADER_BYTES || st.st_size % MC_REGION_SECTOR_BYTES) {
+    uint64_t image_bytes = snapshot ? logical_bytes : (uint64_t)st.st_size;
+    if (!S_ISREG(st.st_mode) || st.st_size < MC_REGION_HEADER_BYTES || image_bytes < MC_REGION_HEADER_BYTES ||
+        image_bytes > (uint64_t)st.st_size || image_bytes % MC_REGION_SECTOR_BYTES) {
         errno = EINVAL;
         return -1;
     }
-    uint64_t n = (uint64_t)st.st_size / MC_REGION_SECTOR_BYTES;
+    uint64_t n = image_bytes / MC_REGION_SECTOR_BYTES;
     if (n > MC_REGION_MAX_SECTORS) {
         errno = EFBIG;
         return -1;
@@ -89,13 +91,15 @@ int mc_region_index_load(int fd, mc_region_index_t **out) {
     }
     v->source = (mc_region_source_t){(uint64_t)st.st_dev, (uint64_t)st.st_ino, (uint64_t)st.st_size,
                                      st.st_mtim.tv_sec,   st.st_mtim.tv_nsec,  0};
-    v->stats.file_bytes = (uint64_t)st.st_size;
+    v->stats.file_bytes = image_bytes;
     v->stats.sectors = (uint32_t)n;
     v->stats.occupied = 2;
     v->stats.metadata_bytes = sizeof(*v) + words((uint32_t)n) * sizeof(uint64_t);
     mark(v->used, 0, true);
     mark(v->used, 1, true);
-    if (mc_file_pread_all(fd, v->header, sizeof(v->header), 0) != 0)
+    if (snapshot)
+        memcpy(v->header, snapshot, sizeof(v->header));
+    else if (mc_file_pread_all(fd, v->header, sizeof(v->header), 0) != 0)
         goto fail;
     v->source.header_crc32 = (uint32_t)crc32(0, v->header, sizeof(v->header));
     for (unsigned i = 0; i < MC_REGION_SLOTS; i++) {
@@ -148,6 +152,19 @@ fail:;
     mc_region_index_free(v);
     errno = saved;
     return -1;
+}
+int mc_region_index_load(int fd, mc_region_index_t **out) {
+    return load_index(fd, NULL, 0, out);
+}
+int mc_region_index_load_snapshot(int fd, const uint8_t header[MC_REGION_HEADER_BYTES],
+                                  uint64_t logical_bytes, mc_region_index_t **out) {
+    if (!header) {
+        if (out)
+            *out = NULL;
+        errno = EINVAL;
+        return -1;
+    }
+    return load_index(fd, header, logical_bytes, out);
 }
 void mc_region_index_free(mc_region_index_t *v) {
     if (v) {

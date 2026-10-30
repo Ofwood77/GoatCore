@@ -479,3 +479,57 @@ redémarrages. Le rapport détaillé est dans `docs/vanilla-compatibility.md`.
 Le backend atomique reste celui utilisé par défaut ; aucun journal ni writer
 incrémental n'est activé. Les règles habituelles d'exécution distante restent
 applicables hors de l'exception de maintenance explicitement autorisée.
+
+## S2 : backend incrémental expérimental et récupération
+
+Le module transactionnel n'est **pas lié à mc_server**. Le stockage actif `.bin`
+et le backend atomique restent inchangés. Construire explicitement :
+
+```sh
+make mc_region_txn test_region_txn mc_trace_io
+./test_region_txn
+./mc_region_txn --experimental-disposable init /chemin/tests-jetables-neuf
+```
+
+`init` refuse un répertoire existant ; ne jamais créer son marqueur dans un
+monde personnel. Le backend exige ce marqueur et une propriété exclusive.
+Les tests d'interruption conservent leurs fichiers dans MC_REGION_TXN_TEST_ROOT
+(`/tmp` par défaut). Ils n'arrêtent aucune machine physique ni service existant.
+
+Comparaison à travail fixé, trois répétitions et comptes système séparés :
+
+```sh
+python3 tests/stress/profile_region_txn.py \
+  --tool ./mc_region_txn --fault-tool ./test_region_txn --tracer ./mc_trace_io \
+  --result-dir tests/stress/results/s2-neuf --repetitions 3 --operations 100
+```
+
+Le pilote crée uniquement des répertoires neufs et teste 1/256/1024 chunks,
+modifications d'un chunk, d'une région et de quatre régions. Les NBT de contrôle
+contiennent DataVersion, S2Value et un champ opaque, pour isoler le stockage ;
+ce ne sont pas des mondes jouables. Le pilote compare tous les NBT, mesure
+CPU/mural, sérialisation, compression/phases, syscalls, volumes, fragmentation,
+puis interrompt et récupère les fichiers originaux. Il ne lance aucun serveur.
+Les durées sous ptrace ne servent pas à mesurer la vitesse. Aucun gain TPS
+n'est déduit de ce backend encore séparé.
+
+Le runner Vanilla existant accepte `--s2-experimental --anvil-rewriter
+./mc_region_txn` pour les fermetures propres, ou `--anvil-rewriter
+./test_region_txn` pour interrompre une écriture d'en-tête puis **récupérer avant
+chaque redémarrage Vanilla**. Ce drapeau arme uniquement le répertoire fraîchement
+créé par le runner. Les régions fournies de l'extérieur et services principaux
+ne sont jamais armés par ce runner. La maintenance autorise temporairement les
+instances locales ; les règles distantes s'appliquent de nouveau après celle-ci.
+
+Avant toute ouverture Vanilla d'une région interrompue, arrêter les écrivains,
+conserver les originaux, récupérer sur leurs inodes d'origine :
+
+```sh
+./mc_region_txn --experimental-disposable recover /chemin/tests-jetables
+```
+
+Exiger succès et absence de journaux en attente, puis vérifier les NBT avant
+export. Le journal/état auxiliaire corrompu bloque les écritures et reste
+conservé. Ne pas le supprimer ni copier une transaction inachevée vers un autre
+inode pour contourner l'identité. Le rapport de compatibilité décrit le format,
+les décisions undo/redo, les barrières et les garanties non démontrées.
