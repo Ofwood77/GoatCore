@@ -84,8 +84,14 @@ static void preservation(void) {
     CHECK(mc_chunk_init(&a, -1, 32, 0) == 0);
     /* >16, >32 and >256 entries exercise padded 5/6/9-bit boundaries. */
     for (int layer = 0; layer < 3; layer++)
-        for (unsigned i = 0; i < (unsigned)(layer == 0 ? 20 : layer == 1 ? 40 : 300); i++)
-            CHECK(mc_chunk_set_block(&a, i & 15, layer * 16 + (int)(i >> 8), (i >> 4) & 15, i + 1) == 0);
+        for (unsigned i = 0, state = 1; i < (unsigned)(layer == 0   ? 20
+                                                       : layer == 1 ? 40
+                                                                    : 300);
+             i++, state++) {
+            while (mc_native_state_sensitive(state))
+                state++;
+            CHECK(mc_chunk_set_block(&a, i & 15, layer * 16 + (int)(i >> 8), (i >> 4) & 15, state) == 0);
+        }
     CHECK(mc_storage_write(store, &a, NULL) == 0);
     CHECK(mc_storage_read(store, -1, 32, &b, NULL) == 0);
     for (int y = -64; y < 320; y++)
@@ -320,6 +326,16 @@ static void world_roundtrip(void) {
             CHECK(ready == 0);
             if (pass)
                 CHECK(state == (int32_t)(i + 1));
+            bool allowed = false;
+            for (int retry = 0; retry < 3000 && !allowed; retry++) {
+                mc_world_tick(w, 0);
+                allowed = mc_world_storage_action_allowed(w, pos[i][0], 70, pos[i][1]);
+                if (!allowed) {
+                    struct timespec ts = {0, 1000000};
+                    nanosleep(&ts, NULL);
+                }
+            }
+            CHECK(allowed);
             CHECK(mc_world_set_block(w, pos[i][0], 70, pos[i][1], i + 1) == 0);
             CHECK(mc_world_flush_block(w, pos[i][0], 70, pos[i][1]) == 0);
         }
@@ -340,7 +356,170 @@ static void world_roundtrip(void) {
     CHECK(access(p, F_OK) == -1 && errno == ENOENT);
     free(root);
 }
+#include "generated_native_be_blocks.h"
+static void opaque_entities(void) {
+    CHECK(native_sensitive_by_block[0] == 0);
+    uint32_t chest =
+        mc_world_runtime_state_id_from_key("minecraft:chest[facing=north,type=single,waterlogged=false]", -1);
+    mc_chunk_t source, loaded;
+    CHECK(mc_chunk_init(&source, 0, 0, 0) == 0);
+    CHECK(mc_chunk_set_block(&source, 2, 64, 2, chest) == 0);
+    uint8_t *raw = NULL;
+    size_t n = 0;
+    CHECK(mc_anvil_encode_chunk_nbt(&source, NULL, &raw, &n) == 0);
+    mc_nbt_tag_t *root = parse(raw, n);
+    free(raw);
+    mc_nbt_tag_t *list = get(root, "block_entities");
+    list->payload.list.items = calloc(2, sizeof(void *));
+    CHECK(list->payload.list.items);
+    mc_nbt_tag_t *be = tag(MC_NBT_TAG_COMPOUND, NULL);
+    list->payload.list.items[0] = be;
+    list->payload.list.length = 1;
+    mc_nbt_tag_t *id = tag(MC_NBT_TAG_STRING, "id");
+    id->payload.string_val = strdup("minecraft:chest");
+    add(be, id);
+    for (unsigned i = 0; i < 3; i++) {
+        mc_nbt_tag_t *t = tag(MC_NBT_TAG_INT, (const char *[]){"x", "y", "z"}[i]);
+        t->payload.int_val = i == 1 ? 64 : 2;
+        add(be, t);
+    }
+    mc_nbt_tag_t *custom = tag(MC_NBT_TAG_COMPOUND, "S3B:opaque");
+    add(be, custom);
+    mc_nbt_tag_t *blob = tag(MC_NBT_TAG_BYTE_ARRAY, "bytes");
+    blob->payload.byte_array.length = 4;
+    blob->payload.byte_array.data = malloc(4);
+    CHECK(blob->payload.byte_array.data);
+    memcpy(blob->payload.byte_array.data, "a\0\xffz", 4);
+    add(custom, blob);
+    mc_nbt_tag_t *items = tag(MC_NBT_TAG_LIST, "Items");
+    items->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    add(be, items);
+    uint8_t *be_before = NULL;
+    size_t be_n = 0;
+    serialize(be, &be_before, &be_n);
+    serialize(root, &raw, &n);
+    CHECK(mc_anvil_decode_native(raw, n, 0, 0, &loaded) == 0);
+    loaded.storage_nbt = raw;
+    loaded.storage_nbt_len = n;
+    CHECK(loaded.storage_guard && !loaded.storage_readonly);
+    CHECK(mc_chunk_set_block(&loaded, 10, 64, 10, 1) == 0);
+    uint8_t *saved = NULL;
+    size_t sn = 0;
+    CHECK(mc_anvil_encode_native(&loaded, NULL, &saved, &sn) == 0);
+    mc_nbt_tag_t *after = parse(saved, sn);
+    uint8_t *be_after = NULL;
+    size_t an = 0;
+    serialize(get(after, "block_entities")->payload.list.items[0], &be_after, &an);
+    CHECK(an == be_n && !memcmp(be_before, be_after, an));
+    free(be_before);
+    free(be_after);
+    free(saved);
+    mc_nbt_free(after);
+    char *world_root = temp(), region[4096];
+    mc_world_storage_t *store = NULL;
+    CHECK(mc_storage_open(world_root, MC_STORAGE_ANVIL_ATOMIC, &store) == 0);
+    path(region, world_root, "dimensions/minecraft/overworld/region/r.0.0.mca");
+    CHECK(mc_anvil_write_chunk_nbt(region, 0, 0, loaded.storage_nbt, loaded.storage_nbt_len) == 0);
+    CHECK(mc_storage_write(store, &loaded, NULL) == 0);
+    CHECK(mc_chunk_set_block(&loaded, 11, 64, 10, 1) == 0);
+    fail_dir_sync = 1;
+    CHECK(mc_storage_write(store, &loaded, NULL) == MC_SAVE_DURABILITY_UNCERTAIN);
+    CHECK(mc_storage_write(store, &loaded, NULL) == 0);
+    mc_storage_close(store);
+    free(world_root);
+    CHECK(mc_chunk_set_block(&loaded, 2, 64, 2, 0) == 0);
+    CHECK(mc_anvil_encode_native(&loaded, NULL, &saved, &sn) == -1);
+    CHECK(mc_chunk_set_block(&loaded, 2, 64, 2, chest) == 0);
+    CHECK(mc_chunk_set_block(&loaded, 2, 63, 2, 1) == 0);
+    CHECK(mc_anvil_encode_native(&loaded, NULL, &saved, &sn) == -1);
+    mc_chunk_destroy(&loaded);
+    /* Every official isValid pair, not a hand-maintained family heuristic. */
+    for (size_t k = 0; k < sizeof(native_be_blocks) / sizeof(*native_be_blocks); k++) {
+        uint32_t state = UINT32_MAX;
+        for (size_t j = 0; j < GLOBAL_BLOCK_COUNT; j++)
+            if (!strcmp(GLOBAL_BLOCKS[j].name, native_be_blocks[k].block))
+                state = GLOBAL_BLOCKS[j].default_state;
+        CHECK(state != UINT32_MAX && mc_native_state_sensitive(state));
+        CHECK(mc_chunk_set_block(&source, 2, 64, 2, state) == 0);
+        uint8_t *base = NULL;
+        size_t bn = 0;
+        CHECK(mc_anvil_encode_chunk_nbt(&source, NULL, &base, &bn) == 0);
+        mc_nbt_tag_t *r = parse(base, bn);
+        free(base);
+        mc_nbt_tag_t *bl = get(r, "block_entities");
+        uint8_t *entry = NULL;
+        size_t en = 0;
+        serialize(be, &entry, &en);
+        mc_nbt_tag_t *copy = parse(entry, en);
+        free(entry);
+        mc_nbt_tag_t *name = get(copy, "id");
+        free(name->payload.string_val);
+        name->payload.string_val = strdup(native_be_blocks[k].entity);
+        mc_nbt_tag_t *timer = NULL;
+        if (!strcmp(native_be_blocks[k].entity, "minecraft:furnace")) {
+            timer = tag(MC_NBT_TAG_SHORT, "lit_time_remaining");
+            add(copy, timer);
+        }
+        bl->payload.list.items = calloc(1, sizeof(void *));
+        CHECK(bl->payload.list.items);
+        bl->payload.list.items[0] = copy;
+        bl->payload.list.length = 1;
+        serialize(r, &base, &bn);
+        CHECK(mc_anvil_decode_native(base, bn, 0, 0, &loaded) == 0);
+        if (!strcmp(native_be_blocks[k].entity, "minecraft:piston"))
+            CHECK(loaded.storage_readonly);
+        mc_chunk_destroy(&loaded);
+        if (timer) {
+            timer->payload.short_val = 100;
+            uint8_t *active = NULL;
+            size_t active_n = 0;
+            serialize(r, &active, &active_n);
+            CHECK(mc_anvil_decode_native(active, active_n, 0, 0, &loaded) == 0 && loaded.storage_readonly);
+            mc_chunk_destroy(&loaded);
+            free(active);
+        }
+        free(base);
+        mc_nbt_free(r);
+    }
+    items->type = MC_NBT_TAG_INT;
+    serialize(root, &raw, &n);
+    CHECK(mc_anvil_decode_native(raw, n, 0, 0, &loaded) == -1);
+    free(raw);
+    items->type = MC_NBT_TAG_LIST;
+    const char *bad_ids[] = {"minecraft:unknown_s3b", "minecraft:furnace"};
+    for (unsigned i = 0; i < 2; i++) {
+        free(id->payload.string_val);
+        id->payload.string_val = strdup(bad_ids[i]);
+        serialize(root, &raw, &n);
+        CHECK(mc_anvil_decode_native(raw, n, 0, 0, &loaded) == -1);
+        free(raw);
+    }
+    free(id->payload.string_val);
+    id->payload.string_val = strdup("minecraft:chest");
+    get(be, "x")->payload.int_val = 16;
+    serialize(root, &raw, &n);
+    CHECK(mc_anvil_decode_native(raw, n, 0, 0, &loaded) == -1);
+    free(raw);
+    get(be, "x")->payload.int_val = 2;
+    mc_nbt_tag_t *ticks = tag(MC_NBT_TAG_LIST, "block_ticks");
+    ticks->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+    ticks->payload.list.length = 1;
+    ticks->payload.list.items = calloc(1, sizeof(void *));
+    CHECK(ticks->payload.list.items);
+    ticks->payload.list.items[0] = tag(MC_NBT_TAG_COMPOUND, NULL);
+    add(root, ticks);
+    serialize(root, &raw, &n);
+    CHECK(mc_anvil_decode_native(raw, n, 0, 0, &loaded) == 0 && loaded.storage_readonly);
+    loaded.storage_nbt = raw;
+    loaded.storage_nbt_len = n;
+    CHECK(mc_chunk_set_block(&loaded, 10, 64, 10, 1) == 0);
+    CHECK(mc_anvil_encode_native(&loaded, NULL, &saved, &sn) == -1);
+    mc_chunk_destroy(&loaded);
+    mc_nbt_free(root);
+    mc_chunk_destroy(&source);
+}
 int main(void) {
+    opaque_entities();
     selection();
     vanilla_session_lock();
     invalid_chunks();

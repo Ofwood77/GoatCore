@@ -18,6 +18,9 @@ struct mc_world_storage {
     mc_storage_kind_t kind;
     int owner, session, s2;
 };
+bool mc_storage_is_native(const mc_world_storage_t *s) {
+    return s && s->kind == MC_STORAGE_ANVIL_ATOMIC;
+}
 const char *mc_storage_name(mc_storage_kind_t kind) {
     return kind == MC_STORAGE_BIN            ? "bin"
            : kind == MC_STORAGE_ANVIL_ATOMIC ? "anvil-atomic-experimental"

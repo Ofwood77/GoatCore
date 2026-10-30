@@ -12,6 +12,7 @@ int mc_storage_parse(const char *name, mc_storage_kind_t *kind);
  * Native sessions own world/session locks until all workers and saves finish.
  * path is borrowed and must outlive the store. */
 int mc_storage_open(const char *path, mc_storage_kind_t kind, mc_world_storage_t **out);
+bool mc_storage_is_native(const mc_world_storage_t *store);
 void mc_storage_close(mc_world_storage_t *store);
 /* out must own no previous allocations (a fresh uniform chunk is allowed). */
 int mc_storage_read(const mc_world_storage_t *store, int32_t cx, int32_t cz, mc_chunk_t *out,

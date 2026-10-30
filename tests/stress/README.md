@@ -551,7 +551,7 @@ simultanément ce monde dans Vanilla. Un journal S2 en attente interdit son
 ouverture : appliquer d'abord la procédure S2 ci-dessus sur les fichiers
 originaux, écrivains arrêtés ; S3A n'effectue aucune récupération S2 automatique.
 
-Lecture native actuellement limitée aux chunks `minecraft:full`, DataVersion
+Au terme de S3A, lecture native limitée aux chunks `minecraft:full`, DataVersion
 4788, hauteur Overworld, palettes connues et sans block entities. Protochunks,
 NBT ambigu/inconnu non conservable, codecs non pris en charge et références
 `.mcc` provoquent un refus ; le chunk reste indisponible, sans régénération.
@@ -559,7 +559,8 @@ La présence d'un codec externe/non pris en charge dans la région interdit
 également sa réécriture. Les sauvegardes conservent les NBT opaques et les
 palettes existantes ; les heightmaps/lumières dérivées affectées sont invalidées
 pour recalcul par Vanilla. Ne pas utiliser les conteneurs dans ce mode : une
-sauvegarde nécessitant des block entities est refusée et reste dirty.
+sauvegarde nécessitant des block entities est refusée et reste dirty. S3B,
+décrit plus bas, étend leur conservation opaque sans activer leurs interactions.
 
 Le runner existant sait sélectionner ce backend et copier un monde de référence
 sans modifier l'original :
@@ -620,3 +621,82 @@ du réencodage des palettes, utiliser `native_storage_oracle.py APRES_WORLD
 `--chunk=-2,0 --chunk=-1,0 --chunk=-2,1 --chunk=-1,1` limitent cette comparaison
 aux chunks modifiés d'une référence officielle ; sans sélection, tous les
 chunks de la copie source sont vérifiés.
+
+### S3B : conservation opaque des block entities
+
+Appliquer les mêmes règles d'isolement que S3A. L'autorisation locale est une
+exception temporaire pendant la maintenance, pas une modification des skills.
+Les ports 25565 et 25587 ne sont pas utilisés. Les fixtures officielles se
+préparent avec le runner existant, Java 25 et le serveur exact 26.1.1 :
+
+```sh
+python3 tests/stress/run_block_checks.py --kind vanilla --suite complex \
+  --java /chemin/java25 --vanilla-root /installation/26.1.1 \
+  --level-type minecraft:normal --level-seed 0 --port 25593 \
+  --result-dir tests/stress/results/s3b-reference
+python3 tests/stress/run_block_checks.py --kind goatcore --suite complex \
+  --server-binary /chemin/binaire-fixe/mc_server \
+  --chunk-storage anvil-atomic-experimental \
+  --world-template tests/stress/results/s3b-reference/runtime/world \
+  --view-distance 2 --verify-restarts 3 --port 25594 \
+  --result-dir tests/stress/results/s3b-modifie
+```
+
+Le scénario crée sept block entities par commandes **Vanilla**, puis vérifie
+une pose Survival éloignée, deux observateurs, l'inventaire et les refus de
+casse/interactions/création de BE. `--complex-dense` prépare 160 BEs ; le défaut
+de génération reste plat, `--level-type minecraft:normal` élargit le corpus.
+Reprendre ensuite la procédure `--kind vanilla --verify-only` de S3A avec
+`--suite complex`, la copie modifiée et son `snapshot.json`. La conservation
+ne doit pas être déduite de ce seul test de présence du bloc :
+
+```sh
+python3 tests/stress/native_corpus.py /copie/apres/world \
+  --compare-entities /copie/avant/world --chunk=-1,1 --output be-proof.json
+python3 tests/stress/native_storage_oracle.py /copie/modifiee/world \
+  --preserved-from /copie/reference/world --output preservation.json
+```
+
+La comparaison BE vérifie types et valeurs NBT exacts, indépendamment de l'ordre
+des clés des compounds. Les autres chunks doivent garder leurs NBT bruts.
+Pour les tags arbitraires synthétiques, comparer aussi un témoin directement
+réouvert dans Vanilla : son sérialiseur peut les normaliser ou les supprimer.
+Ne pas attribuer cette normalisation à GoatCore.
+
+`tools/audit_vanilla_storage.java` interroge les registres du JAR officiel,
+avec son classpath de bibliothèques. Conserver la sortie, puis régénérer via
+`python3 tools/generate_native_storage.py --audit audit.txt --server-jar
+/chemin/server-26.1.1.jar`. Le SHA exact est exigé. `--check` vérifie la table
+sans Java, à partir de la fixture versionnée.
+
+`make mc_native_bench` construit un probe réservé aux copies contenant le
+marqueur `.goatcore-s3b-disposable`. Aucun lancement serveur n'est nécessaire.
+`check_native_corpus.py --probe PROBE --reference WORLD7 --dense WORLD160
+--normal WORLDNORMAL --external WORLDMCC --result-dir NOUVEAU` prépare quatre
+cas et vérifie 18 refus sur copies. Les variantes opaques/malformées sont
+**synthétiques**. La fixture externe se prépare séparément avec
+`tools/write_external_fixture.java`, l'API RegionFile officielle et un dossier
+jetable ; elle ne représente pas une référence naturellement générée.
+
+Pour mesurer 100 sauvegardes par cas, trois répétitions alternées :
+
+```sh
+python3 tests/stress/profile_native_storage.py \
+  --probe /chemin/S3B/mc_native_bench --baseline-probe /chemin/S3A/mc_native_bench \
+  --cases /resultats/corpus/cases.json --writes 100 --repetitions 3 \
+  --fsync-probe /chemin/profile_fsync.so --result-dir /resultats/bench-nouveau
+```
+
+Le même probe de test est lié aux deux révisions ; S3A n'accepte que le cas
+sans BE. Chaque sauvegarde est relue, les NBT non concernés comparés et les
+traces brutes conservées. Arrêter les autres instances de test et compilations
+pendant les mesures. Les encodages séparés et sauvegardes complètes se
+recouvrent : ne pas additionner leurs durées. VmHWM vient de `/proc/self/status`
+après exec ; ru_maxrss peut hériter du pic du processus parent.
+
+La fixture `tests/fixtures/vanilla-26.1.1-s3b-corpus.json` référence les captures,
+empreintes des régions, rapports et binaires réellement testés. Les mondes,
+traces et journaux volumineux restent dans `results/storage-s3b/`, ignoré par
+Git. Protochunks, types BE non couverts, ticks actifs et `.mcc` restent protégés
+ou refusés. Aucune simulation de BE, migration ou activation S2 ; `.bin` reste
+le défaut. Voir le rapport S3B pour les garanties et les limites exactes.

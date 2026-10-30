@@ -66,7 +66,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench
 
 TEST_BINS = \
     test_varint \
@@ -367,3 +367,6 @@ test_region_txn: tests/test_region_txn.c $(REGION_TXN_SRC) | generated_sources
 
 test_native_storage: tests/test_native_storage.c src/world/world.c src/world/world_storage.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync
+
+mc_native_bench: tools/mc_native_bench.c src/world/world.c src/world/world_storage.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

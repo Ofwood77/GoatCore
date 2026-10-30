@@ -101,6 +101,9 @@ int mc_world_get_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *
 int mc_world_get_block_ready(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t *out_state_id);
 /* Read-only prospective state resolution; unavailable neighbors return 1. */
 int mc_world_resolve_block_state(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state, int32_t *resolved);
+/* Native opaque BE/POI neighborhoods and tick-bearing chunks are protected.
+ * Missing border neighbors are queued and refused until ready. */
+bool mc_world_storage_action_allowed(mc_world_t *w,int32_t x,int32_t y,int32_t z);
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);

@@ -3548,6 +3548,8 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
                                      int64_t now_ms) {
     if (!c || !world || !ids) return -1;
 
+    if(!mc_world_storage_action_allowed(world,x,y,z)){mc_mining_session_clear(&c->mining);return reject_block_destroy(c,x,y,z,state_id,seq);}
+
     /* Container-like blocks have extra teardown rules (contents, block entity,
      * chest partner visuals). Let that path decide whether a full chunk resend
      * is safer than a single block update. */
@@ -3637,6 +3639,7 @@ static int try_open_target_container(mc_conn_t *c, int32_t x, int32_t y, int32_t
     mc_world_t *world = get_world(c);
     if (!world) return 0;
 
+    if(!mc_world_storage_action_allowed(world,x,y,z))return 1;
     int32_t state_id = -1;
     if (mc_world_get_block(world, x, y, z, &state_id) != 0) return 0;
     int32_t normalized_state = mc_world_normalize_container_state_id(state_id);
@@ -7560,6 +7563,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                 int32_t state_id = -1;
                 int block_rc = mc_world_get_block_ready(world, x, y, z, &state_id);
                 if (block_rc == 0) {
+                    if(!mc_world_storage_action_allowed(world,x,y,z)){mc_mining_session_clear(&c->mining);return reject_block_destroy(c,x,y,z,state_id,seq);}
                     const mc_slot_t *held_item = selected_mainhand_slot(c);
 
                     if (action == PLAYER_ACTION_START_DESTROY_BLOCK && c->gamemode != GAMEMODE_CREATIVE) {
@@ -7673,6 +7677,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (mc_world_get_block_ready(get_world(c), x, y, z, &clicked_state_id) != 0)
             return queue_block_changed_ack_packet(c, seq);
 
+        if(!mc_world_storage_action_allowed(get_world(c),x,y,z))return reject_block_destroy(c,x,y,z,clicked_state_id,seq);
         int open_rc = try_open_target_container(c, x, y, z);
         if (open_rc != 0) {
             if (open_rc > 0 && has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;

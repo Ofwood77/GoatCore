@@ -3544,3 +3544,330 @@ traiter séparément snapshots/révisions et sauvegardes asynchrones ; aucun de
 ces mécanismes n'est anticipé ici. Revalidation d'intégration, durabilité et
 performances sur Xeon/HDD RAID nécessaire dès le retour du datacenter, avant
 activation réelle ou déploiement.
+
+## Stockage Vanilla S3B — conservation opaque et protections (30 octobre 2026)
+
+### Audit et politique de propriété
+
+Départ : `110a43e317714933c85a77c97ee131d5bc208c3b`, arbre suivi propre ; seuls
+`.vscode/`, `src/main.py` et `start-aider.sh` personnels non suivis. Aucun push,
+déploiement ou accès aux services principaux. Les tests locaux sont autorisés
+pendant la maintenance ; les règles permanentes ne sont pas modifiées.
+
+S3A conservait déjà l'arbre NBT source, mais refusait toute liste de block
+entities non vide. Le modèle gameplay reconstruit les conteneurs à partir de
+champs partiels : il ne doit pas recevoir les données opaques importées. Sans
+protection, ouvrir un coffre pourrait créer un inventaire incomplet ; la
+suppression pouvait fermer des vues, préparer des drops et retirer l'entité
+avant que le stockage refuse sa sauvegarde. Les contrôles doivent donc précéder
+ces effets, pas seulement protéger le writer.
+
+Référence exacte : serveur officiel 26.1.1, protocole 775, DataVersion 4788,
+JAR interne SHA-256
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+`tools/audit_vanilla_storage.java` initialise ses registres et interroge
+`BlockEntityType.isValid`, `PoiTypes.hasPoi` et les statuts de chunks. La fixture
+versionnée et `generated_native_be_blocks.h` sont régénérables ; aucune table
+de centaines de valeurs n'est déduite d'une ancienne version. Le générateur
+exige le SHA du JAR cible lors du renouvellement de l'audit et le precommit
+vérifie la table contre la fixture et les index internes du registre C.
+
+L'audit identifie **49 types** officiels de block entities, leurs associations
+aux blocs, les blocs POI et **12 statuts** : empty, structure_starts,
+structure_references, biomes, noise, surface, carvers, features,
+initialize_light, light, spawn, full (préfixe minecraft). Cela valide les
+identités et formats, pas les comportements des 49 types.
+
+Les données du chunk natif restent possédées par le snapshot NBT brut. Les
+block entities ne sont **jamais** importées dans `mc_block_entity_store` ni
+reconstruites via son encodeur. Le chargement valide id, types des coordonnées,
+bornes, unicité, correspondance au bloc réel et enveloppe commune des
+inventaires : Items = liste de compounds, id = chaîne, count = int positif,
+Slot = byte unique, components = compound s'il existe. Les composants et tous
+leurs sous-arbres sont conservés, sans conversion ni interprétation gameplay.
+Ce contrôle ne prétend pas valider la sémantique de tous les composants, toutes
+les capacités d'inventaire ni toutes les données métier arbitraires.
+
+Pour les familles couvertes, un bitmap de **12 288 octets par chunk contenant
+des BEs** protège leurs cellules et le voisinage immédiat. La mutation et les
+interactions vérifient également les blocs sensibles voisins, y compris dans
+un chunk adjacent. Les bordures dont les voisins sont inconnus sont refusées
+jusqu'à leur chargement ; aucune hypothèse « voisin absent = air ». Les POI
+sont protégés pour éviter une désynchronisation de leurs fichiers associés.
+Les noms/index des blocs sensibles viennent de l'audit officiel et une table
+constante évite une recherche textuelle par cellule dans le chemin courant.
+
+Le thread de tick conserve la propriété des mutations. Le contrôle central
+`mc_world_storage_action_allowed` est utilisé avant les suppressions,
+interactions et mutations du monde. Les handlers ajoutent seulement les gardes
+nécessaires avant les effets d'inventaire/drop et renvoient l'état autoritaire
+avec l'ACK 775 ; ils n'hébergent pas un nouvel ensemble de règles de BEs.
+Les sessions de minage refusées sont annulées. La création, modification ou
+suppression d'une BE gameplay est refusée en mode natif. Un deuxième contrôle
+dans l'encodeur empêche de contourner la protection en modifiant directement
+les conteneurs de blocs du chunk avant la sauvegarde.
+
+### Matrice de compatibilité des données
+
+| Catégorie | Lecture | Conservation | Mutation permise | Persistance / validation | Limites et risque |
+|---|---|---|---|---|---|
+| A — NBT opaque, types/listes/structures imbriquées | Arbre NBT exact, borné | Types, valeurs et ordre des champs conservés | Blocs ordinaires sans relation protégée | Comparaison indépendante avant/après GoatCore | Un NBT qui ne peut pas faire un roundtrip exact est refusé |
+| B — Coffre, four froid, panneau, bannière, shulker box, tonneau, pot décoré | Identité/enveloppe validées | Liste complète opaque, inventaires, composants et champs inconnus | Bloc ordinaire éloigné ; BE et voisinage immuables | Scénarios officiels, redémarrages et égalité NBT | Pas de GUI, drops, édition de texte, ouverture, cuisson ou autre simulation nouvelle |
+| C — Autres types connus, dont piston/spawner/beehive | Lecture des chunks full | NBT opaque conservé | Chunk protégé en lecture seule | Validation des associations et refus d'écriture | Pas de garantie sur leur fonctionnement ; pas d'activation expérimentale implicite |
+| C — Four actif | Lecture des chunks full | Minuteries conservées en Short | Chunk protégé | Contrôle du format officiel et test d'activité | Aucun tick de cuisson simulé |
+| C — block_ticks/fluid_ticks non vides | Lecture opaque | Listes intactes | Chunk protégé | Test de refus après lecture | Aucun scheduler ni décalage des dates inventé |
+| A/B — Structures, références, biomes | Conservés comme données opaques | Aucun remplacement par des valeurs GoatCore | Édition ordinaire sans modifier BE/POI | Comparaisons NBT et fichiers | Ne valide pas worldgen ni transmission réseau fidèle des biomes |
+| B — Heightmaps/lumière | Politique S3A inchangée | Champs opaques conservés ; dérivés connus invalidés | Édition autorisée | Recalcul/réouverture Vanilla | Pas de nouvelle conformité du moteur d'éclairage C |
+| C — Protochunks | Inspection NBT hors simulation | Originaux conservés | Aucune promotion/mutation | Statuts officiels réels + refus natif | Pipeline worldgen absent ; aucune régénération masquant le refus |
+| C — BE inconnue/malformée ou association incohérente | Refus du chargement actif | Fichiers récupérables préservés | Aucune | Tests négatifs | Pas de reconstruction ou suppression silencieuse |
+| C — .mcc/LZ4/custom/inconnu | Index/inspection de référence | Fichiers inchangés | Refus de la région dans le backend actif | Détection et empreintes | Pas de transaction multi-fichiers, pas de décodage .mcc dans GoatCore |
+| Métadonnées globales, POI, entités | Pas d'adoption gameplay nouvelle | Fichiers existants inchangés par cette opération | Aucune nouvelle écriture | Empreintes des copies avant/après | Monde Vanilla complet toujours non démontré |
+
+Les sept familles autorisées sont une liste explicite de **conservation**.
+Les autres types reconnus deviennent lisibles mais protègent tout leur chunk.
+Un four est protégé si sa propriété lit est true ou si lit_time_remaining /
+cooking_time_spent indique une activité. Le JAR utilise `getShortOr/putShort`
+pour ces minuteries. Un premier contrôle exigeait à tort des Int : il a refusé
+le chargement, sans régénérer ni réécrire la région. Les tests sur les vraies
+fixtures ont révélé cet écart ; le contrôle final et le test synthétique de
+four actif utilisent le type Short exact. Les autres champs restent opaques.
+
+Le backend atomique, sa comparaison de snapshot sous verrou, ses deux fsync,
+le résultat de durabilité incertaine et ses garanties précédentes restent en
+place. Les tests existants de crash, EINTR, écritures partielles, erreurs de
+synchronisation et snapshots périmés sont rejoués. Aucun nouveau worker, aucun
+ordonnanceur asynchrone et aucun chemin S2 de gameplay. Une panne physique,
+le RAID et les transactions globales inventaires/items restent hors preuve.
+
+### Corpus officiel et fixtures synthétiques
+
+Trois captures indépendantes sont conservées, toutes issues du serveur officiel
+26.1.1, seed 0, vue/simulation 4 et mondes jetables. Les BEs de contrôle sont
+placées par les commandes du serveur officiel, puis sérialisées par lui ; elles
+ne sont pas présentées comme des constructions naturellement générées.
+
+| Capture | Régions | Chunks | Full / protochunks | BEs observées |
+|---|---:|---:|---:|---|
+| Monde plat + fixtures | 4 | 1 328 | 206 / 1 122 | 7, une par famille couverte |
+| Monde plat dense | 4 | 1 327 | 205 / 1 122 | 160 : 154 coffres et les six autres familles |
+| Monde normal | 4 | 1 348 | 194 / 1 154 | Les sept fixtures, plus coffres, beehive et mob_spawner naturels |
+
+Soit **12 fichiers de régions / 4 003 chunks** catalogués avec empreintes.
+Le corpus normal comprend 8 coffres au total, 5 spawners et une beehive. Les
+NBT de débuts de structures identifient cinq mineshafts, une trial chamber et
+un shipwreck_beached ; cela ne constitue pas une validation du pipeline worldgen
+GoatCore, qui n'est pas développé. Sept statuts réellement présents sont
+observés : structure_starts, biomes, noise, surface, carvers,
+initialize_light, full. Les protochunks sont inspectés sans être promus.
+
+Une tentative supplémentaire d'élargissement à un village via la commande
+Vanilla locate a échoué deux fois avec « An unexpected error occurred trying
+to execute that command », sans coordonnées exploitables. Les copies/logs sont
+conservés ; ni auteur ni cause profonde n'est attribué. Aucun village ne figure
+dans la validation finale et le code de cette tentative n'est pas conservé dans
+le runner. Les références presque pleines restent les fixtures **synthétiques**
+S1 à 1 024 slots, rejouées par la suite d'index/allocation ; aucune région
+presque pleine naturellement générée n'est revendiquée.
+
+`native_corpus.py` catalogue les statuts, types de BEs, codecs, régions et
+empreintes sans écrire les mondes. `--compare-entities` compare types et valeurs
+NBT, avec sélection des chunks pour distinguer les fixtures des entités
+naturelles susceptibles d'évoluer sous Vanilla. Le writer de fixtures est
+séparé et impose une copie marquée jetable.
+
+La fixture externe est **synthétique, émise par l'API officielle RegionFile** :
+un chunk officiel est enrichi d'un byte array déterministe de 1 200 000 octets,
+seed 7754788. Le writer Java 26.1.1 produit un `.mca` de trois secteurs et
+`c.-1.1.mcc` (1 202 186 octets), puis son propre lecteur vérifie le tableau
+intégral. L'inspection GoatCore reconnaît le stub externe et le chemin attendu,
+contrôle existence/type/taille pour diagnostic, mais ne décode pas le payload.
+Les copies avec `.mcc` présent ou supprimé sont refusées sans modification du
+`.mca` ni des données récupérables. Une vraie prise en charge exige une
+transaction multi-fichiers ; elle n'est pas ajoutée.
+
+Les variantes composées des benchmarks réutilisent le chunk dense officiel
+dans une copie du monde plat pour stabiliser l'occupation de région. La variante
+opaque ajoute explicitement des champs **synthétiques** : byte arrays
+déterministes, long, chaîne et liste de compounds, à la racine et dans une BE.
+Les composants custom_data des inventaires des fixtures restent, eux, des
+valeurs acceptées et sérialisées par le serveur officiel. Les deux provenances
+ne sont pas confondues.
+
+### Tests différentiels, refus et non-régression
+
+Le binaire final est testé sur copies plates et normales contenant les sept
+fixtures officielles. Un joueur pose réellement une pierre en Survival loin
+des BEs ; deux observateurs voient la mutation et une query relit le monde
+autoritaire. Puis les requêtes de casse, interaction/ouverture, remplacement
+administrateur et retrait du support des BEs sont refusées. L'inventaire du
+joueur ne change pas pendant les refus et aucun paquet de création d'entité/drop
+n'est apparu. Une pose d'un nouveau coffre est aussi refusée sans consommation.
+Le chunk et ses BEs sont relus après **trois redémarrages GoatCore**.
+
+Dans chaque monde, un seul chunk est modifié. Le contrôle indépendant valide
+les NBT hors états de blocs/données dérivées : **1 327 chunks sur 1 328 restent
+identiques octet par octet** dans la copie plate ; **1 347 sur 1 348** dans la
+copie normale. Les BEs du chunk modifié, leurs inventaires, composants, listes,
+champs inconnus, biomes, structures et ticks restent conservés. Les fichiers
+globaux, POI et entités sont contrôlés séparément ; les fichiers des joueurs
+actifs évoluent par le mécanisme déjà existant.
+
+Deux réouvertures officielles suivent chaque scénario. Les sept BEs des
+fixtures sont comparées par coordonnées : **types et valeurs NBT exactement
+identiques**, y compris les count Int, Slot Byte, minuteries Short du four,
+messages du panneau, motifs de bannière et composants custom_data imbriqués
+(byte signé -17, IntArray, Long, liste de compounds). Le bloc placé est aussi
+vérifié par une commande du serveur officiel, puis par comparaison indépendante
+des 98 304 états du chunk modifié. Une ouverture sans erreur ne sert pas seule
+de preuve.
+
+Le cas dense subit **100 modifications/sauvegardes**, puis deux ouvertures
+Vanilla : les **160 BEs** restent identiques, sans duplication, et les blocs du
+chunk correspondent au résultat du backend C. Dans la variante opaque,
+GoatCore conserve intégralement les champs synthétiques racine/BE avant
+Vanilla. Le sérialiseur officiel élimine certains champs qu'il ne connaît pas :
+un témoin de la même variante ouvert directement par Vanilla est donc comparé
+au résultat GoatCore puis Vanilla. Les sept BEs finales sont identiques au
+témoin. Cela distingue une normalisation officielle d'une perte par GoatCore ;
+aucune promesse de conservation de tags arbitraires par Vanilla n'est faite.
+
+**18 refus reproductibles** sont vérifiés sur copies marquées jetables :
+BE inconnue, id manquant, coordonnées incohérentes, association id/bloc erronée,
+Items mal typé, components mal typé, coordonnées dupliquées, statut proto
+synthétique, ticks non vides, four actif Short, NBT invalide, codec custom
+inconnu, en-tête pointant dans les secteurs réservés, fichier tronqué,
+protochunk officiel, type officiel connu mais non couvert (lecture permise,
+mutation refusée), référence externe présente et référence externe manquante.
+Les `.mca`/`.mcc` récupérables sont inchangés après chaque refus ; aucun
+`chunks/` de fallback n'apparaît. Les variants sont explicitement distingués
+des vrais chunks du corpus. Erreurs de sauvegarde, durabilité incertaine et
+snapshots obsolètes restent également couverts par les suites C ; une injection
+d'EIO du fsync parent avec une BE opaque vérifie le snapshot visible et la
+reprise sans destruction de la liste.
+
+`make -B precommit-check` passe : **27 suites C**, générateurs, hygiène, smoke,
+multi-epoll, login et tests Python existants. `test_native_storage` atteint
+**100 727 vérifications**, dont chaque association officielle type/bloc,
+protection des voisinages, minuteries Short, enveloppes, sauvegardes incertaines
+et refus. Le stockage historique conserve sa lecture 4785 ; **483 fichiers
+`.bin`** d'un scénario placement restent identiques octet par octet à S3A.
+
+Les suites réseau finales repassent **192 observations d'escaliers** contre la
+capture officielle existante, puis huit états après trois redémarrages ;
+**18 cas placement/dalles/fusions** passent en natif et en `.bin`, avec deux
+joueurs, inventaires et redémarrages. Le test shulker BlockEvent reste exécuté
+en `.bin` ; il est volontairement omis en natif, où les BEs ne sont pas jouables.
+Les collisions et protocoles existants ne sont pas modifiés.
+
+ASan+UBSan : **14 suites C**, sans diagnostic, plus le scénario réseau BE
+complet et deux redémarrages sur le serveur instrumenté. TSan local : **six
+suites C**, code 0 sans diagnostic (régions, transactions S2, persistance
+atomique, cohérence monde, stockage natif, configuration perf). Cela couvre
+ces exécutions et ne prouve pas l'absence de toute race du serveur. Le runtime
+Xeon historiquement indisponible n'est pas requalifié comme passant. Les
+injections d'interruption du backend atomique/S2 sont rejouées, sans coupure
+physique ni nouvelle garantie multi-fichiers.
+
+### Coûts locaux des données conservées
+
+NVMe/ext4 local, Ryzen 7 7840HS, O2 et mêmes options. Le probe C est compilé
+contre S3A (`110a43e3`) et les sources S3B. Cinq configurations, trois répétitions
+alternées, **100 modifications/sauvegardes réellement relues par passe** :
+**1 500 sauvegardes**. Dix chargements sont chronométrés séparément par passe.
+Les copies, vérifications et créations de marqueurs sont hors chronomètres ;
+aucun autre serveur Minecraft ni compilation pendant les appels mesurés.
+Le cache système est chaud. Tous les NBT non concernés sont comparés après
+chaque passe, pas seulement le point modifié.
+
+L'encodeur est échantillonné séparément avant l'appel de sauvegarde ; celui-ci
+inclut sa propre sérialisation et sa durabilité. Ces deux mesures ne doivent
+pas être additionnées comme des phases disjointes d'un même appel. Les
+percentiles ci-dessous regroupent 30 lectures ou 300 encodages/sauvegardes par
+configuration. La même région de départ stabilise le coût des copies ; la
+variante opaque agrandit le record. Les jeux d'entrée diffèrent volontairement
+par les données de BE/opaque, leur provenance est décrite plus haut.
+
+| Configuration | Chargement P50 / P95 / P99 (ms) | Encodage P50 (ms) | Sauvegarde P50 / P95 / P99 (ms) | CPU sauvegardes, 300 appels (s) | VmHWM max (KiB) |
+|---|---|---:|---|---:|---:|
+| S3A-zero | 1.164 / 2.469 / 2.585 | 0.615 | 3.322 / 3.738 / 4.180 | 0.499 | 8604 |
+| S3B-zero | 1.173 / 2.705 / 3.060 | 0.621 | 3.296 / 3.845 / 4.325 | 0.493 | 8912 |
+| S3B-few | 1.292 / 2.610 / 2.707 | 0.735 | 3.450 / 3.843 / 4.179 | 0.545 | 11884 |
+| S3B-many | 1.458 / 2.853 / 3.282 | 0.962 | 3.754 / 4.131 / 4.716 | 0.621 | 12032 |
+| S3B-opaque | 1.413 / 3.074 / 3.347 | 0.771 | 4.631 / 5.114 / 5.503 | 0.881 | 12228 |
+
+S3A-zero / S3B-zero utilisent un chunk officiel sans BE ; few en contient 7,
+many 160 ; opaque ajoute 32 Kio de bytes déterministes à la racine **et** à une
+BE, plus Long/chaîne/liste. Le bitmap par chunk BE consomme 12 Kio, indépendamment
+de leur nombre. VmHWM est lu dans `/proc/self/status`, propre à l'espace mémoire
+après exec ; le premier pilote utilisait ru_maxrss, qui conservait le pic du
+parent Python, et n'est pas utilisé pour les chiffres finaux.
+
+Par passe de 100 sauvegardes : **142 540 800 octets** soumis aux écritures pour
+les quatre premières configurations, **156 057 600** pour opaque. **200 fsync
+de région/parent par passe**, identiques aux barrières atomiques S3A ; les deux
+fsync éventuels d'initialisation du marqueur de sélection sont hors appels
+mesurés et distingués dans les traces. Les traces séparées MC_SAVE_TRACE_PATH
+et LD_PRELOAD enregistrent les écritures et synchronisations ; aucun probe
+coûteux n'est activé dans la configuration normale de mc_server.
+
+Le cas sans BE reste proche de S3A (P50 sauvegarde 3,296 contre 3,322 ms) : ce
+petit écart n'est pas déclaré comme un gain. Les coûts augmentent avec le nombre
+de BEs et les données opaques : validation, arbre NBT et copie/compression
+supplémentaires expliquent les écarts mesurés. L'occupation des régions et les
+volumes sont explicites. La reconstruction reste entière : le cas many n'écrit
+pas seulement la BE ou le bloc changé. Aucun fsync n'est supprimé et aucune
+optimisation indépendante n'est introduite.
+
+Il s'agit de coûts de chargement, sérialisation et stockage, **pas d'un nouveau
+benchmark de capacité gameplay/TPS**. Le plafond S3A à 50 bots (14,56 TPS `.bin`,
+5,79 TPS natif et forte amplification) n'est pas résolu ni masqué. Il doit guider
+S4 : snapshots/révisions, coût de conservation NBT et regroupement sûr des
+régions, après définition des acquittements. Aucune extrapolation vers le
+Xeon/HDD RAID ; nouvelle validation distante obligatoire après maintenance.
+
+### Traçabilité, fichiers et suite du chantier S3B
+
+Résultats bruts conservés dans `tests/stress/results/storage-s3b/` (ignoré par
+Git). Le manifeste versionné
+`tests/fixtures/vanilla-26.1.1-s3b-corpus.json` contient les empreintes des
+12 régions officielles, de la fixture externe synthétique, des rapports
+finaux, des journaux de checks/sanitizers et des binaires. Il identifie les
+conditions de génération et les captures ; il ne contient aucun JAR distribué
+ni monde personnel. La génération multithread officielle peut changer l'ordre
+et les empreintes d'une nouvelle capture : les empreintes identifient les
+fichiers testés, pas une promesse de génération octet pour octet déterministe.
+
+Les répertoires `validated-*` sont les campagnes finales de gameplay/restarts ;
+`bench-complete/` est la campagne finale de coûts. Les pilotes antérieurs sont
+conservés séparément. `preservation-*-final.json` vérifie les NBT non concernés ;
+`vanilla-entities-*.json` et `vanilla-blocks-*.json` vérifient les réouvertures.
+Les commandes reproductibles figurent dans `tests/stress/README.md`.
+
+Binaire normal final testé (compilation O2) :
+`tests/stress/results/storage-s3b/validated-bin/mc_server`, SHA-256
+`f041766a37cefdd06e0fee34bfdfdba02e73065bc03fb1ec2e84cf9401b54099`.
+Le binaire ASan+UBSan est distinct et son empreinte figure dans le manifeste.
+
+Périmètre des fichiers modifiés : structures de chunk et garde de stockage,
+décodeur/encodeur natifs, libération du bitmap, interface monde/stockage et
+cinq gardes du handler ; fixture/table officielles et générateurs ; tests C,
+runner bots, oracle de corpus, probe et campagne de coûts ; Makefile, hygiène,
+documentation. Le codec `.bin`, le backend atomique et les transactions S2
+ne sont pas modifiés. Aucun nouvel outil d'audit/probe n'est exécuté dans le
+serveur normal.
+
+**Services principaux : aucune intervention**, aucun accès distant, aucun
+déploiement, aucun redémarrage de 25565/25587. Leur état courant n'a pas été
+sondé pendant la maintenance et n'est pas présenté comme vérifié. Les instances
+locales jetables sont arrêtées après validation. Le défaut reste `.bin` ;
+le mode Anvil reste explicite et expérimental ; aucune migration et aucun
+fallback après refus. S2 reste séparé du gameplay.
+
+S3B valide la conservation dans les scénarios ci-dessus, pas les comportements
+Minecraft des conteneurs ni la compatibilité mondiale complète. Pour le prochain
+lot, traiter d'abord la politique de snapshots et de regroupement durable des
+sauvegardes en S4, avec mesures à travail égal et conservation de ces protections.
+L'adoption de nouveaux types de BEs exige un corpus officiel et des tests de
+relations aux blocs/entités/ticks ; les protochunks et `.mcc` nécessitent des
+travaux distincts. Rejouer l'intégration, les interruptions et les performances
+sur Xeon/HDD RAID avant toute activation hors copies jetables.

@@ -25,6 +25,9 @@ typedef struct {
     /* Native-only immutable last visible NBT, owned with this chunk. */
     uint8_t *storage_nbt;
     size_t storage_nbt_len;
+    /* Native opaque-data protection, one bit per block; absent in .bin. */
+    uint8_t *storage_guard;
+    bool storage_readonly;
     uint64_t network_cache_revision;
     uint8_t *network_chunkdata;
     size_t network_chunkdata_len;

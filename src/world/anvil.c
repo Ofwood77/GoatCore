@@ -1522,6 +1522,170 @@ static int native_y(const mc_nbt_tag_t *sec, int *y) {
     *y = tag->payload.byte_val;
     return 0;
 }
+#include "generated_native_be_blocks.h"
+static const char *native_block_name(uint32_t state) {
+    if (state >= GLOBAL_BLOCK_STATES_COUNT)
+        return NULL;
+    return GLOBAL_BLOCKS[GLOBAL_BLOCK_STATES[state].block_index].name;
+}
+bool mc_native_state_sensitive(uint32_t state) {
+    const char *name = native_block_name(state);
+    if (!name)
+        return true;
+    if (GLOBAL_BLOCK_STATES[state].flags & MC_BLOCK_FLAG_HAS_BLOCK_ENTITY)
+        return true;
+    return GLOBAL_BLOCK_STATES[state].block_index < sizeof(native_sensitive_by_block) &&
+           native_sensitive_by_block[GLOBAL_BLOCK_STATES[state].block_index];
+}
+static unsigned native_cell(int x, int y, int z) {
+    return (unsigned)(((y + 64) << 8) | (z << 4) | x);
+}
+static bool native_guarded(const uint8_t *guard, unsigned cell) {
+    return guard && (guard[cell / 8] & (1u << (cell % 8)));
+}
+/* Validate the common 26.1.1 container envelope, without normalizing any
+ * components or interpreting their payload. Deeper semantics remain opaque. */
+static bool native_items_valid(const mc_nbt_tag_t *be) {
+    const mc_nbt_tag_t *components = mc_nbt_compound_get(be, "components");
+    if (components && components->type != MC_NBT_TAG_COMPOUND)
+        return false;
+    const mc_nbt_tag_t *items = mc_nbt_compound_get(be, "Items");
+    if (!items)
+        return true;
+    if (items->type != MC_NBT_TAG_LIST ||
+        (items->payload.list.length && items->payload.list.elem_type != MC_NBT_TAG_COMPOUND))
+        return false;
+    bool slots[256] = {0};
+    for (int32_t i = 0; i < items->payload.list.length; i++) {
+        const mc_nbt_tag_t *entry = items->payload.list.items[i], *id = mc_nbt_compound_get(entry, "id"),
+                           *count = mc_nbt_compound_get(entry, "count"),
+                           *slot = mc_nbt_compound_get(entry, "Slot"),
+                           *c = mc_nbt_compound_get(entry, "components");
+        if (!id || id->type != MC_NBT_TAG_STRING || !id->payload.string_val[0] || !count ||
+            count->type != MC_NBT_TAG_INT || count->payload.int_val <= 0 || !slot ||
+            slot->type != MC_NBT_TAG_BYTE || (c && c->type != MC_NBT_TAG_COMPOUND))
+            return false;
+        unsigned at = (uint8_t)slot->payload.byte_val;
+        if (slots[at])
+            return false;
+        slots[at] = true;
+    }
+    return true;
+}
+/* Validate identity/ownership, never decode inventories/components into gameplay.
+ * Unknown fields retain their original NBT type and value in storage_nbt. */
+static int native_entities(const mc_nbt_tag_t *root, const mc_chunk_t *chunk, uint8_t **guard,
+                           bool *readonly) {
+    *guard = NULL;
+    *readonly = false;
+    const char *ticks[] = {"block_ticks", "fluid_ticks"};
+    for (unsigned i = 0; i < 2; i++) {
+        const mc_nbt_tag_t *t = mc_nbt_compound_get(root, ticks[i]);
+        if (t && (t->type != MC_NBT_TAG_LIST ||
+                  (t->payload.list.length && t->payload.list.elem_type != MC_NBT_TAG_COMPOUND))) {
+            errno = EINVAL;
+            return -1;
+        }
+        if (t && t->payload.list.length)
+            *readonly = true;
+    }
+    const mc_nbt_tag_t *list = mc_nbt_compound_get(root, "block_entities");
+    if (list && (list->type != MC_NBT_TAG_LIST ||
+                 (list->payload.list.length && list->payload.list.elem_type != MC_NBT_TAG_COMPOUND))) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!list || !list->payload.list.length)
+        return 0;
+    if (list->payload.list.length > MC_BLOCKS_PER_CHUNK) {
+        errno = EINVAL;
+        return -1;
+    }
+    *guard = calloc(MC_BLOCKS_PER_CHUNK / 8, 1);
+    if (!*guard)
+        return -1;
+    uint8_t seen[MC_BLOCKS_PER_CHUNK / 8] = {0};
+    for (int32_t i = 0; i < list->payload.list.length; i++) {
+        const mc_nbt_tag_t *be = list->payload.list.items[i];
+        if (!native_items_valid(be)) {
+            errno = EINVAL;
+            goto bad;
+        }
+        const mc_nbt_tag_t *id = mc_nbt_compound_get(be, "id"), *x = mc_nbt_compound_get(be, "x"),
+                           *y = mc_nbt_compound_get(be, "y"), *z = mc_nbt_compound_get(be, "z");
+        if (!id || id->type != MC_NBT_TAG_STRING || !x || x->type != MC_NBT_TAG_INT || !y ||
+            y->type != MC_NBT_TAG_INT || !z || z->type != MC_NBT_TAG_INT) {
+            errno = EINVAL;
+            goto bad;
+        }
+        int64_t lx = (int64_t)x->payload.int_val - (int64_t)chunk->cx * 16,
+                lz = (int64_t)z->payload.int_val - (int64_t)chunk->cz * 16;
+        int wy = y->payload.int_val;
+        if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || wy < -64 || wy >= 320) {
+            errno = EINVAL;
+            goto bad;
+        }
+        unsigned cell = native_cell((int)lx, wy, (int)lz);
+        if (native_guarded(seen, cell)) {
+            errno = EINVAL;
+            goto bad;
+        }
+        seen[cell / 8] |= (uint8_t)(1u << (cell % 8));
+        const char *block = native_block_name(mc_chunk_get_block(chunk, (int)lx, wy, (int)lz));
+        bool valid = false;
+        for (size_t k = 0; k < sizeof(native_be_blocks) / sizeof(*native_be_blocks); k++)
+            if (!strcmp(id->payload.string_val, native_be_blocks[k].entity) && block &&
+                !strcmp(block, native_be_blocks[k].block)) {
+                valid = true;
+                break;
+            }
+        if (!valid) {
+            errno = EOPNOTSUPP;
+            goto bad;
+        }
+        static const char *const editable[] = {
+            "minecraft:chest",       "minecraft:furnace", "minecraft:sign",         "minecraft:banner",
+            "minecraft:shulker_box", "minecraft:barrel",  "minecraft:decorated_pot"};
+        bool covered = false;
+        for (size_t k = 0; k < sizeof(editable) / sizeof(*editable); k++)
+            if (!strcmp(id->payload.string_val, editable[k]))
+                covered = true;
+        if (!covered)
+            *readonly = true;
+        if (!strcmp(id->payload.string_val, "minecraft:furnace")) {
+            const char *const active[] = {"lit_time_remaining", "cooking_time_spent"};
+            for (unsigned k = 0; k < 2; k++) {
+                const mc_nbt_tag_t *t = mc_nbt_compound_get(be, active[k]);
+                if (t && t->type != MC_NBT_TAG_SHORT) {
+                    errno = EINVAL;
+                    goto bad;
+                }
+                if (t && t->payload.short_val)
+                    *readonly = true;
+            }
+            const char *key = mc_global_state_key(mc_chunk_get_block(chunk, (int)lx, wy, (int)lz));
+            if (key && strstr(key, "lit=true"))
+                *readonly = true;
+        }
+
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    int px = (int)lx + dx, py = wy + dy, pz = (int)lz + dz;
+                    if (px < 0 || px > 15 || pz < 0 || pz > 15 || py < -64 || py >= 320)
+                        continue;
+                    cell = native_cell(px, py, pz);
+                    (*guard)[cell / 8] |= (uint8_t)(1u << (cell % 8));
+                }
+    }
+    return 0;
+bad:;
+    int e = errno;
+    free(*guard);
+    *guard = NULL;
+    errno = e;
+    return -1;
+}
 static int native_schema(const mc_nbt_tag_t *root, int32_t cx, int32_t cz, mc_arena_t *arena) {
     const mc_nbt_tag_t *version = mc_nbt_compound_get(root, "DataVersion"),
                        *x = mc_nbt_compound_get(root, "xPos"), *z = mc_nbt_compound_get(root, "zPos"),
@@ -1539,7 +1703,7 @@ static int native_schema(const mc_nbt_tag_t *root, int32_t cx, int32_t cz, mc_ar
         errno = EINVAL;
         return -1;
     }
-    if (be && (be->type != MC_NBT_TAG_LIST || be->payload.list.length)) {
+    if (be && (be->type != MC_NBT_TAG_LIST || (be->payload.list.length && be->payload.list.elem_type != MC_NBT_TAG_COMPOUND))) {
         errno = EOPNOTSUPP;
         return -1;
     }
@@ -1633,6 +1797,7 @@ int mc_anvil_decode_native(const uint8_t *raw, size_t n, int32_t cx, int32_t cz,
                                        ids[native_unpack(data, cell, bits)]) != 0)
                     goto done;
     }
+    if (native_entities(root,out,&out->storage_guard,&out->storage_readonly)!=0)goto done;
     rc = 0;
 done:;
     int e = errno;
@@ -1644,7 +1809,7 @@ done:;
     return rc;
 }
 static int native_update_section(mc_nbt_tag_t *section, const mc_chunk_t *chunk, int index, mc_arena_t *arena,
-                                 bool force) {
+                                 bool force,const uint8_t *guard,bool readonly) {
     mc_nbt_tag_t *bs = (mc_nbt_tag_t *)mc_nbt_compound_get(section, "block_states");
     uint32_t ids[4096], values[4096];
     int p = 0;
@@ -1671,6 +1836,9 @@ static int native_update_section(mc_nbt_tag_t *section, const mc_chunk_t *chunk,
             errno = EOPNOTSUPP;
             return -1;
         }
+        uint32_t old = (!force && bs) ? ids[p==1?0:native_unpack(old_data,cell,bits)] : 0;
+        if ((force && mc_native_state_sensitive(id)) || (!force && id!=old &&
+            (readonly || native_guarded(guard,(unsigned)index*4096+cell) || mc_native_state_sensitive(old) || mc_native_state_sensitive(id)))) {errno=EOPNOTSUPP;return -1;}
         values[cell] = id;
         if (!force && id != (bs ? ids[p == 1 ? 0 : native_unpack(old_data, cell, bits)] : 0))
             changed = true;
@@ -1764,6 +1932,8 @@ int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_
         mc_nbt_free(root);
         return -1;
     }
+    uint8_t *guard=NULL;bool readonly=false;
+    if(!fresh && native_entities(root,chunk,&guard,&readonly)!=0){mc_arena_destroy(&arena);mc_nbt_free(root);return -1;}
     mc_nbt_tag_t *sections = (mc_nbt_tag_t *)mc_nbt_compound_get(root, "sections");
     int rc = -1;
     bool changed = fresh;
@@ -1804,7 +1974,7 @@ int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_
                 goto done;
             }
         }
-        int c = native_update_section(section, chunk, index, &arena, fresh);
+        int c = native_update_section(section, chunk, index, &arena, fresh, guard, readonly);
         if (c < 0)
             goto done;
         if (c)
@@ -1826,6 +1996,7 @@ int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_
     rc = mc_nbt_write_named_root(root, out, n);
 done:;
     int e = errno;
+    free(guard);
     mc_arena_destroy(&arena);
     mc_nbt_free(root);
     errno = e;

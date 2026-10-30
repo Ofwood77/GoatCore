@@ -306,11 +306,13 @@ mc_block_entity_t *mc_world_get_block_entity(mc_world_t *w, int32_t x, int32_t y
 
 int mc_world_put_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z, const mc_block_entity_t *entity) {
     if (!w || !entity) return -1;
+    if(mc_storage_is_native(w->storage)){errno=EOPNOTSUPP;return -1;}
     return mc_be_store_put(&w->block_entities, (mc_pos_t){x, y, z}, *entity) ? 0 : -1;
 }
 
 int mc_world_remove_block_entity(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     if (!w) return -1;
+    if(mc_storage_is_native(w->storage)){errno=EOPNOTSUPP;return -1;}
     return mc_be_store_remove(&w->block_entities, (mc_pos_t){x, y, z}) ? 0 : 1;
 }
 
@@ -1088,6 +1090,7 @@ static int reconcile_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     int rc = mc_world_resolve_block_state(w, x, y, z, current, &next);
     if (rc == 1) return 0; /* Keep the saved shape until the neighbor is READY. */
     if (rc || next == current) return rc;
+    if(!mc_world_storage_action_allowed(w,x,y,z))return 0;
     int32_t cx, cz; int lx, lz;
     if (coords_to_chunk(x, z, &cx, &cz, &lx, &lz) != 0) return -1;
     mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(cx, cz));
@@ -1126,10 +1129,49 @@ static void reconcile_chunk_neighbors(mc_world_t *w, mc_chunk_t *chunk) {
     }
 }
 
+bool mc_world_storage_action_allowed(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
+    if (!w)
+        return false;
+    if (!mc_storage_is_native(w->storage))
+        return true;
+    if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT)
+        return false;
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (x <= INT32_MIN + 1 || x >= INT32_MAX - 1 || z <= INT32_MIN + 1 || z >= INT32_MAX - 1)
+                return false;
+            int32_t cx, cz;
+            int lx, lz;
+            if (coords_to_chunk(x + dx, z + dz, &cx, &cz, &lx, &lz) != 0)
+                return false;
+            mc_chunk_t *c = mc_world_get_chunk(w, cx, cz, 0);
+            if (!c || c->storage_readonly) {
+                errno = EAGAIN;
+                return false;
+            }
+            if (dx == 0 && dz == 0 && c->storage_guard) {
+                unsigned cell = (unsigned)(((y + 64) << 8) | (lz << 4) | lx);
+                if (c->storage_guard[cell / 8] & (1u << (cell % 8))) {
+                    errno = EOPNOTSUPP;
+                    return false;
+                }
+            }
+            for (int dy = -1; dy <= 1; dy++) {
+                if (y + dy < -64 || y + dy >= 320)
+                    continue;
+                if (mc_native_state_sensitive(mc_chunk_get_block(c, lx, y + dy, lz))) {
+                    errno = EOPNOTSUPP;
+                    return false;
+                }
+            }
+        }
+    return true;
+}
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id) {
     if (!w) return -1;
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) return -1;
     state_id = mc_world_normalize_container_state_id(state_id);
+    if(mc_storage_is_native(w->storage) && (mc_native_state_sensitive((uint32_t)state_id) || !mc_world_storage_action_allowed(w,x,y,z))) {errno=EOPNOTSUPP;return -1;}
 
     int32_t cx = 0, cz = 0;
     int lx = 0, lz = 0;

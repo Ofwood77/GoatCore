@@ -39,6 +39,8 @@ src/generated/generated_item_place.c
 src/generated/generated_item_place.h
 "
 
+python3 tools/generate_native_storage.py --check
+
 missing_generated=0
 for path in $generated_files; do
     if [ ! -f "$path" ]; then

@@ -82,7 +82,7 @@ def run(args):
         reference=args.vanilla_root.resolve()
         for name in ("server.jar","libraries","versions"):(runtime/name).symlink_to(reference/name)
         (runtime/"eula.txt").write_text("eula=true\n")
-        (runtime/"server.properties").write_text(f"server-port={args.port}\nonline-mode=false\nenforce-secure-profile=false\ngamemode=creative\nlevel-type=minecraft:flat\nlevel-seed=0\nspawn-protection=0\nview-distance=4\nsimulation-distance=4\ndifficulty=peaceful\n")
+        (runtime/"server.properties").write_text(f"server-port={args.port}\nonline-mode=false\nenforce-secure-profile=false\ngamemode=creative\nlevel-type={args.level_type}\nlevel-seed={args.level_seed}\nspawn-protection=0\nview-distance=4\nsimulation-distance=4\ndifficulty=peaceful\n")
         (runtime/"ops.json").write_text(json.dumps([{"uuid":"3dbc2475-f96a-3b21-8dae-78a0715c5e2f","name":"Ofwood_","level":4,"bypassesPlayerLimit":False}]))
         java=args.java.resolve() if args.java else reference/"jdk-25.0.5+8/bin/java"
         command=[str(java),"-Xms256M","-Xmx1G","-jar","server.jar","nogui"]
@@ -114,10 +114,11 @@ def run(args):
                     except ConnectionRefusedError:
                         if time.monotonic()>deadline:raise TimeoutError("server readiness")
                         time.sleep(.1)
-                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py"}[args.suite]
+                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py", "complex":"test_complex_storage.py"}[args.suite]
                 cmd=[sys.executable,str(ROOT/"tests/stress"/scenario),
                      "--port",str(args.port),"--snapshot",str(result/"snapshot.json")]
                 if args.kind=="vanilla":cmd.append("--vanilla")
+                if args.complex_dense and args.suite=="complex":cmd.append("--dense")
                 if args.blocks_only and args.suite=="placement":cmd.append("--blocks-only")
                 if args.region_boundaries and args.suite=="placement":cmd.append("--region-boundaries")
                 if args.suite=="pickup":cmd.extend(["--drop-count",str(args.pickup_count)])
@@ -146,7 +147,7 @@ def run(args):
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind",choices=("goatcore","vanilla"),required=True)
-    parser.add_argument("--suite",choices=("stairs","placement","pickup"),default="stairs")
+    parser.add_argument("--suite",choices=("stairs","placement","pickup","complex"),default="stairs")
     parser.add_argument("--port",type=int,required=True)
     parser.add_argument("--server-binary",type=Path,default=ROOT/"mc_server")
     parser.add_argument("--vanilla-root",type=Path,default=Path("/opt/goatcore/vanilla-2611"))
@@ -156,6 +157,9 @@ if __name__=="__main__":
     parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
     parser.add_argument("--s2-experimental",action="store_true",help="arm S2 only inside this fresh isolated Vanilla runtime")
     parser.add_argument("--anvil-rewriter",type=Path,help="rewrite native Vanilla regions with mc_save_bench before each verification restart")
+    parser.add_argument("--level-type",default="minecraft:flat",choices=("minecraft:flat","minecraft:normal"))
+    parser.add_argument("--level-seed",type=int,default=0)
+    parser.add_argument("--complex-dense",action="store_true")
     parser.add_argument("--region-boundaries",action="store_true",help="placement suite: region boundary scenarios")
     parser.add_argument("--verify-only",action="store_true",help="verify a supplied saved snapshot without editing the copied world")
     parser.add_argument("--snapshot-template",type=Path)

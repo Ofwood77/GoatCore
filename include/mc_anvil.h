@@ -56,8 +56,10 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
  * expected==NULL requires an absent slot; mismatches return ESTALE unchanged. */
 int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
                                       const uint8_t *expected, size_t expected_length);
+bool mc_native_state_sensitive(uint32_t state);
+
 /* Strict 4788/padded native path, preserving source NBT outside block edits.
- * Nonempty block entities/protochunks/unknown states are currently refused. */
+ * Block entities remain opaque and protected; protochunks/unknown states refused. */
 int mc_anvil_decode_native(const uint8_t *raw, size_t length, int32_t cx, int32_t cz, mc_chunk_t *out);
 int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_t *entities,
                             uint8_t **out, size_t *length);

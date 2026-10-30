@@ -38,6 +38,7 @@ void mc_chunk_destroy(mc_chunk_t *chunk) {
         mc_paletted_container_destroy(&chunk->sections[i]);
     }
     free(chunk->storage_nbt);
+    free(chunk->storage_guard);
     free(chunk->network_chunkdata);
     free(chunk->network_heightmaps);
     memset(chunk, 0, sizeof(*chunk));
