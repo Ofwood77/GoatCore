@@ -65,7 +65,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io
 
 TEST_BINS = \
     test_varint \
@@ -335,3 +335,10 @@ distclean: clean
 	rm -rf /tmp/mc_c_server_smoke_world
 
 -include $(OBJ:.o=.d)
+
+# Isolated remote persistence microbenchmark (no server listener).
+mc_save_bench: tools/mc_save_bench.c src/world/world.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+mc_trace_io: tools/mc_trace_io.c
+	$(CC) $(CFLAGS) -o $@ $<

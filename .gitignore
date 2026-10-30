@@ -6,6 +6,8 @@ node_modules/
 /mc_recorder
 /mc_anvil_dump
 /mc_gen_bench
+/mc_save_bench
+/mc_trace_io
 /test_*
 __pycache__/
 *.pyc

@@ -1,4 +1,5 @@
 #include "mc_chunk.h"
+#include "mc_util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,8 @@ int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_i
     mc_global_state_id_t old_id = mc_paletted_container_get_block(&chunk->sections[sec_index], x, local_y, z);
     int rc = mc_paletted_container_set_block(&chunk->sections[sec_index], x, local_y, z, global_id);
     if (rc == 0 && old_id != global_id) {
+        size_t invalidated = chunk->network_chunkdata_len + chunk->network_heightmaps_len;
+        mc_save_clock_t span = invalidated ? mc_save_profile_begin() : (mc_save_clock_t){0};
         chunk->revision++;
         free(chunk->network_chunkdata);
         chunk->network_chunkdata = NULL;
@@ -72,6 +75,7 @@ int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_i
         free(chunk->network_heightmaps);
         chunk->network_heightmaps = NULL;
         chunk->network_heightmaps_len = 0;
+        mc_save_profile_end("cache_invalidate", chunk->cx, chunk->cz, span, invalidated, 0);
     }
     return rc;
 }

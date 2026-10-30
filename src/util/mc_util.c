@@ -6,6 +6,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <errno.h>
 
 void log_info(const char *fmt, ...) {
     va_list ap;
@@ -122,4 +123,39 @@ int64_t mc_perf_slow_us(void) {
 uint64_t mc_perf_summary_ticks(void) {
     pthread_once(&perf_config_once, init_perf_config);
     return perf_summary_ticks;
+}
+
+static pthread_once_t save_trace_once = PTHREAD_ONCE_INIT;
+static FILE *save_trace;
+static void init_save_trace(void) {
+    const char *path = getenv("MC_SAVE_TRACE_PATH");
+    if (!path || !*path) return;
+    save_trace = fopen(path, "w");
+    if (!save_trace) { log_error("cannot open save trace"); return; }
+    setvbuf(save_trace, NULL, _IOFBF, 65536);
+    fprintf(save_trace, "start_us,end_us,cpu_us,thread,phase,cx,cz,bytes,result\n");
+}
+static int64_t save_thread_cpu_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+mc_save_clock_t mc_save_profile_begin(void) {
+    int saved_errno = errno;
+    pthread_once(&save_trace_once, init_save_trace);
+    mc_save_clock_t result = {0};
+    if (save_trace) result = (mc_save_clock_t){mc_now_us(), save_thread_cpu_us()};
+    errno = saved_errno;
+    return result;
+}
+void mc_save_profile_end(const char *phase, int32_t cx, int32_t cz,
+                         mc_save_clock_t start, size_t bytes, int result) {
+    if (!start.wall_us) return;
+    int saved_errno = errno;
+    int64_t end = mc_now_us(), cpu = save_thread_cpu_us() - start.cpu_us;
+    /* fprintf serializes only this diagnostic stream, not world ownership. */
+    fprintf(save_trace, "%lld,%lld,%lld,%lu,%s,%d,%d,%zu,%d\n",
+            (long long)start.wall_us, (long long)end, (long long)cpu,
+            (unsigned long)pthread_self(), phase, cx, cz, bytes, result);
+    errno = saved_errno;
 }

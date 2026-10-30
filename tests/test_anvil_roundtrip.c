@@ -985,7 +985,54 @@ static int test_encoded_data_version(void) {
     return valid ? 0 : fail("encoded chunks must use Vanilla 26.1.1 DataVersion 4788");
 }
 
+/* Equivalent uniform, palette and direct representations must produce exactly
+ * the same NBT. The expanded copy deliberately exercises the scanning path. */
+static int test_uniform_encoding_equivalence(void) {
+    mc_chunk_t uniform, expanded;
+    mc_block_entity_store_t be;
+    mc_be_store_init(&be);
+    if (mc_chunk_init(&uniform, -33, 32, 0) || mc_chunk_init(&expanded, -33, 32, 0))
+        return fail("uniform comparison init");
+    for (int sec = 0; sec < MC_WORLD_SECTION_COUNT; sec++) {
+        /* Includes air, non-air and states with properties. No registry IDs
+         * are assumed: each is a valid entry in the generated state table. */
+        mc_global_state_id_t fill = (mc_global_state_id_t)(sec * 13);
+        mc_paletted_container_destroy(&uniform.sections[sec]);
+        mc_paletted_container_destroy(&expanded.sections[sec]);
+        if (mc_paletted_container_init(&uniform.sections[sec], fill) ||
+            mc_paletted_container_init(&expanded.sections[sec], fill)) return fail("uniform section init");
+        int y = MC_WORLD_MIN_Y + sec * 16;
+        /* Promote half the sections to direct storage, then restore every
+         * value. Neither promotion collapses back to a uniform container. */
+        for (int i = 0; i < (sec % 2 ? 20 : 1); i++)
+            if (mc_chunk_set_block(&expanded, i & 15, y, i >> 4, fill + 1u + (unsigned)i))
+                return fail("expanded section promote");
+        for (int i = 0; i < (sec % 2 ? 20 : 1); i++)
+            if (mc_chunk_set_block(&expanded, i & 15, y, i >> 4, fill))
+                return fail("expanded section restore");
+        if (expanded.sections[sec].bits_per_block == 0) return fail("expected scanning path");
+    }
+    /* Mixed content remains on the general path in both representations. */
+    for (int mixed = 0; mixed < 2; mixed++) {
+        if (mixed) {
+            if (mc_chunk_set_block(&uniform, 15, 319, 15, 1) ||
+                mc_chunk_set_block(&expanded, 15, 319, 15, 1)) return fail("mixed comparison");
+        }
+        uint8_t *a = NULL, *b = NULL;
+        size_t na = 0, nb = 0;
+        int ra = mc_anvil_encode_chunk_nbt(&uniform, &be, &a, &na);
+        int rb = mc_anvil_encode_chunk_nbt(&expanded, &be, &b, &nb);
+        int equal = !ra && !rb && na == nb && !memcmp(a, b, na);
+        free(a); free(b);
+        if (!equal) return fail("uniform/palette/direct NBT differs");
+    }
+    mc_chunk_destroy(&uniform); mc_chunk_destroy(&expanded);
+    mc_be_store_destroy(&be);
+    return 0;
+}
+
 int main(void) {
+    if (test_uniform_encoding_equivalence() != 0) return 1;
     if (test_encoded_data_version() != 0) return 1;
     char tmpl[] = "/tmp/mc_world_roundtripXXXXXX";
     char *dir = mkdtemp(tmpl);

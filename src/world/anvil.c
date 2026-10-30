@@ -5,6 +5,7 @@
 #include "generated_registries.h"
 #include "mc_packed.h"
 #include "mc_world.h"
+#include "mc_util.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -948,25 +949,32 @@ static int build_section_block_states(const mc_chunk_t *chunk, int sec_idx, mc_n
     if (out) *out = NULL;
     if (!chunk || sec_idx < 0 || sec_idx >= MC_WORLD_SECTION_COUNT || !out) return -1;
 
-    for (int i = 0; i < 4096; i++) {
-        int y = i >> 8;
-        int rem = i & 255;
-        int z = rem >> 4;
-        int x = rem & 15;
-        int world_y = (sec_idx * 16) + y + MC_WORLD_MIN_Y;
-        mc_global_state_id_t state_id = mc_chunk_get_block(chunk, x, world_y, z);
-        int found = -1;
-        for (int32_t pi = 0; pi < palette_len; pi++) {
-            if (palette_ids[pi] == state_id) {
-                found = pi;
-                break;
+    /* A uniform container already represents all 4096 values. Preserve the
+     * first-seen palette order of the general path for every other container. */
+    if (chunk->sections[sec_idx].bits_per_block == 0) {
+        palette_ids[0] = chunk->sections[sec_idx].uniform_state;
+        palette_len = 1;
+    } else {
+        for (int i = 0; i < 4096; i++) {
+            int y = i >> 8;
+            int rem = i & 255;
+            int z = rem >> 4;
+            int x = rem & 15;
+            int world_y = (sec_idx * 16) + y + MC_WORLD_MIN_Y;
+            mc_global_state_id_t state_id = mc_chunk_get_block(chunk, x, world_y, z);
+            int found = -1;
+            for (int32_t pi = 0; pi < palette_len; pi++) {
+                if (palette_ids[pi] == state_id) {
+                    found = pi;
+                    break;
+                }
             }
+            if (found < 0) {
+                found = palette_len;
+                palette_ids[palette_len++] = state_id;
+            }
+            values[i] = (uint32_t)found;
         }
-        if (found < 0) {
-            found = palette_len;
-            palette_ids[palette_len++] = state_id;
-        }
-        values[i] = (uint32_t)found;
     }
 
     block_states = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "block_states");
@@ -1248,8 +1256,12 @@ int mc_anvil_encode_chunk_nbt(const mc_chunk_t *chunk, const mc_block_entity_sto
     if (out_raw_len) *out_raw_len = 0;
     if (!chunk || !out_raw || !out_raw_len) return -1;
 
+    mc_save_clock_t span = mc_save_profile_begin();
     if (build_chunk_nbt_root(chunk, be_store, &root) != 0) goto cleanup;
+    mc_save_profile_end("nbt_build", chunk->cx, chunk->cz, span, 0, 0);
+    span = mc_save_profile_begin();
     if (mc_nbt_write_named_root(root, &raw, &raw_len) != 0) goto cleanup;
+    mc_save_profile_end("nbt_serialize", chunk->cx, chunk->cz, span, raw_len, 0);
 
     *out_raw = raw;
     *out_raw_len = raw_len;
@@ -1266,6 +1278,7 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
     if (!region_path || !nbt) return -1;
     if (local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) return -1;
 
+    mc_save_clock_t total_span = mc_save_profile_begin(), span = total_span;
     FILE *f = fopen(region_path, "r+b");
     bool new_file = false;
     if (!f) {
@@ -1308,6 +1321,8 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         return -1;
     }
 
+    mc_save_profile_end("region_open_header", local_x, local_z, span, sizeof(header), 0);
+    span = mc_save_profile_begin();
     uint8_t *comp = NULL;
     size_t comp_len = 0;
     if (deflate_buffer_zlib(nbt, nbt_len, &comp, &comp_len) != 0) {
@@ -1315,6 +1330,8 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         return -1;
     }
 
+    mc_save_profile_end("region_compress", local_x, local_z, span, comp_len, 0);
+    span = mc_save_profile_begin();
     if (comp_len + 5 > MC_ANVIL_MAX_CHUNK_NBT) {
         free(comp);
         fclose(f);
@@ -1352,6 +1369,8 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         }
     }
 
+    mc_save_profile_end("region_allocate", local_x, local_z, span, 0, 0);
+    span = mc_save_profile_begin();
     uint64_t chunk_off_bytes = (uint64_t)new_off * MC_ANVIL_SECTOR_BYTES;
     if (fseek(f, (long)chunk_off_bytes, SEEK_SET) != 0) {
         free(comp);
@@ -1382,6 +1401,8 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         }
     }
 
+    mc_save_profile_end("region_payload", local_x, local_z, span, (size_t)new_cnt * MC_ANVIL_SECTOR_BYTES, 0);
+    span = mc_save_profile_begin();
     /* Update header offsets entry (3 bytes offset + 1 byte sector count). */
     header[idx * 4 + 0] = (uint8_t)((new_off >> 16) & 0xFF);
     header[idx * 4 + 1] = (uint8_t)((new_off >> 8) & 0xFF);
@@ -1401,7 +1422,11 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         fclose(f);
         return -1;
     }
+    mc_save_profile_end("region_header", local_x, local_z, span, sizeof(header), 0);
+    span = mc_save_profile_begin();
     fflush(f);
     fclose(f);
+    mc_save_profile_end("region_flush_close", local_x, local_z, span, 0, 0);
+    mc_save_profile_end("region_total", local_x, local_z, total_span, (size_t)new_cnt * MC_ANVIL_SECTOR_BYTES + sizeof(header), 0);
     return 0;
 }

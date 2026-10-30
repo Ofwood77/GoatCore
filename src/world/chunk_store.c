@@ -1,6 +1,7 @@
 #include "mc_chunk_store.h"
 
 #include "mc_anvil.h"
+#include "mc_util.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -254,6 +255,7 @@ int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk, const 
     size_t raw_len = 0;
     size_t compressed_len = 0;
     int rc = -1;
+    mc_save_clock_t total = mc_save_profile_begin(), span;
 
     if (!world_path || !*world_path || !chunk) {
         errno = EINVAL;
@@ -264,23 +266,34 @@ int mc_chunk_store_write(const char *world_path, const mc_chunk_t *chunk, const 
     if (chunk_file_path(chunk_path, sizeof(chunk_path), world_path, chunk->cx, chunk->cz) != 0) return -1;
 
     if (mc_anvil_encode_chunk_nbt(chunk, be_store, &raw, &raw_len) != 0) goto cleanup;
+    span = mc_save_profile_begin();
     if (deflate_buffer_zlib_local(raw, raw_len, &compressed, &compressed_len) != 0) goto cleanup;
+    mc_save_profile_end("chunk_compress", chunk->cx, chunk->cz, span, compressed_len, 0);
 
+    span = mc_save_profile_begin();
     FILE *f = fopen(chunk_path, "wb");
     if (!f) goto cleanup;
+    mc_save_profile_end("chunk_open_truncate", chunk->cx, chunk->cz, span, 0, 0);
+    span = mc_save_profile_begin();
     if (compressed_len > 0 && fwrite(compressed, 1, compressed_len, f) != compressed_len) {
         fclose(f);
         goto cleanup;
     }
+    mc_save_profile_end("chunk_fwrite", chunk->cx, chunk->cz, span, compressed_len, 0);
+    span = mc_save_profile_begin();
     if (fflush(f) != 0) {
         fclose(f);
         goto cleanup;
     }
+    mc_save_profile_end("chunk_fflush", chunk->cx, chunk->cz, span, 0, 0);
+    span = mc_save_profile_begin();
     if (fclose(f) != 0) goto cleanup;
+    mc_save_profile_end("chunk_fclose", chunk->cx, chunk->cz, span, 0, 0);
     rc = 0;
 
 cleanup:
     free(raw);
     free(compressed);
+    mc_save_profile_end("chunk_total", chunk->cx, chunk->cz, total, compressed_len, rc);
     return rc;
 }

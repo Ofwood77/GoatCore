@@ -181,6 +181,9 @@ async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only)
         assert all(b.state=='play' and not b.error for b in actors), 'connection failure'
         latencies=[v for b in actors for v in b.latencies]
         report=dict(phases=phases,bots=[b.report() for b in actors],
+                    action_times=[dict(place_sent=b.place_send_times,break_sent=b.break_send_times,
+                                       place_confirmed=b.place_verified_times,break_confirmed=b.break_verified_times,
+                                       latencies_ms=b.latencies) for b in actors],
                     pickup_observations=[dict(events=len(b.pickups),items=sum(n for _,n in b.pickups)) for b in actors],
                     pickup_events_first_observer=actors[0].pickups,
                     placed=sum(b.placed for b in actors),broken=sum(b.broken for b in actors),
@@ -211,6 +214,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False):
              MC_PERF_SUMMARY_TICKS='100',MC_PERF_TRACE_PATH=str(result/'ticks.csv'))
     if args.fsync_probe:
         env.update(LD_PRELOAD=str(args.fsync_probe.resolve()),MC_FSYNC_TRACE_PATH=str(result/'fsync.csv'))
+    if args.save_trace:env['MC_SAVE_TRACE_PATH']=str(result/'saves.csv')
     samples=[];stop=asyncio.Event()
     (result/'processes-before.txt').write_text(subprocess.check_output(['ps','-eo','pid,comm,pcpu,pmem,args','--sort=-pcpu'],text=True))
     started=time.monotonic()
@@ -292,6 +296,7 @@ if __name__=='__main__':
     p.add_argument('--warmup',type=float,default=5)
     p.add_argument('--idle',type=float,default=5)
     p.add_argument('--fsync-probe',type=Path)
+    p.add_argument('--save-trace',action='store_true',help='record storage stages and server action queue/handler times')
     p.add_argument('--world-template',type=Path)
     p.add_argument('--result-dir',type=Path,required=True)
     args=p.parse_args()

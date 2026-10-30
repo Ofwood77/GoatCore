@@ -1536,3 +1536,386 @@ Les scripts Python sont invoqués avec python3 ; aucun changement de permission
 de script n'est requis. Aucun fichier personnel ni résultat brut n'entre dans
 le commit. Le contrat de persistance de fin de passe est explicitement exposé
 ci-dessus pour la revue avant toute éventuelle promotion ultérieure.
+
+## Phase 2 — profilage Anvil et persistance (29–30 octobre 2026)
+
+### Périmètre, état initial et correction d'une hypothèse du diagnostic précédent
+
+HEAD initial : `13a2b1c5b15872ff0168497d37464000a7622150`, sans changement
+suivi. `.vscode/`, `src/main.py` et `start-aider.sh` sont préservés, hors commit.
+Ce lot ne change ni le tick autoritaire, ni les workers, ni les règles Vanilla,
+ni le protocole, ni le format/cadencement des sauvegardes. simulation_workers
+reste désactivé. Aucun push et aucune opération Git sur l'hôte distant.
+
+L'audit corrige une ambiguïté du rapport précédent : **reconstruire le NBT
+Anvil d'un chunk ne signifie pas reconstruire un fichier de région `.mca`**.
+Le chemin actif `world.c::save_chunk_to_store_with_entities` appelle
+`mc_chunk_store_write`, qui écrit `WORLD/chunks/c_CX_CZ.bin` : un flux zlib
+contenant du NBT de chunk. Le chargement actif appelle uniquement
+`mc_chunk_store_read`, sans import automatique des régions `.mca`. Certains
+messages historiques `source=anvil` ou `path=.../region/r.*.mca` sont trompeurs ;
+les appels et les traces de fichiers effectifs font foi.
+
+| Composant / événement | Comportement constaté avant et après ce lot |
+|---|---|
+| Pose/casse et certaines mutations de conteneurs | Flush explicite synchrone du chunk sale sur le tick. Deux actions successives peuvent donc produire deux réencodages complets du même chunk. |
+| Sauvegarde de fond | Au plus une tentative de chunk sale par tick (`ANVIL_SAVE_ATTEMPTS_PER_TICK=1`). Un chunk propre n'est pas réécrit. |
+| Éviction / arrêt normal | Sauvegarde des chunks sales ; les workers sont arrêtés et leurs résultats intégrés suivant le modèle existant. |
+| Normalisation au chargement | Un worker peut sauvegarder son chunk privé normalisé avant publication. Il ne modifie pas le monde vivant du tick. |
+| Store actif `.bin` | Construction de l'arbre NBT, sérialisation, compression, fopen `wb` avec troncature, fwrite, fflush/fclose vérifiés. Pas de fsync/fdatasync, fichier temporaire ou rename atomique. |
+| API autonome `.mca` | Lecture de l'en-tête 8 192 octets, compression du seul chunk fourni, réutilisation/allocation de secteurs, écriture du payload et de l'en-tête. Pas de lecture/reconstruction de tous les payloads de la région. fflush/fclose non vérifiés dans cette API, sans fsync ni verrou de région. Elle n'est pas utilisée par le store actif du serveur. |
+| Erreur de lecture `.bin` | Log d'erreur puis génération d'un nouveau chunk. Sa sauvegarde peut remplacer le fichier corrompu ; aucune récupération automatique de l'ancien état. |
+
+Les allocations/copies existantes comprennent l'arbre NBT et ses chaînes,
+le tampon NBT sérialisé, le tampon compressBound puis sa réduction par realloc.
+Les sections mixtes reconstruisent toujours leur palette dans l'ordre de
+première occurrence. Ce lot ne prétend pas mesurer séparément chaque malloc,
+chaque copie ou les écritures physiques du journal ext4.
+
+### Correction unique et instrumentation
+
+Les premiers échantillons distants montraient environ 1,6 ms CPU par construction
+NBT, et plusieurs ms murales dans fopen/O_TRUNC, avec peu de CPU dans cette
+ouverture. La correction retenue est limitée à
+`anvil.c::build_section_block_states` : une section `bits_per_block == 0`
+fournit directement son unique `uniform_state`, sans relire ses 4 096 cellules.
+Les autres représentations gardent exactement le parcours et l'ordre de palette
+existants. Le NBT, la compression, les fichiers, les barrières, l'ordre des
+mutations et les garanties de persistance restent identiques. Aucune écriture
+n'est supprimée ou différée pour améliorer les mesures.
+
+Le nouveau test de test_anvil_roundtrip construit le même contenu dans les
+24 sections sous forme uniforme, à palette et directe, puis introduit une
+section mixte : les NBT doivent être identiques **octet par octet**. Il complète
+les tests existants de DataVersion 4788, lecture 4785, coordonnées négatives,
+conteneurs et relecture des états. Le backend compare aussi les `.bin`
+compressés des deux versions, puis toutes les cellules après relecture.
+
+`MC_SAVE_TRACE_PATH` active uniquement à la demande les durées murales/CPU par
+thread : construction/sérialisation NBT, compression, ouverture/troncature,
+fwrite, fflush/fclose et opérations de région. Sans cette variable, la sonde
+ne lit aucune horloge ; elle conserve errno dans tous les cas. Les invalidations
+de cache ne sont chronométrées que si un cache non vide existe. Le test
+concurrent de test_perf_config vérifie 400 lignes complètes, le mode désactivé
+et la conservation d'errno. Les phases sont imbriquées et ne s'additionnent pas.
+Le temps non couvert inclut notamment libération NBT, préparation des chemins
+et coûts de la sonde ; la durée totale les contient.
+
+Le traceur Linux x86_64 `mc_trace_io` ne s'attache qu'à l'enfant qu'il crée.
+Il compte les appels fichiers et permet des interruptions reproductibles.
+Les temps sous ptrace sont exclus des comparaisons de performance.
+Les attentes internes de stdio, du noyau et du stockage ne sont pas toutes
+séparables ; la différence mural/CPU établit une attente, pas son origine
+physique exacte. Le store actif ne prend pas de mutex monde supplémentaire
+pendant l'écriture ; les métriques existantes du tick couvrent ses autres
+files et verrous. Aucun nouveau thread ou verrou de simulation n'est ajouté.
+
+### Méthode et lieux de mesure
+
+Une copie isolée distante a été créée avec remote-build-stage.sh :
+`/opt/goatcore/phase2a-stage.qFGKq3`. Les deux binaires y ont les mêmes sondes,
+options O2, configuration réseau 1 worker/chunks 2 workers et monde initial.
+Le backend distant a terminé ses 42 passes chronométrées et 14 passes de comptes
+système. La campagne bots a été lancée avant la perte d'accès à 10.0.4.66.
+
+Le 30 octobre, l'utilisateur a explicitement autorisé les tests sur son PC
+pendant l'indisponibilité du serveur. Les mesures locales sont distinctes :
+Ryzen 7 7840HS, 16 CPU logiques, Linux 7.0, même scénario/configuration entre
+référence et candidat. `/tmp` est un tmpfs : le premier backend local isole
+ainsi surtout le CPU. La campagne disque utilise ensuite le volume NVMe du
+dépôt, sous `tests/stress/results/anvil-technical/disk-stage`, ignoré par Git.
+Aucune valeur tmpfs/NVMe locale n'est présentée comme une performance de la LVM
+distante. Les en-têtes libcurl manquants localement ont été extraits dans le
+répertoire temporaire ; aucune installation système n'a été faite.
+
+Chaque scénario backend sépare préparation et phase active, fait trois
+répétitions en alternant l'ordre des versions, puis une passe distincte de
+comptage. A : 16 chunks chargés, repos pendant 40 ticks ; B : 200 modifications
+d'un chunk ; C : 200 modifications réparties sur 16 chunks de la même région
+logique ; D : 200 réparties sur 16 régions logiques ; E : relecture de toutes
+les cellules. Le test `.mca` écrit 100 changements d'un seul chunk, avec
+1, 16 ou 256 entrées déjà présentes. Tous les changements sont fixes, aucun
+résultat n'est normalisé à une charge inférieure.
+
+### Backend : coûts et volumes
+
+Durée active médiane de trois passes, en ms :
+
+| Scénario | Référence tmpfs | Candidat tmpfs | Référence NVMe | Candidat NVMe |
+|---|---:|---:|---:|---:|
+| B : 200 sauvegardes, 1 chunk | 76,056 | 30,102 | 85,620 | 39,596 |
+| C : 200 sauvegardes, 16 chunks / même région logique | 80,864 | 31,363 | 82,914 | 38,249 |
+| D : 200 sauvegardes / 16 régions logiques | 75,255 | 30,501 | 97,573 | 51,071 |
+| API .mca : 100 changements, 1 entrée | 37,670 | 15,664 | 37,763 | 14,945 |
+| API .mca : 100 changements, 16 entrées | 38,644 | 14,752 | 37,997 | 14,796 |
+| API .mca : 100 changements, 256 entrées | 36,896 | 14,194 | 37,055 | 14,423 |
+
+A : aucune sauvegarde/écriture dans la phase inactive chargée. B/C/D : exactement
+200 openat, 200 write, 200 close par passe active, aucune lecture de chunk,
+aucun pwrite/fsync/fdatasync. B écrit **70 200 octets** au noyau dans les deux
+versions. Les `.bin` des deux versions sont identiques ; les fichiers de région
+incluent un timestamp mural et ne sont pas comparés globalement par hash.
+
+Pour chacune des occupations `.mca` et chaque version : **100 read, 819 200
+octets lus ; 200 write, 1 228 800 octets écrits ; 100 ouvertures/fermetures,
+400 lseek, zéro fsync/fdatasync/pwrite**. Soit 8 192 octets d'en-tête lus et
+12 288 octets écrits par modification pour ces petits chunks (un secteur de
+4 096 octets plus l'en-tête). Ce volume reste constant de 1 à 256 entrées :
+l'hypothèse d'une reconstruction complète de région est écartée dans ces cas.
+Les volumes sont les octets acceptés par les syscalls, sans amplification
+physique des pages, du journal ou du contrôleur disque.
+
+Sur NVMe, 600 sauvegardes du scénario B par version, distributions murales
+P50/P95/P99 en **µs**, puis CPU moyen en µs :
+
+| Phase | Référence P50/P95/P99 | Candidat P50/P95/P99 | CPU moyen référence → candidat |
+|---|---:|---:|---:|
+| Construction NBT | 277 / 304 / 357 | 54 / 66 / 78 | 281,09 → 54,92 |
+| Sérialisation NBT | 6 / 8 / 11 | 6 / 7 / 11 | 6,45 → 6,39 |
+| Compression | 60 / 75 / 97 | 57 / 73 / 89 | 61,72 → 58,92 |
+| Ouverture/troncature | 16 / 22 / 33 | 16 / 21 / 34 | 17,17 → 16,56 |
+| fwrite | 1 / 2 / 2 | 1 / 2 / 2 | 1,30 → 1,28 |
+| fflush | 5 / 6 / 9 | 5 / 6 / 9 | 4,89 → 4,68 |
+| fclose | 20 / 25 / 42 | 19 / 22 / 34 | 19,19 → 18,51 |
+| Total | 418 / 479 / 622 | 191 / 228 / 283 | 426,29 → 195,23 |
+
+Le CPU de construction baisse de 80,5 % dans cette fixture synthétique à deux
+sections mixtes et 22 sections d'air uniformes. Le maximum total observé est
+5 759 → 549 µs ; l'ouverture maximale 5 342 → 332 µs n'est **pas** attribuée à
+la correction CPU : le timing du stockage varie. Une section logiquement
+uniforme déjà représentée par une palette reste volontairement sur l'ancien
+parcours. Le gain dépend donc de la représentation réelle des chunks.
+Les phases NBT détaillées concernent le store actif ; l'API autonome `.mca`
+construit aussi son NBT en amont du span region_total, sans span NBT distinct
+sur ce second point d'entrée. Sa durée de scénario inclut ce travail.
+
+### Interruptions : défaut préexistant confirmé, contrat inchangé
+
+Deux matrices de douze instances locales jetables (tmpfs puis NVMe), six
+interruptions pour chacune des deux versions, avec un ancien bloc de pierre
+et une bûche témoin adjacente dans le
+chunk négatif (-32,-32). Le traceur tue seulement le processus enfant ; les
+fichiers originaux sont conservés avant toute récupération. Le rechargement
+est tenté sur une copie, par les mêmes API world/worker que le serveur.
+
+| Point d'interruption | Résultat avant ET après correction |
+|---|---|
+| Avant openat O_TRUNC | Ancien fichier de 332 octets inchangé, pierre et témoin conservés. |
+| Après O_TRUNC | Fichier vide, lecture -1, régénération : pierre et témoin perdus. |
+| Avant write | Même résultat : fichier vide et ancien chunk perdu. |
+| Écriture partielle injectée, puis SIGKILL | 162 octets, flux zlib illisible, régénération et perte des deux blocs. |
+| Après write complet | Nouveau fichier de 325 octets lisible, nouvelle bûche et témoin conservés. |
+| Après close | Même nouveau contenu lisible. |
+
+Il s'agit d'un SIGKILL avec cache noyau intact, **pas d'une panne de courant**.
+Même après fflush/fclose ou un ACK réseau, l'absence de fsync ne prouve pas la
+durabilité électrique. Le store actuel n'assure pas l'atomicité du remplacement
+et peut détruire un ancien chunk pendant une nouvelle sauvegarde. L'optimisation
+CPU ne corrige ni ne masque ce défaut. La résistance générale aux crashes n'est
+**pas validée**. L'API `.mca` autonome n'apporte pas davantage de garantie globale
+et ses interruptions ne sont pas couvertes par cette matrice `.bin`.
+
+Les sauvegardes joueurs conservent leur propre protocole atomique et leurs
+fsync, dont le regroupement de fin de passe de ramassage du lot précédent.
+Il n'existe pas de transaction globale inventaire/monde/objets au sol ; les
+entités items en mémoire ne sont pas sérialisées par le store de chunks. Une
+fenêtre de crash peut donc perdre des objets au sol indépendamment du défaut
+`.bin`. Aucun mécanisme de transaction ou nouveau format n'est introduit ici.
+
+### Campagne bots locale NVMe : résultat continu à travail de blocs fixé
+
+Référence = 13a2b1c5 avec les sondes communes ; candidat = même source plus le
+raccourci des sections uniformes. Trois répétitions par niveau, ordre alterné,
+100 poses ET 100 destructions confirmées par bot, même monde initial copié et
+mêmes paramètres de workers/distances. Préparation, échauffement de 5 s, repos
+de 5 s, charge entière, puis repos de 5 s sont séparés. Les 441 chunks annoncés
+à chaque client ont été reçus avant la charge. Les deux versions exécutent
+chacune **25 800 poses et 25 800 destructions**, zéro action manquante, erreur
+ou déconnexion inattendue. Toutes les propositions, entrées de traitement
+serveur et confirmations sont comptées ; il ne s'agit pas de paquets seulement
+envoyés. Les étapes enqueue ont une résolution de 1 ms et leur décompte aux
+bords de phase utilise le début de traitement non arrondi.
+
+Distributions regroupant tous les ticks planifiés chevauchant les trois phases
+actives, sans fenêtre sélectionnée ni écrêtage. TPS = somme des débuts de ticks
+/ somme des durées réelles ; les valeurs légèrement supérieures à 20 reflètent
+les bords de ces phases courtes et les rattrapages, pas une nouvelle fréquence.
+
+| Bots | Version | Poses / casses | Durée totale active s | TPS observés | MSPT P50 / P95 / P99 | Ticks >50 ms | Maximum ms |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | Référence | 300 / 300 | 14,474 | 19,898 | 0,604 / 0,789 / 1,094 | 0 | 2,012 |
+| 1 | Candidat | 300 / 300 | 14,636 | 19,882 | 0,366 / 0,611 / 3,302 | 0 | 6,121 |
+| 10 | Référence | 3 000 / 3 000 | 25,663 | 19,951 | 2,617 / 3,514 / 12,433 | 0 | 17,076 |
+| 10 | Candidat | 3 000 / 3 000 | 24,070 | 19,983 | 2,425 / 3,141 / 3,821 | 0 | 8,191 |
+| 25 | Référence | 7 500 / 7 500 | 12,640 | 20,016 | 8,749 / 12,444 / 14,736 | 0 | 16,713 |
+| 25 | Candidat | 7 500 / 7 500 | 12,124 | 20,126 | 8,396 / 11,775 / 12,714 | 0 | 14,576 |
+| 50 | Référence | 15 000 / 15 000 | 57,586 | 20,005 | 17,766 / 39,227 / 49,598 | 9 | 76,247 |
+| 50 | Candidat | 15 000 / 15 000 | 53,750 | 20,018 | 17,896 / 37,069 / 47,488 | 8 | 64,722 |
+
+Ces MSPT ne cachent pas les passes rapides entre ticks : elles sont conservées
+séparément dans chaque CSV. À 50 bots, coût planifié + passes rapides associé
+à l'intervalle : P50/P95/P99 **37,061/67,365/80,489 ms** avant et
+**35,500/63,068/71,515 ms** après, maximum **103,647/91,533 ms**, respectivement
+327 et 239 intervalles dépassant 50 ms. Les coûts imbriqués du tick ne sont
+pas additionnés une seconde fois. Débit proche de 20 sur ces courtes charges
+locales ne signifie ni absence de latence, ni stabilité longue, ni 20 TPS sur
+10.0.4.66, dont les conditions IO et CPU diffèrent.
+
+| Bots | CPU processus % réf. → cand. | CPU client Python % réf. → cand. | Temps cumulé chunk_total s réf. → cand. | Sauvegardes réf. → cand. | fsync mesurés réf. → cand. |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 2,6 → 1,7 | 2,0 → 1,8 | 0,543 → 0,447 | 458 → 451 | 0 → 0 |
+| 10 | 11,2 → 9,0 | 7,1 → 8,0 | 1,773 → 1,055 | 3 464 → 3 432 | 672 → 630 |
+| 25 | 75,1 → 62,6 | 64,6 → 65,7 | 3,634 → 1,995 | 7 717 → 7 705 | 482 → 462 |
+| 50 | 114,6 → 108,9 | 99,4 → 99,5 | 7,378 → 4,207 | 15 874 → 15 853 | 800 → 778 |
+
+CPU : moyennes par passe, 100 % représentant un cœur logique. RSS active à
+50 bots : 41 268–42 800 KiB avant, 40 920–42 308 après ; pas de croissance
+anormale démontrée dans ces essais courts. Profondeurs au point de mesure du tick : 1/10/18/50 avant,
+1/7/15/50 après ; pics de file 2/12/27/54 avant, 2/14/30/54 après,
+sans saturation de la limite 8 192. L'analyse des ressources
+conserve aussi les compteurs IO, schedstat, wchan et pression hôte.
+
+À 50 bots, chacun des trois essais propose, reçoit et confirme exactement
+5 000 poses et 5 000 casses. Débit groupé par direction : 260,5 → 279,1 actions/s.
+Les latences client P95 par passe sont 79,23/74,22/74,89 ms avant et
+78,41/69,19/72,65 ms après. Attente de file des poses P99 :
+48,259/44,238/42,379 ms avant, 46,091/42,130/44,396 après. Le client Python
+proche de 100 % limite lui-même le rythme ; ce scénario fermé par confirmations
+n'établit pas la capacité maximale d'admission indépendante du client. Aucun
+chantier réseau n'a été entrepris pour changer ces chiffres.
+
+Les effets secondaires temporels restent visibles : les quantités ramassées
+par le premier observateur à 50 bots sont 673/407/409 avant, 303/560/482 après,
+avec des nombres de lots et de fsync différents. Le calendrier des sauvegardes
+sales produit également de petites variations de comptes et d'octets :
+5 962 940 → 5 945 159 octets compressés sauvegardés à 50 bots. Le travail de
+**blocs** est égal, mais le travail total de ramassage/synchronisation disque
+pendant la phase n'est pas strictement identique. Le raccourcissement de charge
+57,586 → 53,750 s n'est donc pas attribué entièrement au codec. La preuve
+contrôlée du gain CPU est le backend à **200 sauvegardes et octets identiques**,
+complétée par les coûts par appel en serveur. Aucune suppression de fsync ou
+de validation n'est responsable du gain annoncé.
+
+### Attribution et limites du profilage
+
+À 50 bots sur les phases actives : construction NBT CPU **5,180 → 1,941 s**
+pour 15 874 → 15 853 appels, soit environ **326 → 122 µs/appel**. Le total
+sauvegarde CPU passe de 7,331 à 4,056 s ; compression et volume restent
+comparables. L'optimisation du parcours uniforme a donc un effet mesurable sur
+le serveur réel, moindre que dans la fixture synthétique. Le fanout et le coût
+Python n'ont pas été isolés par une modification de code et ne sont pas déclarés
+résolus.
+
+Des attentes disque demeurent : ouverture/troncature maximale **18,155 ms avant,
+29,126 ms après** dans ces essais à 50 bots. Des échantillons wchan montrent
+`jbd2_log_wait_commit` et `folio_wait_bit_common`. Cela concorde avec les attentes
+murales observées, sans identifier le contrôleur physique ni toutes les causes
+hôte. Les temps de verrous mesurés ne dominent pas ces pauses ; les attentes
+stdio/noyau non détaillées et les autres processus restent des limites.
+
+Le plus long tick planifié avant correction, 76,247 ms, contient 38,963 ms de
+tâches et 35,948 ms d'items ; seuls environ 4,225 ms de spans chunk_total le
+chevauchent. Après correction, le maximum 64,722 ms contient 41,715 ms de tâches
+et 21,886 ms d'items, avec environ 3,541 ms de sauvegardes de chunks chevauchantes.
+Les sauvegardes joueurs des ramassages restent indépendantes des spans chunks.
+Ces mesures réfutent l'attribution de **toutes** les pauses à Anvil.
+
+Le défaut de troncature est plus grave pour l'intégrité que le coût CPU. La
+prochaine intervention recommandée est un protocole de remplacement atomique
+et durable des fichiers de chunks, avec récupération explicitement définie et
+injections de crash/erreur, avant toute promotion du binaire. Il faudra mesurer
+le coût des barrières nécessaires ; ce lot ne les retire ni ne les ajoute
+silencieusement. La phase 2 reste ouverte.
+
+### Non-régression et compatibilité effectivement vérifiées
+
+`make -B precommit-check` réussit sur la copie locale NVMe : **23 suites C**,
+smoke, réseau multi-epoll 1/2/4 workers et affinité sur un CPU, arrêt sous charge,
+login offline/UUID/doublons/reconnexion/refus online, puis tests Python du
+générateur, des bots et des bornes du profiler. Le registre des blocs et les
+IDs de protocole sont régénérés et comparés aux rapports officiels présents.
+Les sources brutes recettes/loot/composants absentes de cette copie limitent
+les autres vérifications generated-check à la présence des fichiers ; aucune
+régénération complète de tous les assets n'est revendiquée. L'export n'a pas de
+Git ; l'hygiène Git est vérifiée dans le dépôt local. Le binaire reconstruit
+par ce contrôle est identique par cmp au candidat des 24 passes.
+
+| Suite | Binaire normal | ASan + UBSan | Référence / portée |
+|---|---|---|---|
+| Escaliers, formes/voisins, deux observateurs et lectures autoritaires | 192 observations, puis 8 états relus après chacun de 3 redémarrages | 192 observations + 8 après redémarrage | Nouvelle exécution officielle 26.1.1 et fixture versionnée : mêmes 192 lignes et mêmes 8 états. Vanilla relu après 3 redémarrages. |
+| Blocs pleins, bûches, dalles/fusion, refus, collisions, inventaires | 18 scénarios, 4 états et slot 36 après chacun de 3 redémarrages | Même suite et relecture | Identique aux 18 scénarios de la fixture Vanilla existante ; shulker BlockEvent 775 conservé. Pas de nouvelle exécution Vanilla de cette seconde suite. |
+| Ramassages | 100 drops et 100 objets ramassés vus par deux joueurs ; inventaire à la reconnexion puis après chacun de 3 redémarrages | Même cas 100, reconnexion et redémarrage | Quantités exactes, pas de duplication/perte dans ce scénario terminé normalement. Ne prouve pas une transaction globale en cas de crash. |
+| Sérialisation et coordonnées | Backend : relecture de toutes les cellules B/C/D et `.mca` à 1/16/256 entrées ; fichiers `.bin` identiques entre versions | test_anvil_roundtrip, test_world_consistency et codec réseau | DataVersion 4788, lecture 4785, propriétés, coordonnées négatives et frontières, régions logiques multiples. |
+
+ASan+UBSan locaux : O1/g, `-fsanitize=address,undefined`,
+`-fno-omit-frame-pointer -fno-pie`, lien `-no-pie`,
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1`,
+`UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. Dix suites C passent :
+test_pvp, test_stairs, test_world_consistency, test_anvil_roundtrip,
+test_player_nbt, test_chunk_network_codec, test_paletted_container,
+test_perf_config, test_block_registry et test_nbt. Les trois suites réseau du
+tableau passent avec arrêt normal et relecture. Aucun diagnostic sanitizer.
+Les logs de fichiers corrompus et d'échecs disque des injections C sont attendus
+et vérifiés ; les corruptions du scénario F sont des défauts connus reproduits,
+pas une réussite de sûreté de persistance.
+
+TSan : contrairement au runtime LXC distant précédemment arrêté avec
+`unexpected memory mapping`, le runtime du **PC local** fonctionne. La sonde
+minimale, test_perf_config et test_world_consistency non-PIE terminent avec
+**code 0**, sans diagnostic. Ce résultat est limité à ces tests et cet hôte :
+aucune validation TSan du serveur réseau complet ni du runtime distant actuel.
+
+Les premiers pilotes distants avec une sonde de cache trop bavarde ont été
+arrêtés et exclus des conclusions : près de 500 Mo/passe à l'initialisation.
+La sonde a été corrigée dans les deux versions avant les campagnes retenues.
+Le pilote bots local sur tmpfs a été arrêté pour déplacer la campagne disque
+sur NVMe ; il n'entre pas dans le tableau des 24 passes. Une première compilation
+locale a échoué faute de curl/curl.h, puis a réussi avec le SDK extrait. Une
+lecture de fixture de placement utilisait initialement `cases` au lieu de
+`scenarios` ; l'analyse corrigée compare bien les 18 lignes. Aucun de ces essais
+de harnais n'est présenté comme une mesure finale ou une régression du serveur.
+
+### Binaires, services, artefacts et fichiers du lot
+
+Empreintes SHA-256 locales :
+
+- Référence 13a2b1c5 + sondes communes : `0b3a961b97bd3254c728c02e8391ea0bd89fa94447d2c4b0a4a4c16f4d157e1e`.
+- **Binaire normal final testé** : `c9eafc0e5f7616f584b35f8010be4a898dbe784c34bceea387051c72461d14c1`.
+- ASan+UBSan : `3c0c2e167de6a64d6f4f92f8668902b38bca7b34a3e3e79eade25155b1cecf36`.
+- JAR interne officiel 26.1.1 : `3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`, version.json protocole 775 / DataVersion 4788. Le vieux JAR local 26.1 a été écarté. Le bundler 26.1.1 provient du manifeste Mojang, SHA-1 vérifié `49c8195703ad0ba4f0a4efbccfd85a4a8ca57431` ; Java local 25.0.4.1.
+
+Aucun remplacement de binaire principal, changement de service, de monde,
+d'authentification ou de permissions n'a été effectué sur 10.0.4.66.
+**Dernière observation distante vérifiée, 29 octobre 22:34 UTC : 25565 actif,
+PID 140 ; 25587 inactif, PID 0**, résultat systemd success. Binaire partagé
+`f840ed3f535d80d8b87293b1ada6fdf88cacd6c681740f1dcfa3b06bd1dc423c`.
+Les empreintes des configs, setups et unités sont conservées dans
+services-before.txt. Le 30 octobre, les connexions SSH expirent ; le contrôle
+final des deux services, la récupération de la campagne distante et la
+vérification du nettoyage des processus temporaires distants restent
+**impossibles tant que l'accès n'est pas rétabli**. Leur état courant n'est pas
+inventé. 25587 n'a pas été redémarré, 25565 n'a pas été manipulé.
+
+Tous les processus Minecraft temporaires **locaux** sont arrêtés et leurs ports
+libérés, y compris 25589/25590/25591. Le binaire final reste dans la copie locale
+isolée ; rien n'est promu sur les services. La validation distante finale reste
+ouverte, et la persistance ne doit pas être qualifiée de crash-safe.
+
+Artefacts bruts locaux, ignorés par Git, sous
+`tests/stress/results/anvil-technical/` :
+
+- `disk-stage/tests/stress/results/anvil-backend-nvme` : 42 passes, 14 comptes système, JSON de commandes, phases CPU/murales, syscalls, relectures et fichiers.
+- `disk-stage/tests/stress/results/anvil-matrix-nvme` : les 24 passes complètes, ticks.csv, saves.csv, actions.json (instants individuels), resources.json, fsync.csv, snapshots de processus, monde initial/manifeste et résumés.
+- `disk-stage/tests/stress/results/anvil-crashes-nvme` : 12 interruptions, fichiers interrompus préservés, copies récupérées et comptes système ; `stairs-normal`, `stairs-vanilla`, `placement-normal`, `pickup-normal` : captures et relectures.
+- `tmpfs-results` : backend CPU, première matrice d'interruptions, suites ASan/UBSan et pilote tmpfs exclu des mesures disque. Les artefacts initialement en RAM ont été copiés sur le NVMe.
+- `local-build-logs`, `disk-stage/precommit.log`, `binaries.sha256`, `local-host.txt`, `analysis-nvme.txt` et `analyze.py` : builds, sanitizers, méthode de regroupement et tentatives de contrôle distant. La copie distante qFGKq3 conserve ses propres résultats, non récupérés depuis la panne réseau.
+
+Fichiers du commit : `.gitignore`, `Makefile`, `include/mc_util.h`,
+`src/util/mc_util.c`, `src/net/server.c`, `src/world/anvil.c`,
+`src/world/chunk.c`, `src/world/chunk_store.c`, `tests/test_anvil_roundtrip.c`,
+`tests/test_perf_config.c`, `tests/stress/profile_tick.py`,
+`tests/stress/profile_persistence.py`, `tests/stress/run_block_checks.py`,
+`tests/stress/README.md`, `tools/mc_save_bench.c`, `tools/mc_trace_io.c`,
+`tools/check_repo_hygiene.sh` et ce document. Les Python sont invoqués par
+python3 ; aucun changement de permission n'est nécessaire. Un seul commit
+local, sans push : `Profile and optimize Anvil persistence bottlenecks`.

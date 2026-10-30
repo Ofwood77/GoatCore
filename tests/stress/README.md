@@ -281,3 +281,69 @@ invariants de quantité sur Vanilla ; les bornes temporelles ne doivent pas êtr
 Une sonde demandée mais absente ne vaut jamais zéro fsync : les chemins invalides
 et l'absence de fichier de trace provoquent un échec. Sans sonde demandée,
 profile_tick.py conserve `fsync: null` pour indiquer une métrique non mesurée.
+
+### Profilage de persistance et interruptions contrôlées
+
+Sur la copie de sources isolée de 10.0.4.66 uniquement :
+
+```sh
+make mc_save_bench mc_trace_io
+python3 tests/stress/profile_persistence.py \
+  --binary reference=./mc_save_bench.reference --binary candidate=./mc_save_bench.candidate \
+  --repetitions 3 --result-dir tests/stress/results/persistence-new
+python3 tests/stress/profile_persistence.py --crash \
+  --binary reference=./mc_save_bench.reference --binary candidate=./mc_save_bench.candidate \
+  --server reference=./mc_server.reference --server candidate=./mc_server.candidate \
+  --result-dir tests/stress/results/crashes-new
+```
+
+Construire les deux révisions avec les mêmes options et sondes ; conserver les
+copies de binaires avant toute recompilation. Le backend utilise le codec et le
+store réels, sans socket. Il sépare la préparation, le chargement et la période
+mesurée : monde inactif chargé, 200 modifications dans un chunk, 200 réparties
+sur 16 chunks dans une même région logique, puis dans 16 régions distinctes.
+L'API `.mca`, distincte du store actif du serveur, est exercée avec 1, 16 et
+256 entrées présentes et 100 modifications du seul premier chunk. Les relectures
+comparent toutes les cellules. Les fichiers `.bin` déterministes des deux
+versions doivent être identiques octet par octet.
+
+`MC_SAVE_TRACE_PATH=/chemin/trace.csv` active les phases murales/CPU par thread :
+construction NBT, sérialisation, compression, ouverture/troncature, fwrite,
+fflush/fclose, cache et opérations de région. Sans cette variable, aucun clock
+n'est lu par la sonde. Elle préserve errno. Le CSV est tamponné et peut perdre sa
+fin lors d'un SIGKILL ; il ne constitue aucune preuve de durabilité. La sonde de
+cache mesure seulement les invalidations d'un cache non vide, pour exclure les
+millions de cellules initialisées sans cache pendant le chargement.
+Les durées imbriquées ne s'additionnent pas. Les erreurs sans phase terminée ne
+doivent pas être comptées comme sauvegardes réussies.
+
+`mc_trace_io` nécessite Linux x86_64 et ptrace autorisé pour **son enfant** ; il
+ne s'attache jamais à un service existant. Il compte openat/read/write/pread/
+pwrite/writev/close/lseek/fsync/fdatasync/ftruncate, avec fichiers et résultats.
+Les répétitions sous ptrace sont réservées aux comptes et interruptions, car
+leurs temps sont perturbés. Les volumes sont les octets remis au noyau ; les
+écritures physiques et le journal ext4 ne sont pas mesurés par ce compteur.
+
+Le mode crash crée six instances temporaires successives par version, ports
+éphémères, mondes privés et opérateur offline de test. Il tue l'enfant avant
+O_TRUNC, après O_TRUNC, avant write, après une écriture partielle injectée,
+après write et après close. Il conserve le chunk interrompu, inspecte sa
+lisibilité, puis teste la récupération sur **une copie**. Une lecture défaillante
+peut provoquer une régénération et une perte des anciens blocs. Un fichier relu
+après SIGKILL, même après close, ne prouve pas sa résistance à une panne de
+courant : le cache du noyau est conservé dans cette expérience.
+
+Pour la campagne bots, ajouter `--save-trace` à profile_tick.py. actions.json
+conserve les instants individuels de poses/casses envoyées et confirmées ; les
+phases enqueue_* et handler_* distinguent l'arrivée dans la file réseau, le
+début et la fin du traitement. L'arrivée dans la file a une résolution de 1 ms
+et suit le décodage réseau ; elle n'est pas l'instant exact d'arrivée sur la
+carte réseau. Les latences client incluent ses propres attentes. Garder les
+fenêtres continues et la même quantité d'actions pour les comparaisons.
+
+run_block_checks.py accepte `--verify-restarts 3` pour relire le même monde
+après trois arrêts/redémarrages successifs, sans refaire la préparation. Pour
+une autre installation isolée du JAR officiel, préciser `--vanilla-root` et
+`--java /chemin/java25`. Vérifier le version.json du JAR interne et son empreinte
+avant de comparer : le même protocole 775 ne suffit pas à distinguer 26.1 de
+26.1.1. Les résultats sur tmpfs, NVMe local et LVM distant doivent rester séparés.

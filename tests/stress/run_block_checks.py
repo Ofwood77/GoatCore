@@ -31,7 +31,8 @@ def run(args):
         (runtime/"eula.txt").write_text("eula=true\n")
         (runtime/"server.properties").write_text(f"server-port={args.port}\nonline-mode=false\nenforce-secure-profile=false\ngamemode=creative\nlevel-type=minecraft:flat\nlevel-seed=0\nspawn-protection=0\nview-distance=4\nsimulation-distance=4\ndifficulty=peaceful\n")
         (runtime/"ops.json").write_text(json.dumps([{"uuid":"3dbc2475-f96a-3b21-8dae-78a0715c5e2f","name":"Ofwood_","level":4,"bypassesPlayerLimit":False}]))
-        command=[str(reference/"jdk-25.0.5+8/bin/java"),"-Xms256M","-Xmx1G","-jar","server.jar","nogui"]
+        java=args.java.resolve() if args.java else reference/"jdk-25.0.5+8/bin/java"
+        command=[str(java),"-Xms256M","-Xmx1G","-jar","server.jar","nogui"]
         env=os.environ.copy()
     else:
         (runtime/"assets").symlink_to(ROOT/"assets")
@@ -39,7 +40,7 @@ def run(args):
         env=dict(os.environ,MC_WORLD_PATH=str(runtime/"world"),MC_BIND_PORT=str(args.port),
                  MC_SETUP_FILE=str(ROOT/"tests/stress/network/one.conf"),MC_QA_MODE="1",MC_ADMIN_USERNAME="Ofwood_")
         command=[str(args.server_binary.resolve())]
-    for phase in ("edit","verify"):
+    for phase in ["edit", "verify"] + [f"verify-{i}" for i in range(2, args.verify_restarts + 1)]:
         phase_env=env.copy()
         if args.fsync_probe and args.kind=="goatcore":
             phase_env.update(MC_PERF="1",MC_PERF_TRACE_PATH=str(result/f"ticks-{phase}.csv"),
@@ -60,7 +61,7 @@ def run(args):
                      "--port",str(args.port),"--snapshot",str(result/"snapshot.json")]
                 if args.kind=="vanilla":cmd.append("--vanilla")
                 if args.suite=="pickup":cmd.extend(["--drop-count",str(args.pickup_count)])
-                if phase=="verify":cmd.append("--verify")
+                if phase!="edit":cmd.append("--verify")
                 test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=600)
                 (result/f"test-{phase}.log").write_text(test.stdout+test.stderr)
                 if test.returncode:raise RuntimeError(f"{phase} checks failed; see {result}/test-{phase}.log")
@@ -76,7 +77,7 @@ def run(args):
             if proc.returncode:raise RuntimeError(f"server shutdown exit {proc.returncode}")
             if args.fsync_probe and args.kind=="goatcore" and not (result/f"fsync-{phase}.csv").is_file():
                 raise RuntimeError("fsync probe did not produce a trace")
-    metadata={"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed"}
+    metadata={"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
     if args.kind=="goatcore":metadata["binary_sha256"]=hashlib.sha256(args.server_binary.read_bytes()).hexdigest()
     (result/"metadata.json").write_text(json.dumps(metadata,indent=2))
     print(json.dumps({**metadata,"results":str(result)}))
@@ -89,7 +90,9 @@ if __name__=="__main__":
     parser.add_argument("--port",type=int,required=True)
     parser.add_argument("--server-binary",type=Path,default=ROOT/"mc_server")
     parser.add_argument("--vanilla-root",type=Path,default=Path("/opt/goatcore/vanilla-2611"))
+    parser.add_argument("--java",type=Path,help="Java 25 executable for an isolated Vanilla installation")
     parser.add_argument("--result-dir",type=Path)
     parser.add_argument("--pickup-count",type=int,default=2,choices=(2,100))
+    parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
     parser.add_argument("--fsync-probe",type=Path,help="optional test-only fsync library and per-phase tick traces")
     run(parser.parse_args())

@@ -1602,6 +1602,18 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
     bool perf = mc_perf_enabled();
     int64_t handler_start_us = perf ? mc_now_us() : 0;
     mc_proto_state_t profile_state = perf ? (mc_proto_state_t)atomic_load(&c->state) : MC_STATE_HANDSHAKING;
+    bool profile_place = perf && profile_state == MC_STATE_PLAY && task->packet_id == MC_PKT_PLAY_SERVERBOUND_USE_ITEM_ON;
+    bool profile_break = perf && profile_state == MC_STATE_PLAY && task->packet_id == MC_PKT_PLAY_SERVERBOUND_PLAYER_ACTION &&
+        task->payload_len && task->payload[0] == 0;
+    mc_save_clock_t action_span = {0};
+    if (profile_place || profile_break) {
+        action_span = mc_save_profile_begin();
+        if (action_span.wall_us && task->enqueue_ms > 0) {
+            action_span.wall_us = task->enqueue_ms * 1000;
+            mc_save_profile_end(profile_place ? "enqueue_place" : "enqueue_break", 0, 0, action_span, task->payload_len, 0);
+            action_span = mc_save_profile_begin();
+        }
+    }
 
     mc_frame_t frame;
     memset(&frame, 0, sizeof(frame));
@@ -1676,6 +1688,7 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
             if (elapsed_us > entry->max_us) entry->max_us = elapsed_us;
         }
     }
+    mc_save_profile_end(profile_place ? "handler_place" : "handler_break", 0, 0, action_span, task->payload_len, rc);
     return rc;
 }
 

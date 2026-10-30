@@ -19,4 +19,10 @@ bool mc_perf_enabled(void);
 int64_t mc_perf_slow_us(void);
 uint64_t mc_perf_summary_ticks(void);
 
+/* Optional MC_SAVE_TRACE_PATH diagnostics; disabled spans read no clocks. */
+typedef struct { int64_t wall_us, cpu_us; } mc_save_clock_t;
+mc_save_clock_t mc_save_profile_begin(void);
+void mc_save_profile_end(const char *phase, int32_t cx, int32_t cz,
+                         mc_save_clock_t start, size_t bytes, int result);
+
 #endif /* MC_UTIL_H */
