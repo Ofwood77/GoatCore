@@ -97,6 +97,7 @@ typedef struct mc_chunk_done {
  * per-tick queue consumed by the networking layer. */
 struct mc_world {
     char *world_path;
+    mc_world_storage_t *storage;
     int64_t seed;
 
     float gen_base_freq;
@@ -327,54 +328,6 @@ static int coords_to_chunk(int32_t x, int32_t z, int32_t *out_cx, int32_t *out_c
     return 0;
 }
 
-static int mkdir_p(const char *path, mode_t mode) {
-    /* Establish durable directory ancestry once, before publishing workers. */
-    return mc_persistence_mkdirs(path, mode);
-}
-
-static int ensure_world_dirs(const char *world_path) {
-    if (!world_path || !*world_path) return -1;
-    if (mkdir_p(world_path, 0755) != 0) return -1;
-
-    char region[1024];
-    int n = snprintf(region, sizeof(region), "%s/region", world_path);
-    if (n <= 0 || (size_t)n >= sizeof(region)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    if (mkdir_p(region, 0755) != 0) return -1;
-
-    char chunks[1024];
-    n = snprintf(chunks, sizeof(chunks), "%s/chunks", world_path);
-    if (n <= 0 || (size_t)n >= sizeof(chunks)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    if (mkdir_p(chunks, 0755) != 0) return -1;
-
-    char players[1024];
-    n = snprintf(players, sizeof(players), "%s/players", world_path);
-    if (n <= 0 || (size_t)n >= sizeof(players)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    if (mkdir_p(players, 0755) != 0) return -1;
-
-    char containers[1024];
-    n = snprintf(containers, sizeof(containers), "%s/containers", world_path);
-    if (n <= 0 || (size_t)n >= sizeof(containers)) {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    if (mkdir_p(containers, 0755) != 0) return -1;
-
-    if (access(world_path, R_OK | W_OK | X_OK) != 0) return -1;
-    if (access(region, R_OK | W_OK | X_OK) != 0) return -1;
-    if (access(chunks, R_OK | W_OK | X_OK) != 0) return -1;
-    if (access(players, R_OK | W_OK | X_OK) != 0) return -1;
-    if (access(containers, R_OK | W_OK | X_OK) != 0) return -1;
-    return 0;
-}
 
 static int pending_mods_push(mc_pending_mods_t *p, mc_pending_mod_t m) {
     if (!p) return -1;
@@ -677,11 +630,11 @@ void mc_world_generate_chunk(mc_world_t *w, mc_chunk_t *chunk) {
     chunk->loaded = true;
 }
 
-static int save_chunk_to_store_with_entities(const mc_world_t *w, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store) {
+static int save_chunk_to_store_with_entities(const mc_world_t *w, mc_chunk_t *chunk, const mc_block_entity_store_t *be_store) {
     if (!w || !chunk) return -1;
     if (!w->world_path || !*w->world_path) return -1;
 
-    int rc = mc_chunk_store_write(w->world_path, chunk, be_store ? be_store : &w->block_entities);
+    int rc = mc_storage_write(w->storage, chunk, be_store ? be_store : &w->block_entities);
     if (rc != 0) {
         int e = errno;
         log_error("chunk store save %s chunk=(%d,%d) world=%s (errno=%d %s)",
@@ -714,7 +667,7 @@ static int save_chunk_to_store_with_entities(const mc_world_t *w, const mc_chunk
     return rc;
 }
 
-static int save_chunk_to_store(const mc_world_t *w, const mc_chunk_t *chunk) {
+static int save_chunk_to_store(const mc_world_t *w, mc_chunk_t *chunk) {
     return save_chunk_to_store_with_entities(w, chunk, &w->block_entities);
 }
 
@@ -783,7 +736,7 @@ static void *worker_main(void *arg) {
         mc_block_entity_store_t loaded_block_entities;
         mc_be_store_init(&loaded_block_entities);
 
-        int store_rc = mc_chunk_store_read(w->world_path, job.cx, job.cz, chunk, &loaded_block_entities);
+        int store_rc = mc_storage_read(w->storage, job.cx, job.cz, chunk, &loaded_block_entities);
         if (store_rc == 0) {
             bool normalized = normalize_chunk_container_states(chunk);
             if (w->debug_containers && w->debug_container_pos_set) {
@@ -860,7 +813,7 @@ static void *worker_main(void *arg) {
     return NULL;
 }
 
-mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count) {
+mc_world_t *mc_world_create_with_storage(const char *world_path, int64_t level_seed, int worker_count, mc_storage_kind_t storage) {
     if (worker_count < 0 || worker_count > MAX_WORKERS) return NULL;
     mc_world_t *w = (mc_world_t *)calloc(1, sizeof(*w));
     if (!w) return NULL;
@@ -871,13 +824,13 @@ mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_s
             free(w);
             return NULL;
         }
-        if (ensure_world_dirs(w->world_path) != 0) {
-            int e = errno;
-            log_error("world_path not writable: %s (errno=%d %s)", w->world_path, e, strerror(e));
-            free(w->world_path);
-            free(w);
-            return NULL;
-        }
+    }
+    if (mc_storage_open(w->world_path, storage, &w->storage) != 0) {
+        int e = errno;
+        log_error("world storage unavailable: %s (errno=%d %s)", w->world_path ? w->world_path : "(memory)", e, strerror(e));
+        free(w->world_path);
+        free(w);
+        return NULL;
     }
 
     w->seed = level_seed;
@@ -911,6 +864,7 @@ mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_s
     mc_be_store_init(&w->block_entities);
 
     if (chunk_map_init(&w->chunks, 256) != 0) {
+        mc_storage_close(w->storage);
         free(w->world_path);
         free(w);
         return NULL;
@@ -924,6 +878,7 @@ mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_s
     if (pthread_mutex_init(&w->job_lock, NULL) != 0 || pthread_cond_init(&w->job_cv, NULL) != 0 ||
         pthread_mutex_init(&w->done_lock, NULL) != 0) {
         chunk_map_free(&w->chunks);
+        mc_storage_close(w->storage);
         free(w->world_path);
         free(w);
         return NULL;
@@ -948,6 +903,7 @@ mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_s
             free(w->chunk_list);
             free(w->updates);
             free(w->jobs);
+            mc_storage_close(w->storage);
             free(w->world_path);
 
             pthread_mutex_destroy(&w->job_lock);
@@ -960,6 +916,10 @@ mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_s
 
     w->tick_count = 0;
     return w;
+}
+
+mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count) {
+    return mc_world_create_with_storage(world_path,level_seed,worker_count,MC_STORAGE_BIN);
 }
 
 mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
@@ -1031,6 +991,7 @@ void mc_world_destroy(mc_world_t *w) {
     free(w->updates);
     free(w->jobs);
     mc_be_store_destroy(&w->block_entities);
+    mc_storage_close(w->storage);
     free(w->world_path);
 
     pthread_mutex_destroy(&w->job_lock);

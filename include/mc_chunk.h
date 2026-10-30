@@ -22,6 +22,9 @@ typedef struct {
     bool evict_after_save;
     size_t list_index;
     uint64_t revision;
+    /* Native-only immutable last visible NBT, owned with this chunk. */
+    uint8_t *storage_nbt;
+    size_t storage_nbt_len;
     uint64_t network_cache_revision;
     uint8_t *network_chunkdata;
     size_t network_chunkdata_len;

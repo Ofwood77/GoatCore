@@ -1229,7 +1229,8 @@ static int validate_region(int fd, uint8_t *header, uint64_t size) {
     return rc;
 }
 
-int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len) {
+static int write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len,
+                           bool compare_source, const uint8_t *expected, size_t expected_len) {
     if (!region_path || !nbt || local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) {
         errno = EINVAL; return -1;
     }
@@ -1253,6 +1254,21 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
         size = (uint64_t)st.st_size;
         if (validate_region(source, header, size) != 0) goto done;
     } else if (errno != ENOENT) goto done;
+    if (compare_source) {
+        size_t n = strlen(region_path) + sizeof(".s2-journal");
+        char *pending = malloc(n);
+        if (!pending) goto done;
+        snprintf(pending,n,"%s.s2-journal",region_path);
+        struct stat st;
+        int sr; do { sr=lstat(pending,&st); } while(sr<0 && errno==EINTR);
+        free(pending);
+        if(sr==0 || errno!=ENOENT) { if(sr==0) errno=EBUSY; goto done; }
+        uint8_t *current=NULL;size_t current_len=0;
+        int rr=mc_anvil_read_chunk_nbt(region_path,local_x,local_z,&current,&current_len);
+        bool same=expected ? rr==0 && current_len==expected_len && !memcmp(current,expected,expected_len) : rr==1;
+        free(current);
+        if(!same) { if(rr>=0) errno=ESTALE; goto done; }
+    }
     mc_save_profile_end("region_read_validate", local_x, local_z, span, sizeof(header), 0);
     span = mc_save_profile_begin();
     if (deflate_buffer_zlib(nbt, nbt_len, &comp, &comp_len) != 0) goto done;
@@ -1321,4 +1337,497 @@ done:;
     errno = saved;
     mc_save_profile_end("region_total", local_x, local_z, total_span, written, result);
     return result;
+}
+
+int mc_anvil_write_chunk_nbt(const char *path, int lx, int lz, const uint8_t *nbt, size_t length) {
+    return write_chunk_nbt(path,lx,lz,nbt,length,false,NULL,0);
+}
+int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
+                                      const uint8_t *expected, size_t expected_length) {
+    if (expected && !expected_length) {
+        errno = EINVAL;
+        return -1;
+    }
+    return write_chunk_nbt(path, lx, lz, nbt, length, true, expected, expected_length);
+}
+
+/* Native 26.1.1 chunk editing. The historical compact .bin codec above remains
+ * unchanged. Vanilla SimpleBitStorage stores floor(64/bits) values per long. */
+static void native_remove(mc_nbt_tag_t *compound, const char *name) {
+    if (!compound || compound->type != MC_NBT_TAG_COMPOUND)
+        return;
+    for (int32_t i = 0; i < compound->payload.compound.length;) {
+        mc_nbt_tag_t *t = compound->payload.compound.children[i];
+        if (t && t->name && !strcmp(t->name, name)) {
+            mc_nbt_free(t);
+            compound->payload.compound.length--;
+            memmove(compound->payload.compound.children + i, compound->payload.compound.children + i + 1,
+                    (size_t)(compound->payload.compound.length - i) * sizeof(t));
+        } else
+            i++;
+    }
+}
+static int native_set(mc_nbt_tag_t *compound, mc_nbt_tag_t *tag) {
+    if (!tag)
+        return -1;
+    for (int32_t i = 0; i < compound->payload.compound.length; i++) {
+        mc_nbt_tag_t *old = compound->payload.compound.children[i];
+        if (old && old->name && tag->name && !strcmp(old->name, tag->name)) {
+            mc_nbt_free(old);
+            compound->payload.compound.children[i] = tag;
+            return 0;
+        }
+    }
+    if (compound_add_local(compound, tag) != 0) {
+        mc_nbt_free(tag);
+        return -1;
+    }
+    return 0;
+}
+static bool native_unique(const mc_nbt_tag_t *t, unsigned depth) {
+    if (!t || depth > 64)
+        return false;
+    if (t->type == MC_NBT_TAG_COMPOUND) {
+        for (int32_t i = 0; i < t->payload.compound.length; i++) {
+            const mc_nbt_tag_t *a = t->payload.compound.children[i];
+            if (!a || !a->name || !native_unique(a, depth + 1))
+                return false;
+            for (int32_t j = 0; j < i; j++)
+                if (!strcmp(a->name, t->payload.compound.children[j]->name))
+                    return false;
+        }
+    } else if (t->type == MC_NBT_TAG_LIST) {
+        for (int32_t i = 0; i < t->payload.list.length; i++)
+            if (!native_unique(t->payload.list.items[i], depth + 1))
+                return false;
+    }
+    return true;
+}
+static int native_parse(const uint8_t *raw, size_t n, mc_nbt_tag_t **out) {
+    *out = NULL;
+    size_t used = 0;
+    if (!raw || !n || n > MC_ANVIL_MAX_CHUNK_NBT || mc_nbt_read_named_root(raw, n, out, &used) != 0)
+        return -1;
+    uint8_t *copy = NULL;
+    size_t cn = 0;
+    int rc = -1;
+    if (used != n || !native_unique(*out, 0) || (*out)->type != MC_NBT_TAG_COMPOUND) {
+        errno = EINVAL;
+        goto done;
+    }
+    if (mc_nbt_write_named_root(*out, &copy, &cn) != 0)
+        goto done;
+    if (cn != n || memcmp(raw, copy, n)) {
+        errno = EOPNOTSUPP;
+        goto done;
+    }
+    rc = 0;
+done:;
+    int e = errno;
+    free(copy);
+    if (rc) {
+        mc_nbt_free(*out);
+        *out = NULL;
+    }
+    errno = e;
+    return rc;
+}
+static uint32_t native_unpack(const int64_t *data, unsigned index, int bits) {
+    unsigned per = 64u / (unsigned)bits;
+    return (uint32_t)(((uint64_t)data[index / per] >> ((index % per) * (unsigned)bits)) &
+                      ((UINT64_C(1) << bits) - 1));
+}
+static int native_palette(const mc_nbt_tag_t *bs, uint32_t ids[4096], mc_arena_t *arena) {
+    const mc_nbt_tag_t *palette = mc_nbt_compound_get(bs, "palette");
+    if (!palette || palette->type != MC_NBT_TAG_LIST ||
+        palette->payload.list.elem_type != MC_NBT_TAG_COMPOUND || palette->payload.list.length < 1 ||
+        palette->payload.list.length > 4096) {
+        errno = EINVAL;
+        return -1;
+    }
+    mc_arena_reset(arena);
+    for (int32_t i = 0; i < palette->payload.list.length; i++) {
+        const mc_nbt_tag_t *entry = palette->payload.list.items[i];
+        const mc_nbt_tag_t *name = mc_nbt_compound_get(entry, "Name"),
+                           *props = mc_nbt_compound_get(entry, "Properties");
+        if (!name || name->type != MC_NBT_TAG_STRING || !name->payload.string_val ||
+            (props && props->type != MC_NBT_TAG_COMPOUND)) {
+            errno = EINVAL;
+            return -1;
+        }
+        if (props)
+            for (int32_t p = 0; p < props->payload.compound.length; p++) {
+                const mc_nbt_tag_t *v = props->payload.compound.children[p];
+                if (v->type != MC_NBT_TAG_STRING || !v->payload.string_val) {
+                    errno = EINVAL;
+                    return -1;
+                }
+            }
+        char *key = canonicalize_palette_key_in_arena(name->payload.string_val, props, arena);
+        if (!key)
+            return -1;
+        ids[i] = mc_global_state_id_from_key(key, UINT32_MAX);
+        if (ids[i] == UINT32_MAX && (!props || !props->payload.compound.length)) {
+            for (size_t b = 0; b < GLOBAL_BLOCK_COUNT; b++)
+                if (!strcmp(GLOBAL_BLOCKS[b].name, name->payload.string_val)) {
+                    ids[i] = GLOBAL_BLOCKS[b].default_state;
+                    break;
+                }
+        }
+        if (ids[i] == UINT32_MAX) {
+            errno = EOPNOTSUPP;
+            return -1;
+        }
+        for (int32_t j = 0; j < i; j++)
+            if (ids[j] == ids[i]) {
+                errno = EOPNOTSUPP;
+                return -1;
+            }
+    }
+    return palette->payload.list.length;
+}
+static int native_data(const mc_nbt_tag_t *bs, int palette_size, unsigned values, int min_bits,
+                       const int64_t **data) {
+    *data = NULL;
+    const mc_nbt_tag_t *tag = mc_nbt_compound_get(bs, "data");
+    if (palette_size == 1) {
+        if (tag && (tag->type != MC_NBT_TAG_LONG_ARRAY || tag->payload.long_array.length)) {
+            errno = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    int bits = ceil_log2_u32((uint32_t)palette_size);
+    if (bits < min_bits)
+        bits = min_bits;
+    unsigned per = 64u / (unsigned)bits, expected = (values + per - 1) / per;
+    if (!tag || tag->type != MC_NBT_TAG_LONG_ARRAY || tag->payload.long_array.length != (int32_t)expected) {
+        errno = EINVAL;
+        return -1;
+    }
+    *data = tag->payload.long_array.data;
+    for (unsigned i = 0; i < values; i++)
+        if (native_unpack(*data, i, bits) >= (uint32_t)palette_size) {
+            errno = EINVAL;
+            return -1;
+        }
+    return bits;
+}
+static int native_y(const mc_nbt_tag_t *sec, int *y) {
+    const mc_nbt_tag_t *tag = mc_nbt_compound_get(sec, "Y");
+    if (!tag || tag->type != MC_NBT_TAG_BYTE) {
+        errno = EINVAL;
+        return -1;
+    }
+    *y = tag->payload.byte_val;
+    return 0;
+}
+static int native_schema(const mc_nbt_tag_t *root, int32_t cx, int32_t cz, mc_arena_t *arena) {
+    const mc_nbt_tag_t *version = mc_nbt_compound_get(root, "DataVersion"),
+                       *x = mc_nbt_compound_get(root, "xPos"), *z = mc_nbt_compound_get(root, "zPos"),
+                       *y = mc_nbt_compound_get(root, "yPos"), *status = mc_nbt_compound_get(root, "Status"),
+                       *sections = mc_nbt_compound_get(root, "sections"),
+                       *be = mc_nbt_compound_get(root, "block_entities");
+    if (!version || version->type != MC_NBT_TAG_INT || version->payload.int_val != 4788 || !status ||
+        status->type != MC_NBT_TAG_STRING || strcmp(status->payload.string_val, "minecraft:full") || !y ||
+        y->type != MC_NBT_TAG_INT || y->payload.int_val != -4) {
+        errno = EOPNOTSUPP;
+        return -1;
+    }
+    if (!x || x->type != MC_NBT_TAG_INT || x->payload.int_val != cx || !z || z->type != MC_NBT_TAG_INT ||
+        z->payload.int_val != cz) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (be && (be->type != MC_NBT_TAG_LIST || be->payload.list.length)) {
+        errno = EOPNOTSUPP;
+        return -1;
+    }
+    if (!sections || sections->type != MC_NBT_TAG_LIST ||
+        sections->payload.list.elem_type != MC_NBT_TAG_COMPOUND) {
+        errno = EINVAL;
+        return -1;
+    }
+    bool seen[26] = {0};
+    uint32_t ids[4096];
+    for (int32_t i = 0; i < sections->payload.list.length; i++) {
+        const mc_nbt_tag_t *sec = sections->payload.list.items[i];
+        int sy;
+        if (native_y(sec, &sy) != 0)
+            return -1;
+        if (sy < -5 || sy > 20 || seen[sy + 5]) {
+            errno = EOPNOTSUPP;
+            return -1;
+        }
+        seen[sy + 5] = true;
+        const mc_nbt_tag_t *bs = mc_nbt_compound_get(sec, "block_states");
+        if (bs) {
+            if (sy < -4 || sy > 19 || bs->type != MC_NBT_TAG_COMPOUND) {
+                errno = EOPNOTSUPP;
+                return -1;
+            }
+            int p = native_palette(bs, ids, arena);
+            const int64_t *data;
+            if (p < 0 || native_data(bs, p, 4096, 4, &data) < 0)
+                return -1;
+        }
+        const mc_nbt_tag_t *biomes = mc_nbt_compound_get(sec, "biomes");
+        if (biomes) {
+            const mc_nbt_tag_t *p = mc_nbt_compound_get(biomes, "palette");
+            const int64_t *data;
+            if (biomes->type != MC_NBT_TAG_COMPOUND || !p || p->type != MC_NBT_TAG_LIST ||
+                p->payload.list.elem_type != MC_NBT_TAG_STRING || p->payload.list.length < 1 ||
+                p->payload.list.length > 64) {
+                errno = EINVAL;
+                return -1;
+            }
+            for (int32_t j = 0; j < p->payload.list.length; j++)
+                if (!p->payload.list.items[j]->payload.string_val ||
+                    !*p->payload.list.items[j]->payload.string_val) {
+                    errno = EINVAL;
+                    return -1;
+                }
+            if (native_data(biomes, p->payload.list.length, 64, 1, &data) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+int mc_anvil_decode_native(const uint8_t *raw, size_t n, int32_t cx, int32_t cz, mc_chunk_t *out) {
+    mc_nbt_tag_t *root = NULL;
+    mc_arena_t arena;
+    if (!out || native_parse(raw, n, &root) != 0)
+        return -1;
+    if (mc_arena_init(&arena, 2u * 1024u * 1024u) != 0) {
+        mc_nbt_free(root);
+        return -1;
+    }
+    int rc = -1;
+    bool initialized = false;
+    if (native_schema(root, cx, cz, &arena) != 0)
+        goto done;
+    if (mc_chunk_init(out, cx, cz, 0) != 0)
+        goto done;
+    initialized = true;
+    const mc_nbt_tag_t *secs = mc_nbt_compound_get(root, "sections");
+    uint32_t ids[4096];
+    for (int32_t i = 0; i < secs->payload.list.length; i++) {
+        const mc_nbt_tag_t *sec = secs->payload.list.items[i], *bs = mc_nbt_compound_get(sec, "block_states");
+        if (!bs)
+            continue;
+        int sy;
+        if (native_y(sec, &sy) != 0)
+            goto done;
+        int p = native_palette(bs, ids, &arena);
+        const int64_t *data;
+        int bits = p > 0 ? native_data(bs, p, 4096, 4, &data) : -1;
+        if (p < 0 || bits < 0)
+            goto done;
+        if (p == 1) {
+            mc_paletted_container_destroy(&out->sections[sy + 4]);
+            if (mc_paletted_container_init(&out->sections[sy + 4], ids[0]) != 0)
+                goto done;
+        } else
+            for (unsigned cell = 0; cell < 4096; cell++)
+                if (mc_chunk_set_block(out, cell & 15, sy * 16 + (int)(cell >> 8), (cell >> 4) & 15,
+                                       ids[native_unpack(data, cell, bits)]) != 0)
+                    goto done;
+    }
+    rc = 0;
+done:;
+    int e = errno;
+    mc_arena_destroy(&arena);
+    mc_nbt_free(root);
+    if (rc && initialized)
+        mc_chunk_destroy(out);
+    errno = e;
+    return rc;
+}
+static int native_update_section(mc_nbt_tag_t *section, const mc_chunk_t *chunk, int index, mc_arena_t *arena,
+                                 bool force) {
+    mc_nbt_tag_t *bs = (mc_nbt_tag_t *)mc_nbt_compound_get(section, "block_states");
+    uint32_t ids[4096], values[4096];
+    int p = 0;
+    if (bs) {
+        p = native_palette(bs, ids, arena);
+        if (p < 0)
+            return -1;
+    }
+    const int64_t *old_data = NULL;
+    int bits = 0;
+    if (bs && !force) {
+        bits = native_data(bs, p, 4096, 4, &old_data);
+        if (bits < 0)
+            return -1;
+    }
+    bool changed = force;
+    if (!force && bs && p == 1 && chunk->sections[index].bits_per_block == 0 &&
+        ids[0] == chunk->sections[index].uniform_state)
+        return 0;
+    for (unsigned cell = 0; cell < 4096; cell++) {
+        uint32_t id =
+            mc_chunk_get_block(chunk, cell & 15, index * 16 + (int)(cell >> 8) - 64, (cell >> 4) & 15);
+        if (!mc_global_state_key(id)) {
+            errno = EOPNOTSUPP;
+            return -1;
+        }
+        values[cell] = id;
+        if (!force && id != (bs ? ids[p == 1 ? 0 : native_unpack(old_data, cell, bits)] : 0))
+            changed = true;
+    }
+    if (!changed)
+        return 0;
+    if (!bs) {
+        bs = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, "block_states");
+        mc_nbt_tag_t *pal = nbt_new_tag_local(MC_NBT_TAG_LIST, "palette");
+        if (!bs || !pal) {
+            mc_nbt_free(bs);
+            mc_nbt_free(pal);
+            return -1;
+        }
+        pal->payload.list.elem_type = MC_NBT_TAG_COMPOUND;
+        if (compound_add_local(bs, pal) != 0) {
+            mc_nbt_free(pal);
+            mc_nbt_free(bs);
+            return -1;
+        }
+        if (native_set(section, bs) != 0)
+            return -1;
+    }
+    mc_nbt_tag_t *palette = (mc_nbt_tag_t *)mc_nbt_compound_get(bs, "palette");
+    for (unsigned cell = 0; cell < 4096; cell++) {
+        uint32_t id = values[cell];
+        int at = 0;
+        for (; at < p; at++)
+            if (ids[at] == id)
+                break;
+        if (at == p) {
+            if (p == 4096) {
+                errno = EOPNOTSUPP;
+                return -1;
+            }
+            mc_nbt_tag_t *entry = make_block_state_entry(id);
+            if (!entry || list_add_local(palette, entry) != 0) {
+                mc_nbt_free(entry);
+                return -1;
+            }
+            ids[p++] = id;
+        }
+        values[cell] = (uint32_t)at;
+    }
+    native_remove(bs, "data");
+    if (p > 1) {
+        bits = ceil_log2_u32((uint32_t)p);
+        if (bits < 4)
+            bits = 4;
+        unsigned per = 64u / (unsigned)bits, words = (4096 + per - 1) / per;
+        int64_t *packed = calloc(words, sizeof(*packed));
+        if (!packed)
+            return -1;
+        for (unsigned cell = 0; cell < 4096; cell++)
+            packed[cell / per] = (int64_t)((uint64_t)packed[cell / per] |
+                                           (uint64_t)values[cell] << ((cell % per) * (unsigned)bits));
+        mc_nbt_tag_t *data = nbt_new_long_array_local("data", packed, (int32_t)words);
+        free(packed);
+        if (native_set(bs, data) != 0)
+            return -1;
+    }
+    return 1;
+}
+int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_t *entities, uint8_t **out,
+                           size_t *n) {
+    if (out)
+        *out = NULL;
+    if (n)
+        *n = 0;
+    if (!chunk || !out || !n) {
+        errno = EINVAL;
+        return -1;
+    }
+    mc_nbt_tag_t *root = NULL, *be = NULL;
+    mc_arena_t arena;
+    bool fresh = chunk->storage_nbt == NULL;
+    if (build_block_entities_list(chunk, entities, &be) != 0)
+        return -1;
+    if (be->payload.list.length) {
+        mc_nbt_free(be);
+        errno = EOPNOTSUPP;
+        return -1;
+    }
+    mc_nbt_free(be);
+    if (fresh) {
+        if (build_chunk_nbt_root(chunk, entities, &root) != 0)
+            return -1;
+    } else if (native_parse(chunk->storage_nbt, chunk->storage_nbt_len, &root) != 0)
+        return -1;
+    if (mc_arena_init(&arena, 2u * 1024u * 1024u) != 0) {
+        mc_nbt_free(root);
+        return -1;
+    }
+    mc_nbt_tag_t *sections = (mc_nbt_tag_t *)mc_nbt_compound_get(root, "sections");
+    int rc = -1;
+    bool changed = fresh;
+    if (!sections || sections->type != MC_NBT_TAG_LIST) {
+        errno = EINVAL;
+        goto done;
+    }
+    for (int index = 0; index < 24; index++) {
+        mc_nbt_tag_t *section = NULL;
+        for (int32_t i = 0; i < sections->payload.list.length; i++) {
+            int sy;
+            if (native_y(sections->payload.list.items[i], &sy) != 0)
+                goto done;
+            if (sy == index - 4) {
+                section = sections->payload.list.items[i];
+                break;
+            }
+        }
+        if (!section) {
+            bool nonair =
+                chunk->sections[index].bits_per_block != 0 || chunk->sections[index].uniform_state != 0;
+            if (!nonair)
+                continue;
+            section = nbt_new_tag_local(MC_NBT_TAG_COMPOUND, NULL);
+            mc_nbt_tag_t *biomes = NULL;
+            if (!section || native_set(section, nbt_new_byte_local("Y", (int8_t)(index - 4))) != 0 ||
+                build_section_biomes(&biomes) != 0) {
+                mc_nbt_free(section);
+                goto done;
+            }
+            if (compound_add_local(section, biomes) != 0) {
+                mc_nbt_free(biomes);
+                mc_nbt_free(section);
+                goto done;
+            }
+            if (list_add_local(sections, section) != 0) {
+                mc_nbt_free(section);
+                goto done;
+            }
+        }
+        int c = native_update_section(section, chunk, index, &arena, fresh);
+        if (c < 0)
+            goto done;
+        if (c)
+            changed = true;
+    }
+    if (changed) {
+        if (native_set(root, nbt_new_byte_local("isLightOn", 0)) != 0)
+            goto done;
+        for (int32_t i = 0; i < sections->payload.list.length; i++) {
+            native_remove(sections->payload.list.items[i], "BlockLight");
+            native_remove(sections->payload.list.items[i], "SkyLight");
+        }
+        mc_nbt_tag_t *hm = (mc_nbt_tag_t *)mc_nbt_compound_get(root, "Heightmaps");
+        const char *known[] = {"WORLD_SURFACE_WG", "WORLD_SURFACE",   "OCEAN_FLOOR_WG",
+                               "OCEAN_FLOOR",      "MOTION_BLOCKING", "MOTION_BLOCKING_NO_LEAVES"};
+        for (unsigned i = 0; i < 6; i++)
+            native_remove(hm, known[i]);
+    }
+    rc = mc_nbt_write_named_root(root, out, n);
+done:;
+    int e = errno;
+    mc_arena_destroy(&arena);
+    mc_nbt_free(root);
+    errno = e;
+    return rc;
 }

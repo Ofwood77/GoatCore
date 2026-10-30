@@ -25,6 +25,7 @@
 #define DEFAULT_OFFLINE_SKINS false
 
 typedef struct {
+    mc_storage_kind_t chunk_storage;
     int64_t level_seed;
     int view_distance;
     int simulation_distance;
@@ -56,6 +57,7 @@ static int write_default_server_config(const char *path) {
         return -1;
     }
     fprintf(f, "# mc_c_server config\n");
+    fprintf(f, "chunk-storage=bin\n");
     fprintf(f, "level-seed=%d\n", DEFAULT_LEVEL_SEED);
     fprintf(f, "view-distance=%d\n", DEFAULT_VIEW_DISTANCE);
     fprintf(f, "simulation-distance=%d\n", DEFAULT_SIMULATION_DISTANCE);
@@ -164,6 +166,13 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
         trim_ws(val);
         if (!*key) continue;
 
+        if (strcmp(key, "chunk-storage") == 0) {
+            if (mc_storage_parse(val,&out->chunk_storage)!=0) {
+                log_error("invalid chunk-storage '%s' (bin or anvil-atomic-experimental)",val);
+                return -1;
+            }
+            continue;
+        }
         if (strcmp(key, "level-seed") == 0) {
             long long v = 0;
             if (!*val || sscanf(val, "%lld", &v) != 1) {
@@ -345,6 +354,8 @@ int main(void) {
     cfg.chunk_blob_path = "assets/chunk_0_0_26_1_1.bin";
     cfg.block_states_path = "assets/block_states.json";
     cfg.world_path = "world";
+    cfg.chunk_storage = disk_cfg.chunk_storage;
+    log_info("chunk storage: %s (no migration or fallback)",mc_storage_name(cfg.chunk_storage));
     cfg.level_seed = disk_cfg.level_seed;
     cfg.view_distance = disk_cfg.view_distance;
     cfg.simulation_distance = disk_cfg.simulation_distance;

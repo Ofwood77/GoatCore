@@ -3141,3 +3141,406 @@ Prochain lot recommandé : revalidation Xeon/HDD RAID dès disponibilité et
 avant toute intégration à l'ordonnanceur ou migration. Ne pas supprimer des
 barrières pour masquer le surcoût. Le backend atomique et `.bin` restent les
 chemins par défaut ; aucune autre phase Minecraft n'est commencée.
+
+## Stockage Vanilla S3A — backend Anvil actif optionnel (30 octobre 2026)
+
+### Périmètre et audit
+
+État initial : HEAD `f7638ad323aa4848224d299b0e198f0880011ddb` (S2), arbre suivi
+propre, seuls `.vscode/`, `src/main.py`, `start-aider.sh` personnels non suivis.
+S1 `e9a2f61eb7d9fee820be5daace6ca2083f3ec24a` et S2 sont présents localement.
+Aucun push, déploiement, migration ni nouvelle fonctionnalité Minecraft.
+L'exception locale explicite pendant la maintenance de 10.0.4.66 s'applique ;
+les règles permanentes de déploiement ne sont pas modifiées.
+
+Avant S3A, `mc_server` utilisait exclusivement `chunks/c_<cx>_<cz>.bin`, zlib/NBT,
+avec remplacement atomique durable. Les workers chargeaient/généraient des
+chunks privés puis les publiaient par la done queue ; le tick intégrait les
+modifications et effectuait flush, sauvegardes périodiques, éviction et arrêt.
+Le lecteur Anvil historique était permissif (états inconnus remplacés par air,
+indices invalides tolérés) et son encodeur construisait un NBT minimal,
+insuffisant pour modifier un chunk officiel sans perdre ses champs opaques.
+Il utilisait aussi un packing compact des palettes, conservé pour les `.bin`.
+S1 validait/indexait les régions ; S2 restait un outil expérimental séparé.
+
+Référence examinée : JAR officiel 26.1.1, protocole 775, DataVersion 4788,
+SHA-256 interne `3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Les désassemblages de `SimpleBitStorage`, `SerializableChunkData` et
+`DirectoryLock` sont conservés avec les résultats. La version cible range
+`floor(64/bits)` valeurs par long, sans chevauchement. Elle recalcule les types
+de heightmaps manquants d'après les blocs ; les tableaux de lumière doivent
+également être invalidés après modification. Son verrou `session.lock` est un
+verrou de fichier Java interprocessus, avec lequel S3A se coordonne par fcntl.
+
+### Intégration et invariants
+
+Une interface `mc_world_storage` centralise sélection, ouverture, lecture et
+écriture. `chunk-storage=bin` est le défaut, y compris pour une configuration
+existante sans cette clé. `chunk-storage=anvil-atomic-experimental` sélectionne
+explicitement le chemin `dimensions/minecraft/overworld/region/r.RX.RZ.mca`.
+Les coordonnées négatives sont calculées par les primitives S1. Aucun fallback
+`.bin`, aucune conversion et aucun chemin S2 dans le serveur. La génération
+plate existante n'est appelée que pour un slot/région réellement absent ; une
+erreur ou un format non pris en charge laisse le chunk indisponible et produit
+un diagnostic. Les mondes contenant des `.bin` ou des régions à l'ancien
+emplacement ne sont pas adoptés silencieusement par le mode natif.
+
+Un marqueur `.goatcore-storage` durable empêche une réouverture accidentelle
+en mode `.bin`. Un verrou de monde empêche deux sessions natives simultanées ;
+`session.lock` empêche l'ouverture concurrente par Vanilla. Un verrou partagé
+sur le propriétaire S2 exclut son écrivain exclusif ; tout `.s2-journal` en
+attente bloque le mode natif. Aucun journal n'est effacé ni récupéré
+implicitement. Le marqueur ne sélectionne jamais le backend à la place de la
+configuration.
+
+Chaque chunk natif conserve son NBT source brut, possédé/libéré avec le chunk.
+Les workers en sont propriétaires jusqu'au handoff ; le tick garde ensuite la
+propriété des mutations et sauvegardes synchrones. Aucun nouveau worker,
+snapshot différé, ordonnanceur ou changement du tick. Les mutations utilisent
+l'invalidation de cache réseau et le marquage dirty existants. Une sauvegarde
+ne retire dirty qu'après acquittement durable ; une erreur préserve le snapshot
+récupérable et reste visible dans les logs.
+
+Le décodeur natif strict est distinct du codec `.bin` inchangé. Il valide
+coordonnées, version, statut, sections, palettes, longueurs et indices. Le NBT
+source doit pouvoir être relu/réémis sans différence : doublons de noms,
+chaînes tronquées par l'interprétation C, ambiguïtés et structures non
+conservables sont refusés. Lors d'une modification, les entrées de palette
+existantes, leur ordre et leurs champs opaques sont conservés ; les nouveaux
+états sont ajoutés, et les longs alignés à la manière Vanilla. Les sections
+inchangées restent intactes. Les six types connus de heightmaps sont invalidés,
+ainsi que les lumières de sections et `isLightOn`, pour éviter des données
+dérivées incohérentes lors de la réouverture officielle. Les autres champs de
+heightmaps, biomes, structures et ticks restent conservés.
+
+La publication réutilise le remplacement complet : copie de la région courante
+vers temporaire unique, mises à jour, fsync fichier, rename atomique, fsync du
+parent. Le NBT source attendu est comparé au chunk courant **sous le même verrou
+de région que la publication** ; ESTALE interdit l'écrasement d'une version
+plus récente. Un chunk généré exige un slot encore absent. Les sauvegardes de
+chunks distincts d'une région recopient toujours sa version courante. Un retour
+`MC_SAVE_DURABILITY_UNCERTAIN` avance uniquement le snapshot visible, conserve
+dirty et permet de retenter sans rollback destructif. Les lecteurs S1 gardent
+un descripteur d'inode cohérent à travers un rename.
+
+Garanties héritées : avant rename l'ancienne région reste intacte ; après
+rename le fichier visible est complet ; 0 acquitte les deux fsync. Une panne
+d'électricité réelle, le firmware, un autre système de fichiers et le RAID
+restent hors démonstration locale. Le remplacement de la région n'est pas une
+transaction globale joueurs/items/entités/POI. S2 reste séparé et désactivé.
+
+### Limites explicites de prise en charge
+
+Le mode natif accepte uniquement les chunks Overworld `minecraft:full`,
+DataVersion 4788, sections de blocs -4..19 (sections de lumière -5/20 admises),
+palettes reconnues et sans block entities non vides. Protochunks, autres
+versions/dimensions, états inconnus, encodages de palette non pris en charge et
+NBT non conservable sont refusés. Les BEs ne sont pas interprétées puis
+réécrites partiellement : leur présence interdit le chargement natif. Une
+sauvegarde nécessitant des BEs est refusée ; les tests natifs n'utilisent pas
+les conteneurs. Le stockage `.bin` conserve sa lecture des chunks GoatCore
+4785 et ses comportements de conteneurs historiques.
+
+Codecs 1/2/3 lus, écriture zlib 2. LZ4/personnalisés/inconnus et références `.mcc`
+font refuser la région ; aucun fichier externe n'est écrasé ou supprimé. Les
+palettes existantes trop remplies pour ajouter un état sont refusées plutôt
+que compactées au prix d'une perte de métadonnées opaques.
+
+Le terrain est natif ; ni génération Vanilla complète, ni gestion des entités,
+POI, fluides, block entities et données globales n'est ajoutée. Les chemins
+joueurs `players/data` et leur persistance restent ceux du serveur existant.
+Un nouveau monde GoatCore ne constitue pas un monde Vanilla complet. Un essai
+avec `level.dat` seul a été refusé par le serveur officiel : 26.1.1 requiert
+notamment `data/minecraft/world_gen_settings.dat`. L'essai final utilise donc
+une copie des métadonnées officielles complètes avec les régions neuves de
+GoatCore. Aucun monde personnel n'est utilisé. Avant Vanilla : arrêter GoatCore,
+exiger les acquittements, conserver une copie, vérifier l'absence de journaux S2
+et ouvrir uniquement une copie propre. La récupération préalable S2 reste une
+procédure séparée sur les inodes originaux, jamais une activation automatique.
+
+### Validations fonctionnelles S3A
+
+Toutes les instances sont temporaires et locales, ports 25593..25600. Les deux
+services principaux ne sont ni contactés ni modifiés. Le binaire normal final
+est une copie fixe, séparée des répertoires de compilation et des instances.
+
+`make -B precommit-check` : **27 suites C**, générateurs, hygiène, smoke, réseau
+multi-epoll, login offline/authentification négative, profils, scripts de stress
+et calculs de traces passent. Aucun diagnostic de compilation nouveau. La
+construction emploie le SDK curl local déjà utilisé par S1/S2, sans installation
+système ni environnement Python supplémentaire.
+
+`test_native_storage` ajoute **98 835 vérifications** : sélection explicite,
+refus de mélanges, sessions simultanées/processus distincts, verrou fcntl de type
+Vanilla, journal S2 en attente, 5/6/9 bits par palette, matérialisation d'une
+section implicite, snapshots obsolètes, sauvegardes rapprochées, préservation
+NBT opaque, palette/heightmaps/lumière, codec non supporté, coordonnées de chunk
+incohérentes, DataVersion native refusée, BE non vide et NBT tronqué. L'injection
+d'EIO du fsync parent vérifie le résultat incertain puis la reprise. Le test
+utilise aussi les vrais workers de monde, flush/dirty/éviction/rechargement et
+trois ouvertures successives aux coordonnées -513/-512/-17/-16/511/512. Aucun
+`chunks/` n'est créé dans le monde natif.
+
+Les suites antérieures Anvil, allocation S1, transactions/récupération S2,
+interruptions et erreurs système du remplacement atomique, NBT, chunks,
+inventaires et monde restent passantes. La lecture historique GoatCore 4785
+reste couverte par les tests existants ; le mode natif strict n'adopte pas ces
+anciens encodages. Les injections d'interruption portent sur le backend
+atomique partagé, pas sur une coupure électrique réelle.
+
+| Scénario exécuté | Résultat et preuve |
+|---|---|
+| Monde Anvil neuf, escaliers | 192 observations, deux observateurs, mutations/rotations/retrait/voisinage, puis 8 états conservés après redémarrages ; répété ASan+UBSan |
+| Copie officielle 26.1.1 | 192 observations identiques ; trois redémarrages GoatCore, puis deux ouvertures Vanilla et assertions sur les 8 états |
+| Nouvelle référence officielle | Suite complète de 192 observations rejouée sur le JAR officiel et comparée à la nouvelle exécution GoatCore |
+| Blocs/dalles natifs | 18 cas : blocs pleins, logs X/Y/Z, dalles haut/bas, trois fusions, remplaçables, rejets et collision partielle ; deux observateurs, consommation Survival, 4 blocs et inventaire relus après trois redémarrages |
+| Stockage `.bin` | Même suite de 18 cas, plus BlockEvent shulker, inventaire et trois redémarrages ; 483 fichiers de chunks identiques octet par octet au binaire S2 `d1aad1c...` sur le même scénario |
+| Frontières de régions | Poses Survival à (-513,64,511), (-512,64,512), (511,64,-513), (512,64,-512) : pierre, log, dalle, escalier ; deux observateurs, état autoritaire et inventaire ; trois redémarrages GoatCore et deux Vanilla |
+| Ramassage natif | 100 objets, inventaire et absence de duplication dans ce scénario, trois redémarrages ; exécuté avec ASan+UBSan |
+| Régions neuves relues par Vanilla | Métadonnées officielles complètes + régions GoatCore : 8 états vérifiés, puis comparaison indépendante des 98 304 blocs de chacun des **483 chunks** d'origine après deux ouvertures officielles |
+
+Dans la copie officielle initiale, **1 294 chunks** sur quatre régions sont
+conservés : quatre chunks de fixtures sont modifiés, les **1 290 autres NBT
+restent identiques octet par octet**. Le lecteur Python indépendant vérifie
+l'égalité des NBT hors block states et données dérivées, les palettes originales
+en préfixe, les biomes, structures, ticks et champs inconnus. `level.dat`, ses
+métadonnées associées (`data/`, datapacks lorsqu'ils existent), POI et entités
+ne sont pas réécrits par GoatCore et sont vérifiés. Les fichiers des joueurs
+actifs évoluent normalement par le mécanisme existant `players/data`.
+
+Après réouverture officielle de cette copie, les **98 304 blocs de chacun des
+quatre chunks modifiés** restent identiques au snapshot GoatCore : comparaison
+du nom et de toutes les propriétés, indépendamment des palettes/longs choisis
+par le sérialiseur officiel. Aucun succès n'est déduit de la seule existence
+d'un fichier ou du seul décodage NBT. Les traces officielles finales ne signalent
+pas d'erreur de lecture ni de régénération des chunks testés. Les champs opaques
+sont vérifiés avant Vanilla : son propre sérialiseur peut modifier des
+métadonnées légitimes lors de l'ouverture et ne promet pas de garder tout tag
+arbitraire.
+
+Les snapshots des frontières de régions (états **et** dernier slot d'inventaire)
+sont identiques entre la nouvelle exécution GoatCore et Vanilla. Les octets
+réseau n'ont pas à avoir le même délai ; les deux clients observent les
+mutations et les queries relisent l'état autoritaire. L'éviction/relecture est
+vérifiée en C avec les workers existants, indépendamment des confirmations
+réseau et des tests de redémarrage.
+
+**ASan+UBSan** : 14 suites C terminent sans diagnostic, fuite détectée ni UB :
+NBT, NBT arena, Anvil roundtrip, index régions, transactions S2, persistance
+atomique, cohérence monde, stockage natif, registre, escaliers, palettes,
+joueurs NBT, block entities et codec réseau de chunks. Les serveurs natifs
+instrumentés exécutent également 192 observations d'escaliers et les 100
+ramassages, avec redémarrages. Options `detect_leaks=1:halt_on_error=1:abort_on_error=1`
+et `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`, O1/g non-PIE.
+
+**TSan local** : six suites passent, code 0, sans diagnostic : régions,
+transactions S2, persistance atomique, cohérence monde, stockage natif et
+configuration perf. Cela couvre leurs exécutions, pas une preuve d'absence de
+races de l'ensemble du serveur. Le défaut de runtime distant `unexpected memory
+mapping` n'est ni réinterprété ni testé pendant la maintenance.
+
+Mises au point du harnais conservées dans les artefacts : un premier essai
+importé a été interrompu parce que le nettoyage de compilation supprimait son
+binaire ; les essais finaux utilisent une copie fixe. L'export de sources a
+initialement omis le nouvel oracle Python, corrigé avant le precommit final.
+L'essai de métadonnées limité à `level.dat` a démontré l'absence nécessaire du
+fichier de génération 26.1.1 ; la copie complète passe. Le nouveau scénario de
+téléportation lointaine envoyait initialement seulement TeleportConfirm ; il
+envoie maintenant aussi la position client, nécessaire pour que Vanilla
+actualise l'envoi des chunks. Les essais finaux passent sur les deux serveurs.
+La revue finale a corrigé la libération d'un tag Y en cas d'échec d'allocation
+lors de l'ajout d'une section absente ; les validations et la campagne finale
+portent sur le binaire ainsi corrigé. Aucun de ces essais de préparation n'est
+substitué aux mesures finales.
+
+Limites opérationnelles supplémentaires : les verrous sont consultatifs pour
+les outils externes ; ceux qui les ignorent ne sont pas couverts. Le destructeur
+historique journalise les échecs de sauvegarde sans retourner un statut global
+au processus : un code d'arrêt 0 n'est donc pas, à lui seul, un acquittement de
+persistance. Inspecter les erreurs et acquittements individuels ; aucune donnée
+non acquittée ne doit être annoncée durable. Les biomes NBT sont conservés sur
+disque, mais leur transmission réseau et la lumière côté client restent celles
+du serveur existant, sans nouvelle parité des biomes/éclairage des mondes
+importés. Le corpus officiel utilisé est un monde plat 26.1.1 ; il ne démontre
+pas l'adoption sûre de tous les chunks d'un monde de survie peuplé de BEs,
+entités et données de génération.
+
+### Campagne locale finale : `.bin` contre Anvil atomique intégré
+
+Binaire normal final identique pour les deux modes :
+`14febb95c81cd402ac1b115f19c873c79f29e66aaa6c99e6b8a6b6d85ba2146b`.
+Ryzen 7 7840HS, 16 CPU logiques, NVMe/ext4 ; aucun résultat Xeon/HDD n'est
+extrapolé. O2, configuration existante `tests/stress/network/one.conf` :
+un worker réseau, deux workers chunks, affinité auto, simulation_workers=0,
+distances vue/simulation 10. Aucune compilation ni autre instance Minecraft
+pendant la mesure. Les processus hôte, ressources, pression CPU/IO/mémoire et
+files sont enregistrés, sans prétendre contrôler tous les processus du PC.
+
+Deux templates préparés indépendamment, un par backend, sans migration :
+**441 chunks, mêmes noms/propriétés de chacun des 98 304 blocs par chunk**,
+vérifiés avant mesure par un lecteur Python indépendant. Copies neuves pour
+chaque passe ; préparation/chargement, échauffement 5 s, idle 5 s, phase active
+puis idle 5 s séparés. Trois répétitions à chaque palier, ordre des backends
+alterné. Les traces couvrent toute la charge active, premier envoi à dernière
+confirmation, y compris les ticks qui chevauchent les bornes ; aucun choix
+d'une fenêtre favorable de 100 ticks.
+
+Chaque bot effectue **100 poses + 100 destructions**. Dans chaque configuration,
+les trois passes confirment respectivement 300/3 000/7 500/15 000 poses **et autant
+de destructions**, aux paliers 1/10/25/50. Envois clients, handlers serveur et
+confirmations concordent : **103 200 actions sur les 24 passes, aucune manquante,
+aucune déconnexion ou erreur de sauvegarde/fsync**. Le maximum de file atteint
+62 tâches dans le mode natif à 50 bots. L'état initial et le travail imposé aux
+blocs sont égaux ; le nombre de sauvegardes coalescées peut varier.
+
+TPS ci-dessous = somme des ticks commencés / somme des durées actives des trois
+passes ; P50/P95/P99 regroupent tous les ticks actifs, et non les médianes des
+percentiles de chaque passe. Les MSPT de cette première table concernent le
+tick planifié ; le travail du chemin rapide exécuté entre ticks est présenté
+séparément, car son omission masquerait une partie du coût réel.
+
+| Bots | Mode | TPS observés | MSPT P50 / P95 / P99 (ms) | Ticks >50 ms | Tick maximal (ms) |
+|---:|---|---:|---|---:|---:|
+| 1 | bin | 19.980 | 1.995 / 2.683 / 8.069 | 0 | 8.577 |
+| 1 | anvil | 19.959 | 3.110 / 4.097 / 8.106 | 0 | 34.576 |
+| 10 | bin | 19.960 | 3.768 / 4.991 / 8.049 | 0 | 18.610 |
+| 10 | anvil | 19.946 | 5.066 / 6.089 / 9.927 | 0 | 21.480 |
+| 25 | bin | 19.973 | 9.220 / 19.534 / 22.659 | 0 | 23.274 |
+| 25 | anvil | 19.985 | 18.319 / 33.988 / 39.634 | 0 | 47.431 |
+| 50 | bin | 14.556 | 49.451 / 90.700 / 109.121 | 472 | 133.230 |
+| 50 | anvil | 5.785 | 98.358 / 180.787 / 211.047 | 431 | 229.953 |
+
+| Bots | Mode | Durée active totale / ticks | Tick + fast P99 / max (ms) | Latence action P50 / P95 / P99 (ms) |
+|---:|---|---|---|---|
+| 1 | bin | 15.466 s / 309 | 33.957 / 34.999 | 2.383 / 42.006 / 43.016 |
+| 1 | anvil | 16.684 s / 333 | 35.256 / 48.626 | 3.736 / 41.842 / 43.923 |
+| 10 | bin | 26.352 s / 526 | 25.531 / 33.504 | 38.021 / 41.360 / 42.955 |
+| 10 | anvil | 28.577 s / 570 | 33.974 / 39.938 | 38.349 / 42.001 / 43.782 |
+| 25 | bin | 16.823 s / 336 | 60.193 / 69.309 | 13.733 / 25.406 / 32.779 |
+| 25 | anvil | 24.469 s / 489 | 80.242 / 100.285 | 26.464 / 44.946 / 52.421 |
+| 50 | bin | 66.294 s / 965 | 147.931 / 186.843 | 56.023 / 114.011 / 143.992 |
+| 50 | anvil | 86.435 s / 500 | 329.508 / 365.226 | 89.607 / 213.836 / 267.900 |
+
+Les temps de sauvegarde suivants regroupent les appels actifs : un seul chunk
+distinct à 1 bot, quatre chunks dans quatre régions aux autres paliers. Un
+appel n'est donc pas un nouveau chunk. Le volume est celui soumis par le
+backend aux écritures (copie de région et mises à jour comprises), pas une
+mesure des octets NAND ni de l'amplification interne du SSD. Deux fsync par
+sauvegarde de chunk ; le total inclut aussi les fichiers joueurs. Aucun coût de
+création/échauffement n'est inclus dans ces volumes.
+
+| Bots | Mode | Sauvegardes | Volume logique (Mo décimaux) | fsync chunks / total | Sauvegarde P50 / P95 / P99 / max (ms) |
+|---:|---|---:|---:|---|---|
+| 1 | bin | 464 | 0.164 | 928 / 928 | 2.148 / 8.187 / 32.807 / 34.848 |
+| 1 | anvil | 480 | 226.099 | 960 / 960 | 3.316 / 9.080 / 34.539 / 48.445 |
+| 10 | bin | 3515 | 1.259 | 7030 / 7638 | 1.513 / 2.302 / 2.686 / 18.576 |
+| 10 | anvil | 3557 | 1692.946 | 7114 / 7926 | 2.675 / 3.551 / 4.173 / 23.156 |
+| 25 | bin | 7801 | 2.893 | 15602 / 16210 | 1.400 / 1.665 / 2.112 / 16.299 |
+| 25 | anvil | 7953 | 3781.186 | 15906 / 16596 | 2.394 / 2.843 / 3.484 / 19.921 |
+| 50 | bin | 15739 | 5.920 | 31478 / 32344 | 1.450 / 1.998 / 2.310 / 22.659 |
+| 50 | anvil | 15413 | 7340.786 | 30826 / 31520 | 2.438 / 2.992 / 3.709 / 27.926 |
+
+Chargements mesurés séparément dans la préparation, en cache système chaud :
+1 323 appels (3 × 441), sauf `.bin`/10 bots où un accès supplémentaire est
+observé (1 324). Aucune erreur/absence lors de ces relectures. Les statistiques
+sont par appel, pas une affirmation d'égalité des nombres d'accès. CPU = médiane
+des pourcentages serveur par passe ; **100 % représente un cœur logique**.
+
+| Bots | Mode | CPU serveur médian | RSS maximal (MiB) | Chargement P95 (ms) | CPU client Python médian |
+|---:|---|---:|---:|---:|---:|
+| 1 | bin | 2.3 % | 25.73 | 1.206 | 2.1 % |
+| 1 | anvil | 5.2 % | 30.89 | 2.444 | 2.0 % |
+| 10 | bin | 9.6 % | 29.11 | 1.216 | 7.4 % |
+| 10 | anvil | 21.3 % | 33.77 | 1.551 | 6.6 % |
+| 25 | bin | 46.6 % | 33.45 | 0.970 | 47.9 % |
+| 25 | anvil | 64.0 % | 38.17 | 1.406 | 37.4 % |
+| 50 | bin | 109.1 % | 41.14 | 0.980 | 93.0 % |
+| 50 | anvil | 107.8 % | 45.57 | 1.330 | 81.0 % |
+
+À 50 bots, les sauvegardes `.bin` cumulent **23,658 s murales / 4,905 s CPU** ;
+les sauvegardes natives **38,947 s / 18,071 s CPU**. Dans ces dernières :
+construction/conservation/sérialisation NBT hors `region_total` ≈ **9,935 s
+murales / 9,928 s CPU** ; lecture/validation/contrôle du snapshot **2,565 s**,
+compression **0,641 s**, copie de région **1,928 s**, fsync fichier **13,788 s**,
+fsync répertoire **8,519 s**. Les phases imbriquées ne sont pas additionnées
+aux totaux une seconde fois. Mur - CPU inclut aussi l'ordonnancement, ce n'est
+pas un compteur pur d'attente disque. Les primitives de verrouillage ne sont
+pas isolées par une nouvelle instrumentation dans ce lot.
+
+L'amplification est confirmée : **7,341 Go contre 5,920 Mo** pour le même nombre
+de poses/casses à 50 bots, malgré légèrement moins de sauvegardes natives
+(15 413 contre 15 739). Les anciennes garanties de durabilité ne sont pas
+retirées. Le coût n'est pas seulement disque : le traitement NBT qui préserve
+les champs opaques et la validation de la région ajoutent du CPU mesuré. Aucun
+gain de TPS n'est annoncé ; à 50 bots les TPS par passe varient de 13,47 à 16,25
+en `.bin` et de 5,35 à 6,25 en natif. À 25 bots les TPS moyens proches de 20
+coexistent avec une durée des actions plus longue et des coûts tick+fast qui
+dépassent 50 ms. Cela ne démontre pas une stabilité générale à 20 TPS.
+
+La simulation des items reste libre et dépend des ticks, donc la charge totale
+incidente n'est pas strictement identique : le premier observateur voit
+1 685 objets ramassés en `.bin` contre 898 en natif à 50 bots. Les paquets de
+ramassage vus par plusieurs observateurs ne sont pas sommés comme s'ils
+représentaient des objets distincts. Le générateur Python atteint environ
+93 % / 81 % d'un cœur à ce palier ; il peut limiter le débit et le fanout n'est
+pas isolé. Les traces démontrent le surcoût des sauvegardes, mais pas que tout
+l'écart TPS provient du disque. La charge de fond et le stockage NVMe du PC
+limitent la portée des chiffres. Rejouer sur Xeon/HDD RAID avant déploiement.
+
+Une première campagne de 24 passes est conservée sous `bench-final` ; elle a
+précédé le nettoyage d'un chemin d'échec d'allocation. Les chiffres ci-dessus
+proviennent exclusivement de `bench-release`, sur le SHA final indiqué.
+
+### Fichiers, artefacts et suite du stockage
+
+Fichiers créés : `include/mc_world_storage.h`, `src/world/world_storage.c`,
+`tests/test_native_storage.c`, `tests/stress/native_storage_oracle.py`.
+Modifiés : `Makefile`, `include/mc_anvil.h`, `include/mc_chunk.h`,
+`include/mc_server.h`, `include/mc_world.h`, `src/main.c`, `src/net/server.c`,
+`src/world/anvil.c`, `src/world/chunk.c`, `src/world/world.c`,
+`tests/stress/profile_tick.py`, `tests/stress/run_block_checks.py`,
+`tests/stress/test_block_placement.py`, `tests/stress/README.md`, ce document.
+Aucune modification de `play.c`, des registres, règles de placement, workers
+de simulation ni des permissions de scripts.
+
+Les résultats bruts sont conservés sous `tests/stress/results/storage-s3a/`
+(ignorés par Git) : exports stage/asan/tsan, `precommit-release.log`, builds et
+logs sanitizers `*-release.log`, `bin-release/mc_server`, copies de mondes et
+rapports `stairs-import-release`, `placement-bin-release`,
+`placement-native-release`, `boundaries-native-release`, `asan-stairs-release`,
+`asan-pickup-release`, `vanilla-import-release`, `vanilla-new-release`,
+`vanilla-stairs-reference` et `vanilla-boundaries-final`. Les assertions sur
+NBT/blocs sont dans `import-preservation-release.json`,
+`vanilla-import-blocks-release.json`, `vanilla-new-blocks-release.json` et
+`bin-reference-equality-release.json`. `bench-release` contient les 24 passes,
+manifestes des templates, actions proposées/confirmées, traces continues,
+fsync, ressources, processus hôte et résumés. `analyze.py`,
+`benchmark-analysis.json`, `benchmark-extra.json`, `analysis-release.txt` et
+`manifest.json` permettent d'auditer les calculs. Les pilotes, erreurs de mise
+au point et première campagne restent séparés des résultats finaux.
+
+SHA-256 du binaire normal final effectivement utilisé en gameplay et dans les
+24 mesures finales :
+`14febb95c81cd402ac1b115f19c873c79f29e66aaa6c99e6b8a6b6d85ba2146b`.
+SHA-256 du serveur ASan+UBSan final testé :
+`a4b2f1f5ca55d76d87acf67e724d1b340082ade06a369166203c4caf53cfe658`.
+S2 n'est pas lié dans `mc_server` (vérification des symboles) et reste un outil
+expérimental séparé. Le backend atomique est conservé et `.bin` reste le défaut.
+Aucune migration automatique, conversion ni dépendance aux `.bin` dans le
+chemin de terrain natif. Aucun déploiement ni push. 25565/25587 : aucune action,
+aucun binaire, monde, configuration d'authentification ou droit administrateur
+modifié ; leur état distant n'est pas recontrôlé pendant la maintenance.
+Les processus temporaires locaux sont arrêtés en fin de validation.
+
+S3A valide la lecture/modification/sauvegarde/relecture native de terrain dans
+les scénarios ci-dessus ; il ne valide ni un monde Vanilla complet ni 20 TPS
+à 50 bots. S3B devrait élargir le corpus (mondes non plats, NBT opaques, BEs et
+protochunks), définir la modification sans perte des données encore refusées
+et renforcer le diagnostic d'échecs de fermeture. Le coût CPU de conservation
+NBT et l'amplification des reconstructions doivent rester mesurés, sans activer
+S2 ni retirer des fsync par défaut. La création des métadonnées globales et la
+politique d'adoption doivent rester explicites et non destructives. S4 devra
+traiter séparément snapshots/révisions et sauvegardes asynchrones ; aucun de
+ces mécanismes n'est anticipé ici. Revalidation d'intégration, durabilité et
+performances sur Xeon/HDD RAID nécessaire dès le retour du datacenter, avant
+activation réelle ou déploiement.

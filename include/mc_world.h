@@ -3,6 +3,7 @@
 
 #include "block_entity_store.h"
 #include "mc_chunk.h"
+#include "mc_world_storage.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -71,6 +72,7 @@ typedef struct {
 
 mc_world_t *mc_world_create(const char *world_path, int64_t level_seed);
 mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count);
+mc_world_t *mc_world_create_with_storage(const char *world_path, int64_t level_seed, int worker_count, mc_storage_kind_t storage);
 int mc_world_worker_count(const mc_world_t *w);
 void mc_world_destroy(mc_world_t *w);
 

@@ -104,6 +104,12 @@ async def run(args):
             rows = snapshot["states"]
             reverse = {v: k for k, v in state.items()}
             for index, row in enumerate(rows):
+                if args.region_boundaries:
+                    x,y,z=row['point']
+                    await command(a,f"tp {x-1.5} {y} {z+.5}")
+                    await until(lambda:a.pos and abs(a.pos[0]-(x-1.5))<.01 and abs(a.pos[2]-(z+.5))<.01,'boundary teleport')
+                    await a.conn.send(30,struct.pack('>ddd?',x-1.5,y,z+.5,True))
+                    await asyncio.wait_for(a.chunk_ready_events[(x//16,z//16)].wait(),35)
                 if args.vanilla:
                     marker = f"P2A_PERSIST_{index}"
                     await command(a, f"execute if block {' '.join(map(str, row['point']))} {reverse[row['state']]} run tellraw Ofwood_ \"{marker}\"")
@@ -113,6 +119,39 @@ async def run(args):
             assert latest_inventory(a)[36] == tuple(snapshot["slot36"])
             print(json.dumps({"status": "passed", "restart_states": len(rows), "slot36": snapshot["slot36"]}))
             return
+        if args.region_boundaries:
+            saved=[]
+            fixtures=[((-513,64,511),'stone','stone'),((-512,64,512),'oak_log','oak_log[axis=y]'),
+                      ((511,64,-513),'oak_slab','oak_slab[type=bottom,waterlogged=false]'),
+                      ((512,64,-512),'oak_stairs','oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]')]
+            for point,item,key in fixtures:
+                x,y,z=point
+                await setblock(a,(x-2,63,z),'stone')
+                await setblock(a,(x-4,63,z),'stone')
+                await command(a,f'tp {x-1.5} {y} {z+.5}')
+                await command(a,f'tp {b.name} {x-3.5} {y} {z+.5}')
+                for player,px in ((a,x-1.5),(b,x-3.5)):
+                    await until(lambda:player.pos and abs(player.pos[0]-px)<.01 and abs(player.pos[2]-(z+.5))<.01,'boundary teleport')
+                    await player.conn.send(30,struct.pack('>ddd?',px,y,z+.5,True))
+                await asyncio.gather(*(asyncio.wait_for(p.chunk_ready_events[(x//16,z//16)].wait(),35) for p in (a,b)))
+                await setblock(a,(x-2,63,z),'stone');await setblock(a,(x-4,63,z),'stone')
+                await setblock(a,(x,63,z),'stone');await setblock(a,point,'air')
+                await hold(a,items['minecraft:'+item]);await command(a,'gamemode survival')
+                await a.conn.send(32,struct.pack('>ff?',180.,0.,True))
+                for player in (a,b):player.clear_block_events(point)
+                before=len(a.events[20]);await place(a,(x,63,z),1,(.5,1.,.5))
+                expected=state['minecraft:'+key]
+                await asyncio.gather(observed(a,point,expected),observed(b,point,expected))
+                await until(lambda:(36,items['minecraft:'+item],3) in slot_updates_since(a,before),'boundary Survival consumption')
+                if args.vanilla:
+                    marker='BOUNDARY_'+str(len(saved))
+                    await command(a,f'execute if block {x} {y} {z} {key} run tellraw Ofwood_ "{marker}"')
+                    await until(lambda:any(marker.encode() in p for _,p in a.events[121]),marker)
+                else:assert await query_block(a,point)==expected
+                saved.append(dict(point=list(point),state=expected))
+            snapshot=dict(states=saved,slot36=[items['minecraft:oak_stairs'],3])
+            Path(args.snapshot).write_text(json.dumps(snapshot,indent=2))
+            print(json.dumps(dict(status='passed',region_boundary_states=saved,observer=b.name)));return
         # Fixed fixture straddles negative chunk X and Z boundaries. Both actors
         # use server teleport commands, so Vanilla sees the same positions.
         await setblock(a, (-18, 63, 14), "stone")
@@ -202,20 +241,22 @@ async def run(args):
         slab = state["minecraft:oak_slab[type=bottom,waterlogged=false]"]
         await asyncio.gather(observed(a, (-18, 64, 14), slab), observed(b, (-18, 64, 14), slab))
         rows.append({"case": "partial-collision", "point": [-18,64,14], "state": slab, "count": 4})
-        # A BlockEvent uses minecraft:block IDs, never the sorted descriptor index.
-        await hold(a, items["minecraft:stone"])
-        await setblock(a, point, "shulker_box[facing=up]")
-        await setblock(a, (point[0], point[1]+1, point[2]), "air")
-        start_events = len(a.events[7])
-        await place(a, point, 1, (0.5, 1, 0.5))
-        await until(lambda: len(a.events[7]) > start_events, "shulker BlockEvent")
-        action = a.events[7][-1][1]
-        protocol_id, end = read_varint(action, 10)
-        assert action[8:10] == b"\x01\x01" and end == len(action)
-        assert protocol_id == reference["shulker_block_protocol_id"]
-        window, _ = read_varint(a.events[59][-1][1])
-        await a.conn.send(19, varint(window))
-        await asyncio.sleep(0.15)
+        protocol_id = None
+        if not args.blocks_only:
+            # A BlockEvent uses minecraft:block IDs, never the sorted descriptor index.
+            await hold(a, items["minecraft:stone"])
+            await setblock(a, point, "shulker_box[facing=up]")
+            await setblock(a, (point[0], point[1]+1, point[2]), "air")
+            start_events = len(a.events[7])
+            await place(a, point, 1, (0.5, 1, 0.5))
+            await until(lambda: len(a.events[7]) > start_events, "shulker BlockEvent")
+            action = a.events[7][-1][1]
+            protocol_id, end = read_varint(action, 10)
+            assert action[8:10] == b"\x01\x01" and end == len(action)
+            assert protocol_id == reference["shulker_block_protocol_id"]
+            window, _ = read_varint(a.events[59][-1][1])
+            await a.conn.send(19, varint(window))
+            await asyncio.sleep(0.15)
         # Leave actual placements in both negative-coordinate chunks for restart.
         saved = []
         for target, item, key, face in (
@@ -249,6 +290,8 @@ def slot_updates_since(bot, start):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--region-boundaries",action="store_true",help="two observers, Survival placements across +/-512 region boundaries")
+    parser.add_argument("--blocks-only", action="store_true", help="skip the independent block entity event check")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--blocks-report", default="data/26.1.1/reports/blocks.json")

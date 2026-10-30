@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "mc_inventory.h"
+#include "mc_world_storage.h"
 
 #define MC_PROTO_VERSION 775
 #define MC_PROTO_VERSION_CURRENT MC_PROTO_VERSION
@@ -44,7 +45,8 @@ typedef struct {
     const char *tags_blob_path;
     const char *chunk_blob_path;
     const char *block_states_path;
-    const char *world_path; /* optional: path to world dir containing region/ */
+    const char *world_path; /* optional world root */
+    mc_storage_kind_t chunk_storage; /* zero = historical .bin */
     int64_t level_seed;
     int view_distance;
     int simulation_distance;

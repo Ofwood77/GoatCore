@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Remote-only continuous tick/IO comparison using existing protocol-775 bots.
+"""Continuous tick/IO comparison using existing protocol-775 bots.
 
-Never run on a developer PC. Binaries must contain the same optional tick trace.
+Use the dedicated host, or an explicitly authorized isolated local exception. Binaries must contain the same optional tick trace.
 Every run copies one immutable world; startup, preparation, warmup and idle are
 separate from the fixed action phase. All bots stay connected throughout.
 """
@@ -24,6 +24,7 @@ import time
 
 from protocol import position, varint, read_varint
 from stress import Bot, block_target_offset, options
+from native_storage_oracle import world_blocks
 from test_player_visibility import close
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +103,24 @@ def io_summary(path, start, end):
                 cpu_s=sum(c for a,b,c,*_ in calls)/1e6,
                 max_ms=max(((b-a)/1000 for a,b,*_ in calls),default=0),
                 errors=sum(c[4]!=0 for c in calls))
+
+
+def storage_summary(path, start, end):
+    phases={}
+    if not path.exists():return phases
+    with path.open() as file:
+        for row in csv.DictReader(file):
+            a,b=int(row['start_us']),int(row['end_us'])
+            if a>=end or b<=start:continue
+            phases.setdefault(row['phase'],[]).append(row)
+    result={}
+    for phase,rows in phases.items():
+        costs=[(int(r['end_us'])-int(r['start_us']))/1000 for r in rows]
+        result[phase]=dict(calls=len(rows),errors=sum(int(r['result'])<0 for r in rows),absent=sum(int(r['result'])==1 for r in rows),
+                           bytes=sum(int(r['bytes']) for r in rows),cpu_s=sum(int(r['cpu_us']) for r in rows)/1e6,
+                           wall_s=sum(costs)/1000,p50_ms=quantile(costs,.5),p95_ms=quantile(costs,.95),
+                           p99_ms=quantile(costs,.99),max_ms=max(costs))
+    return result
 
 
 def proc_sample(pid):
@@ -200,12 +219,12 @@ async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only)
         bot_log.close()
 
 
-async def one(args,binary,label,bots,result,template=None,prepare_only=False):
+async def one(args,binary,label,bots,result,template=None,prepare_only=False,backend="bin"):
     result.mkdir(parents=True,exist_ok=False)
     runtime=result/'runtime';runtime.mkdir();world=runtime/'world'
     if template:shutil.copytree(template,world)
     (runtime/'assets').symlink_to(ROOT/'assets')
-    (runtime/'server.config').write_text('online-mode=false\noffline-skins=false\nview-distance=10\nsimulation-distance=10\nlevel-seed=0\n')
+    (runtime/'server.config').write_text(f'online-mode=false\noffline-skins=false\nview-distance=10\nsimulation-distance=10\nlevel-seed=0\nchunk-storage={backend}\n')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     assert port not in (25565,25587)
@@ -246,13 +265,17 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False):
     for phase,(a,b) in report['phases'].items():
         if b<=a:continue
         stats=summarize(rows,a,b);stats['fsync']=io_summary(result/'fsync.csv',a,b) if args.fsync_probe else None
+        stats['storage']=storage_summary(result/'saves.csv',a,b)
         selected=[s for s in samples if a<=s['time_us']<=b]
         if len(selected)>1:
             stats['process_cpu_percent']=100*(selected[-1]['cpu_s']-selected[0]['cpu_s'])/((selected[-1]['time_us']-selected[0]['time_us'])/1e6)
+            before_io={k:int(v) for k,v in (line.split(':') for line in selected[0]['process_io'].splitlines())}
+            after_io={k:int(v) for k,v in (line.split(':') for line in selected[-1]['process_io'].splitlines())}
+            stats['sampled_process_io_delta']={k:after_io[k]-v for k,v in before_io.items()}
             stats['client_cpu_percent']=100*(selected[-1]['client_cpu_s']-selected[0]['client_cpu_s'])/((selected[-1]['time_us']-selected[0]['time_us'])/1e6)
             stats['rss_min_kb']=min(s['rss_kb'] for s in selected);stats['rss_max_kb']=max(s['rss_kb'] for s in selected)
         summaries[phase]=stats
-    result_row=dict(label=label,binary=str(binary),sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),bots=bots,
+    result_row=dict(backend=backend,label=label,binary=str(binary),sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),bots=bots,
                     cycles_per_bot=args.cycles,item_id=args.item,port=port,phases=summaries,
                     placed=report['placed'],broken=report['broken'],missing=report['missing'],failures=report['failures'],
                     pickup_observations=report['pickup_observations'],
@@ -269,19 +292,33 @@ async def main(args):
         label,path=value.split('=',1);binary=Path(path).resolve();assert binary.is_file()
         assert label and all(c.isalnum() or c in '-_' for c in label)
         binaries.append((label,binary))
-    if args.world_template:template=args.world_template.resolve()
-    else:
-        await one(args,binaries[0][1],'template',1,args.result_dir/'template',prepare_only=True)
-        template=args.result_dir/'template/runtime/world'
-    manifest={str(p.relative_to(template)):hashlib.sha256(p.read_bytes()).hexdigest() for p in template.rglob('*') if p.is_file()}
-    (args.result_dir/'template-manifest.json').write_text(json.dumps(manifest,indent=2))
+    modes=dict(v.split('=',1) for v in args.storage_backend)
+    assert set(modes)<=set(label for label,_ in binaries), 'unknown backend label'
+    assert all(v in ('bin','anvil-atomic-experimental') for v in modes.values())
+    templates={};semantics={}
+    for label,binary in binaries:
+        backend=modes.get(label,'bin')
+        if backend in templates:continue
+        if args.world_template:
+            assert len(set(modes.values())|{'bin'})==1, 'mixed backends require independent templates'
+            template=args.world_template.resolve()
+        else:
+            await one(args,binary,'template',1,args.result_dir/f'template-{backend}',prepare_only=True,backend=backend)
+            template=args.result_dir/f'template-{backend}/runtime/world'
+        templates[backend]=template
+        manifest={str(p.relative_to(template)):hashlib.sha256(p.read_bytes()).hexdigest() for p in template.rglob('*') if p.is_file()}
+        (args.result_dir/f'template-manifest-{backend}.json').write_text(json.dumps(manifest,indent=2))
+        semantics[backend]=world_blocks(template,backend)
+        (args.result_dir/f'template-blocks-{backend}.json').write_text(json.dumps(semantics[backend],indent=2))
+    assert all(s==next(iter(semantics.values())) for s in semantics.values()), 'template block states/work differ'
     rows=[]
     for bots in args.bots:
         for repetition in range(args.repetitions):
             order=binaries if repetition%2==0 else list(reversed(binaries))
             for label,binary in order:
                 name=f'{label}-{bots}-r{repetition+1}'
-                row=await one(args,binary,label,bots,args.result_dir/name,template)
+                backend=modes.get(label,"bin")
+                row=await one(args,binary,label,bots,args.result_dir/name,templates[backend],backend=backend)
                 row['repetition']=repetition+1;rows.append(row)
                 (args.result_dir/'comparison.json').write_text(json.dumps(rows,indent=2))
 
@@ -289,6 +326,7 @@ async def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',action='append',required=True,help='label=/absolute/path/to/binary')
+    p.add_argument('--storage-backend',action='append',default=[],help='label=bin or label=anvil-atomic-experimental; independent equivalent templates')
     p.add_argument('--bots',nargs='+',type=int,default=[1,10,25,50])
     p.add_argument('--repetitions',type=int,default=3)
     p.add_argument('--cycles',type=int,default=100)

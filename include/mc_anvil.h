@@ -52,6 +52,15 @@ int mc_anvil_decode_chunk_nbt(const uint8_t *nbt_buf,
  * External .mcc and unsupported compression cause a fail-closed rejection.
  * Caller owns an immutable NBT snapshot and the durable storage directory. */
 int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len);
+/* Native integration: source comparison under the same region lock as publish.
+ * expected==NULL requires an absent slot; mismatches return ESTALE unchanged. */
+int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
+                                      const uint8_t *expected, size_t expected_length);
+/* Strict 4788/padded native path, preserving source NBT outside block edits.
+ * Nonempty block entities/protochunks/unknown states are currently refused. */
+int mc_anvil_decode_native(const uint8_t *raw, size_t length, int32_t cx, int32_t cz, mc_chunk_t *out);
+int mc_anvil_encode_native(const mc_chunk_t *chunk, const mc_block_entity_store_t *entities,
+                            uint8_t **out, size_t *length);
 int mc_anvil_write_chunk(const char *region_path, const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store);
 int mc_anvil_encode_chunk_nbt(const mc_chunk_t *chunk, const mc_block_entity_store_t *be_store, uint8_t **out_raw, size_t *out_raw_len);
 

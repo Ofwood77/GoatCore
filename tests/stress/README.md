@@ -533,3 +533,90 @@ export. Le journal/état auxiliaire corrompu bloque les écritures et reste
 conservé. Ne pas le supprimer ni copier une transaction inachevée vers un autre
 inode pour contourner l'identité. Le rapport de compatibilité décrit le format,
 les décisions undo/redo, les barrières et les garanties non démontrées.
+
+### S3A : stockage actif Anvil optionnel
+
+Le défaut reste `chunk-storage=bin` dans `server.config`. Pour une **copie de
+monde jetable**, sélectionner explicitement :
+
+```ini
+chunk-storage=anvil-atomic-experimental
+```
+
+`MC_WORLD_PATH` désigne la racine du monde ; les régions utilisées sont
+`dimensions/minecraft/overworld/region/r.<x>.<z>.mca`. Aucun import des `.bin`,
+aucune migration ni bascule après erreur. Le mode Anvil crée un marqueur de
+sélection durable et détient des verrous de monde/session/région. Ne pas ouvrir
+simultanément ce monde dans Vanilla. Un journal S2 en attente interdit son
+ouverture : appliquer d'abord la procédure S2 ci-dessus sur les fichiers
+originaux, écrivains arrêtés ; S3A n'effectue aucune récupération S2 automatique.
+
+Lecture native actuellement limitée aux chunks `minecraft:full`, DataVersion
+4788, hauteur Overworld, palettes connues et sans block entities. Protochunks,
+NBT ambigu/inconnu non conservable, codecs non pris en charge et références
+`.mcc` provoquent un refus ; le chunk reste indisponible, sans régénération.
+La présence d'un codec externe/non pris en charge dans la région interdit
+également sa réécriture. Les sauvegardes conservent les NBT opaques et les
+palettes existantes ; les heightmaps/lumières dérivées affectées sont invalidées
+pour recalcul par Vanilla. Ne pas utiliser les conteneurs dans ce mode : une
+sauvegarde nécessitant des block entities est refusée et reste dirty.
+
+Le runner existant sait sélectionner ce backend et copier un monde de référence
+sans modifier l'original :
+
+```sh
+python3 tests/stress/run_block_checks.py --kind goatcore --suite stairs \
+  --chunk-storage anvil-atomic-experimental --port 25593 \
+  --server-binary /chemin/binaire-fixe/mc_server --verify-restarts 3 \
+  --result-dir tests/stress/results/s3a-stairs-neuf
+```
+
+Pour une copie officielle, ajouter `--world-template /copie/reference/world
+--view-distance 2`. Les suites `placement` et `pickup` utilisent le même runner.
+`placement --blocks-only` omet uniquement le test distinct de BlockEvent shulker ;
+`placement --region-boundaries` vérifie deux observateurs, les inventaires
+Survival, les coordonnées ±512 et plusieurs régions. Ce dernier scénario envoie
+une position client après les téléportations, afin que Vanilla actualise son
+suivi des chunks éloignés.
+
+Réouverture officielle sans rejouer les modifications : `--kind vanilla
+--verify-only --world-template /copie/modifiee/world --snapshot-template
+/capture/snapshot.json --suite stairs --java /chemin/java25 --vanilla-root
+/installation/26.1.1 --port 25594`. Exiger succès des assertions puis comparer les
+blocs de tous les chunks modifiés, palettes et métadonnées. Le programme
+`native_storage_oracle.py` fournit un lecteur NBT indépendant, un digest des
+98 304 blocs par chunk (`--backend bin` choisit explicitement l'ancien packing
+compact), et `--preserved-from` vérifie la conservation des champs non modifiés
+et des fichiers globaux/POI/entités. Il ne modifie aucun monde.
+
+Un monde nouvellement créé par GoatCore ne contient pas toutes les métadonnées
+globales Vanilla. Pour tester ses régions avec Vanilla, utiliser une **copie
+complète** des métadonnées d'un monde officiel : `level.dat` seul ne suffit pas
+à 26.1.1, qui requiert notamment `data/minecraft/world_gen_settings.dat`.
+Ne pas présenter ces essais de chunks comme une compatibilité mondiale complète.
+
+Comparaison à travail fixé, avec le même binaire et des templates indépendants
+vérifiés bloc par bloc avant mesure :
+
+```sh
+python3 tests/stress/profile_tick.py \
+  --binary bin=/chemin/mc_server --binary anvil=/chemin/mc_server \
+  --storage-backend anvil=anvil-atomic-experimental \
+  --bots 1 10 25 50 --repetitions 3 --cycles 100 --save-trace \
+  --fsync-probe /chemin/profile_fsync.so \
+  --result-dir tests/stress/results/s3a-charge-neuve
+```
+
+Les fichiers de trace couvrent toute la période active, préparation et idle
+séparés ; les ressources et compteurs d'E/S sont conservés. Le chemin du binaire
+est immuable pendant toute la campagne. S2 n'est pas lié dans `mc_server` et
+n'intervient dans aucune de ces sauvegardes. L'exception locale n'est valable
+que pendant la maintenance ; répéter ces validations sur Xeon/HDD RAID avant
+tout déploiement. Aucun chiffre local ne démontre un gain sur ce matériel.
+
+Pour comparer tous les blocs après une réouverture officielle, indépendamment
+du réencodage des palettes, utiliser `native_storage_oracle.py APRES_WORLD
+--same-blocks-as AVANT_WORLD --output preuve.json`. Les options répétées
+`--chunk=-2,0 --chunk=-1,0 --chunk=-2,1 --chunk=-1,1` limitent cette comparaison
+aux chunks modifiés d'une référence officielle ; sans sélection, tous les
+chunks de la copie source sont vérifiés.

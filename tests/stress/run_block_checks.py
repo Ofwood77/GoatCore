@@ -16,6 +16,7 @@ import tempfile
 import time
 import zlib
 import gzip
+import shutil
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -67,6 +68,7 @@ def rewrite_regions(runtime, probe, output, s2_experimental=False):
 
 
 def run(args):
+    if args.chunk_storage != "bin" and args.kind != "goatcore": raise ValueError("storage selection is GoatCore-only")
     if args.port in (25565,25587): raise ValueError("main service ports are forbidden")
     if args.fsync_probe and not args.fsync_probe.is_file():raise ValueError("fsync probe library not found")
     if args.s2_experimental and not args.anvil_rewriter:raise ValueError('S2 requires an explicit experimental rewriter')
@@ -75,6 +77,7 @@ def run(args):
     result=args.result_dir.resolve() if args.result_dir else Path(tempfile.mkdtemp(prefix="blocks-",dir=ROOT/"tests/stress/results"))
     if args.result_dir:result.mkdir(parents=True,exist_ok=False)
     runtime=result/"runtime";runtime.mkdir()
+    if args.world_template:shutil.copytree(args.world_template.resolve(),runtime/"world")
     if args.kind=="vanilla":
         reference=args.vanilla_root.resolve()
         for name in ("server.jar","libraries","versions"):(runtime/name).symlink_to(reference/name)
@@ -86,11 +89,14 @@ def run(args):
         env=os.environ.copy()
     else:
         (runtime/"assets").symlink_to(ROOT/"assets")
-        (runtime/"server.config").write_text("online-mode=false\noffline-skins=false\n")
+        (runtime/"server.config").write_text(f"online-mode=false\noffline-skins=false\nchunk-storage={args.chunk_storage}\nview-distance={args.view_distance}\n")
         env=dict(os.environ,MC_WORLD_PATH=str(runtime/"world"),MC_BIND_PORT=str(args.port),
                  MC_SETUP_FILE=str(ROOT/"tests/stress/network/one.conf"),MC_QA_MODE="1",MC_ADMIN_USERNAME="Ofwood_")
         command=[str(args.server_binary.resolve())]
-    for phase in ["edit", "verify"] + [f"verify-{i}" for i in range(2, args.verify_restarts + 1)]:
+    if args.snapshot_template:shutil.copy2(args.snapshot_template.resolve(),result/"snapshot.json")
+    if args.verify_only and not args.snapshot_template:raise ValueError("verify-only requires a saved snapshot")
+    phases=(["edit"] if not args.verify_only else [])+["verify"]+[f"verify-{i}" for i in range(2,args.verify_restarts+1)]
+    for phase in phases:
         if phase!='edit' and args.anvil_rewriter:
             rewrite_regions(runtime,args.anvil_rewriter,result/f'anvil-rewrite-{phase}.json',args.s2_experimental)
         phase_env=env.copy()
@@ -112,6 +118,8 @@ def run(args):
                 cmd=[sys.executable,str(ROOT/"tests/stress"/scenario),
                      "--port",str(args.port),"--snapshot",str(result/"snapshot.json")]
                 if args.kind=="vanilla":cmd.append("--vanilla")
+                if args.blocks_only and args.suite=="placement":cmd.append("--blocks-only")
+                if args.region_boundaries and args.suite=="placement":cmd.append("--region-boundaries")
                 if args.suite=="pickup":cmd.extend(["--drop-count",str(args.pickup_count)])
                 if phase!="edit":cmd.append("--verify")
                 test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=600)
@@ -129,7 +137,7 @@ def run(args):
             if proc.returncode:raise RuntimeError(f"server shutdown exit {proc.returncode}")
             if args.fsync_probe and args.kind=="goatcore" and not (result/f"fsync-{phase}.csv").is_file():
                 raise RuntimeError("fsync probe did not produce a trace")
-    metadata={"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
+    metadata={"chunk_storage":args.chunk_storage if args.kind=="goatcore" else None,"world_template":str(args.world_template) if args.world_template else None,"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
     if args.kind=="goatcore":metadata["binary_sha256"]=hashlib.sha256(args.server_binary.read_bytes()).hexdigest()
     (result/"metadata.json").write_text(json.dumps(metadata,indent=2))
     print(json.dumps({**metadata,"results":str(result)}))
@@ -148,5 +156,12 @@ if __name__=="__main__":
     parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
     parser.add_argument("--s2-experimental",action="store_true",help="arm S2 only inside this fresh isolated Vanilla runtime")
     parser.add_argument("--anvil-rewriter",type=Path,help="rewrite native Vanilla regions with mc_save_bench before each verification restart")
+    parser.add_argument("--region-boundaries",action="store_true",help="placement suite: region boundary scenarios")
+    parser.add_argument("--verify-only",action="store_true",help="verify a supplied saved snapshot without editing the copied world")
+    parser.add_argument("--snapshot-template",type=Path)
+    parser.add_argument("--chunk-storage",choices=("bin","anvil-atomic-experimental"),default="bin")
+    parser.add_argument("--world-template",type=Path,help="copy a reference world into this fresh isolated runtime")
+    parser.add_argument("--view-distance",type=int,default=10,choices=range(2,33))
+    parser.add_argument("--blocks-only",action="store_true",help="skip the separate shulker BlockEvent check")
     parser.add_argument("--fsync-probe",type=Path,help="optional test-only fsync library and per-phase tick traces")
     run(parser.parse_args())

@@ -715,7 +715,7 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
         return -1;
     }
 
-    s->world = mc_world_create_with_workers(cfg->world_path, cfg->level_seed, cfg->chunk_workers);
+    s->world = mc_world_create_with_storage(cfg->world_path, cfg->level_seed, cfg->chunk_workers, cfg->chunk_storage);
     if (!s->world) {
         mc_task_queue_destroy(&s->task_queue);
         pthread_mutex_destroy(&s->conns_lock);
