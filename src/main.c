@@ -26,6 +26,7 @@
 
 typedef struct {
     mc_storage_kind_t chunk_storage;
+    mc_save_mode_t anvil_save_mode;
     int64_t level_seed;
     int view_distance;
     int simulation_distance;
@@ -58,6 +59,7 @@ static int write_default_server_config(const char *path) {
     }
     fprintf(f, "# mc_c_server config\n");
     fprintf(f, "chunk-storage=bin\n");
+    fprintf(f, "anvil-save-mode=immediate\n");
     fprintf(f, "level-seed=%d\n", DEFAULT_LEVEL_SEED);
     fprintf(f, "view-distance=%d\n", DEFAULT_VIEW_DISTANCE);
     fprintf(f, "simulation-distance=%d\n", DEFAULT_SIMULATION_DISTANCE);
@@ -173,6 +175,13 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
             }
             continue;
         }
+        if (strcmp(key,"anvil-save-mode")==0) {
+            if(mc_save_mode_parse(val,&out->anvil_save_mode)!=0) {
+                log_error("invalid anvil-save-mode '%s'",val);
+                return -1;
+            }
+            continue;
+        }
         if (strcmp(key, "level-seed") == 0) {
             long long v = 0;
             if (!*val || sscanf(val, "%lld", &v) != 1) {
@@ -239,7 +248,10 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
 
         log_info("server.config: ignoring unknown key '%s'", key);
     }
-
+    if(out->anvil_save_mode!=MC_SAVE_IMMEDIATE && out->chunk_storage!=MC_STORAGE_ANVIL_ATOMIC) {
+        log_error("anvil-save-mode requires explicit anvil-atomic-experimental storage");
+        return -1;
+    }
     return 0;
 }
 
@@ -316,9 +328,9 @@ int main(void) {
         log_error("CPU setup: %s", setup_error);
         return 1;
     }
-    log_info("CPU setup: file=%s Linux_online=%d Linux_cpuset=%d allowed=%d CPUs=%s network_workers=%d chunk_workers=%d save_workers=0 simulation_workers=0 tick_rate=20",
+    log_info("CPU setup: file=%s Linux_online=%d Linux_cpuset=%d allowed=%d CPUs=%s network_workers=%d chunk_workers=%d save_workers=%d simulation_workers=0 tick_rate=20",
              setup_path, setup.linux_online_cpus, setup.linux_available_cpus, setup.allowed_cpus, setup.allowed_cpu_list,
-             setup.network_workers, mc_setup_resolve_chunk_workers(&setup));
+             setup.network_workers, mc_setup_resolve_chunk_workers(&setup),disk_cfg.anvil_save_mode==MC_SAVE_ASYNC?1:0);
 
     mc_server_config_t cfg = {0};
     cfg.bind_ip = NULL;
@@ -355,7 +367,9 @@ int main(void) {
     cfg.block_states_path = "assets/block_states.json";
     cfg.world_path = "world";
     cfg.chunk_storage = disk_cfg.chunk_storage;
+    cfg.anvil_save_mode = disk_cfg.anvil_save_mode;
     log_info("chunk storage: %s (no migration or fallback)",mc_storage_name(cfg.chunk_storage));
+    log_info("anvil save mode: %s; gameplay ACK is not a durable save ACK",mc_save_mode_name(cfg.anvil_save_mode));
     cfg.level_seed = disk_cfg.level_seed;
     cfg.view_distance = disk_cfg.view_distance;
     cfg.simulation_distance = disk_cfg.simulation_distance;
@@ -430,7 +444,7 @@ int main(void) {
     log_info("GoatCore");
     log_info("server listening on port %u", cfg.bind_port);
     int rc = net_server_run(srv);
-    net_server_destroy(srv);
+    if(net_server_destroy_checked(srv)!=0)rc=-1;
 
     return rc == 0 ? 0 : 2;
 }

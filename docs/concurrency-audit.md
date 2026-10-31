@@ -1,5 +1,53 @@
 # Concurrency audit and first epoll isolation step
 
+## S4 storage ownership update (2026-10-31)
+
+The sections below describe earlier network milestones. S4 adds an optional
+storage owner, without parallel gameplay or a change to the authoritative tick.
+`chunk-storage=bin` and `anvil-save-mode=immediate` remain the defaults. Only an
+explicit native Anvil world with `anvil-save-mode=async` creates one I/O thread.
+
+The tick copies section palettes/packed words, raw source NBT and the S3B guard
+into independent save snapshots. No live chunk, player, inventory, network
+cache or world-map pointer reaches the I/O worker. The storage handle is immutable
+and outlives that worker. A single slot includes queued, running and completed
+work: at most 64 snapshots and 64 MiB of copied input. Encoding/compression
+buffers and the loaded world are outside that input budget. Backpressure skips
+new copies and keeps the latest dirty state on the tick. It does not discard
+accepted mutations. There is no arbitrary cancellation of an active writer.
+
+The queue mutex protects ownership transfer and completion visibility, and is
+released during serialization and filesystem operations. Region publication
+uses the existing storage/world exclusivity and region locks. Every expected
+source is checked under the region lock before one atomic publication. Readers
+pin a complete old or new inode; an old snapshot cannot silently replace a new
+source. Regions are processed deterministically by region coordinates and slot.
+Atomicity is per region, not across regions or player/entity files. S2 remains
+separate from the server binary.
+
+Only the tick acknowledges a matching in-flight generation. A later live
+generation stays dirty. A failed parent-directory fsync transfers the coherent
+visible source for a safe retry, but does not advance the durable generation.
+Errors are latched instead of retried every tick; explicit flush/shutdown may
+retry and must report a persistent failure. Dirty/pending chunks cannot be
+evicted prematurely. Shutdown joins loaders, integrates their results, drains
+the last dirty states and joins the writer before releasing storage or chunks.
+A failed join retains potentially referenced resources rather than freeing
+them; checked shutdown propagates failure to the server exit status.
+
+Experimental batched/async gameplay ACKs can precede disk durability. A loaded
+chunk flush, `save-all` or successful checked shutdown is the documented barrier.
+SIGKILL can lose unconfirmed memory-only changes. No cross-file transaction with
+player inventories/items is provided; a crash can leave those states out of
+step. A hung filesystem can still block a durability barrier or shutdown.
+
+Validation includes blocked-writer mutation/eviction, full queue ownership,
+generation/source rejection, error then retry with a newer mutation, shutdown
+drain and six process-interruption checkpoints across three chunks. The S4
+compatibility report records the normal, ASan/UBSan and local TSan results and
+their limits. Passing these runs is not a proof of absence of every race or of
+power-loss safety. No remote deployment or migration is part of S4.
+
 ## Threads and ownership
 
 `net_server_run()` runs the one network owner on its calling thread. It owns the

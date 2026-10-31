@@ -363,6 +363,14 @@ static void *write_thread(void *arg) {
     return NULL;
 }
 
+static int write_region_group(const char *region,blob_t *old,blob_t newer,blob_t second) {
+    mc_anvil_chunk_write_t writes[]={
+        {0,newer.data,newer.size,old[0].data,old[0].size},
+        {1,second.data,second.size,old[1].data,old[1].size}
+    };
+    return mc_anvil_write_batch_expected(region,writes,2);
+}
+
 int main(void) {
     const char *base = getenv("MC_ATOMIC_TEST_ROOT");
     if (!base)
@@ -390,7 +398,7 @@ int main(void) {
     assert(!write_bin(world, stone));
     blob_t region_before = read_file(region), bin_before = read_file(bin);
 
-    for (int kind = 0; kind < 2; kind++) {
+    for (int kind = 0; kind < 3; kind++) {
         const char *target = kind ? region : bin;
         blob_t before = kind ? region_before : bin_before;
         for (int point = BEFORE_TEMP; point <= AFTER_DIR_SYNC; point++) {
@@ -399,7 +407,9 @@ int main(void) {
             assert(pid >= 0);
             if (!pid) {
                 interruption = point;
-                if (kind)
+                if (kind==2)
+                    (void)write_region_group(region,old,newer,second_new);
+                else if (kind)
                     (void)mc_anvil_write_chunk_nbt(region, 0, 0, newer.data, newer.size);
                 else
                     (void)write_bin(world, stair);
@@ -413,11 +423,11 @@ int main(void) {
                 assert(equal(before, after));
             if (kind) {
                 expect_raw(region, 0, point <= BEFORE_RENAME ? old[0] : newer);
-                expect_raw(region, 1, old[1]);
+                expect_raw(region, 1, kind==2 && point>BEFORE_RENAME ? second_new : old[1]);
                 expect_raw(region, 2, old[2]);
             } else
                 expect_bin(world, point <= BEFORE_RENAME ? stone : stair);
-            printf("crash kind=%s point=%d readable=1 old_intact=%d\n", kind ? "region" : "bin", point,
+            printf("crash kind=%s point=%d readable=1 old_intact=%d\n", kind==2?"region-group":kind ? "region" : "bin", point,
                    equal(before, after));
             free(after.data);
         }
@@ -425,7 +435,7 @@ int main(void) {
 
     /* Orphans from SIGKILL are deliberately retained and never promoted. */
     const int errors[] = {EINTR, EIO, ENOSPC, EDQUOT, 0, -1};
-    for (int kind = 0; kind < 2; kind++) {
+    for (int kind = 0; kind < 3; kind++) {
         const char *target = kind ? region : bin;
         blob_t before = kind ? region_before : bin_before;
         for (int op = CREATE_TEMP; op <= LOCK_REGION; op++) {
@@ -446,7 +456,7 @@ int main(void) {
                 fault = op;
                 injected_errno = err;
                 remaining = 1;
-                int rc = kind ? mc_anvil_write_chunk_nbt(region, 0, 0, newer.data, newer.size)
+                int rc = kind==2 ? write_region_group(region,old,newer,second_new) : kind ? mc_anvil_write_chunk_nbt(region, 0, 0, newer.data, newer.size)
                               : write_bin(world, stair);
                 assert(!remaining);
                 int result_errno = errno;
@@ -462,11 +472,11 @@ int main(void) {
                     assert(equal(before, after));
                 if (kind) {
                     expect_raw(region, 0, success || uncertain ? newer : old[0]);
-                    expect_raw(region, 1, old[1]);
+                    expect_raw(region, 1, kind==2 && (success || uncertain) ? second_new : old[1]);
                     expect_raw(region, 2, old[2]);
                 } else
                     expect_bin(world, success || uncertain ? stair : stone);
-                printf("error kind=%s op=%d injected=%d rc=%d readable=1\n", kind ? "region" : "bin", op, err,
+                printf("error kind=%s op=%d injected=%d rc=%d readable=1\n", kind==2?"region-group":kind ? "region" : "bin", op, err,
                        rc);
                 free(after.data);
             }

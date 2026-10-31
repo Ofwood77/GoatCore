@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include "mc_inventory.h"
 #include "mc_world_storage.h"
+#include "mc_save_pipeline.h"
 
 #define MC_PROTO_VERSION 775
 #define MC_PROTO_VERSION_CURRENT MC_PROTO_VERSION
@@ -47,6 +48,7 @@ typedef struct {
     const char *block_states_path;
     const char *world_path; /* optional world root */
     mc_storage_kind_t chunk_storage; /* zero = historical .bin */
+    mc_save_mode_t anvil_save_mode; /* zero = existing synchronous barriers */
     int64_t level_seed;
     int view_distance;
     int simulation_distance;
@@ -62,6 +64,7 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg);
 int net_server_run(mc_server_t *server);
 void net_server_stop(mc_server_t *server);
 void net_server_destroy(mc_server_t *server);
+int net_server_destroy_checked(mc_server_t *server);
 int net_server_spawn_item_drop(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot);
 int net_server_spawn_item_drop_locked(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot);
 int net_server_spawn_item_drop_with_pickup_delay(mc_server_t *server, double x, double y, double z, const mc_slot_t *slot,

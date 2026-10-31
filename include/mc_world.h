@@ -4,6 +4,7 @@
 #include "block_entity_store.h"
 #include "mc_chunk.h"
 #include "mc_world_storage.h"
+#include "mc_save_pipeline.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -74,7 +75,11 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed);
 mc_world_t *mc_world_create_with_workers(const char *world_path, int64_t level_seed, int worker_count);
 mc_world_t *mc_world_create_with_storage(const char *world_path, int64_t level_seed, int worker_count, mc_storage_kind_t storage);
 int mc_world_worker_count(const mc_world_t *w);
+/* Configure once before loading chunks. Only explicit native worlds may batch. */
+int mc_world_configure_saves(mc_world_t *w, mc_save_mode_t mode);
+mc_save_mode_t mc_world_save_mode(const mc_world_t *w);
 void mc_world_destroy(mc_world_t *w);
+int mc_world_destroy_checked(mc_world_t *w);
 
 const char *mc_world_path(const mc_world_t *w);
 const mc_world_ids_t *mc_world_ids(const mc_world_t *w);
@@ -107,6 +112,11 @@ bool mc_world_storage_action_allowed(mc_world_t *w,int32_t x,int32_t y,int32_t z
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id);
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z);
 int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z);
+/* Gameplay persistence request: immediate retains the old durable barrier;
+ * experimental batching accepts a dirty request, not a durable confirmation. */
+int mc_world_request_block_save(mc_world_t *w, int32_t x, int32_t y, int32_t z);
+/* Tick owner, explicit durable barrier, also used before world destruction. */
+int mc_world_flush_saves(mc_world_t *w);
 
 void mc_world_tick(mc_world_t *w, int64_t now_ms);
 void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t *stats);

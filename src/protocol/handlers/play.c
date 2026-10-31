@@ -1608,7 +1608,7 @@ static int recompute_connected_block_at(mc_world_t *world, int32_t x, int32_t y,
     if (out_state_id) *out_state_id = next;
     if (next == current) return 0;
     if (mc_world_set_block(world, x, y, z, next) != 0) return -1;
-    if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+    if (mc_world_request_block_save(world, x, y, z) != 0) return -1;
     return 1;
 }
 
@@ -1810,7 +1810,7 @@ static int save_active_window(mc_conn_t *c) {
     if (type == MC_BLOCK_ENTITY_NONE) return 0;
     if (block_entity_from_container_instance(&entity, type, container) != 0 ||
         mc_world_put_block_entity(world, container->x, container->y, container->z, &entity) != 0 ||
-        mc_world_flush_block(world, container->x, container->y, container->z) != 0) {
+        mc_world_request_block_save(world, container->x, container->y, container->z) != 0) {
         log_error("container save failed kind=%d pos=(%d,%d,%d)", (int)container->kind, container->x, container->y, container->z);
         return -1;
     }
@@ -3499,7 +3499,7 @@ static int break_container_block(mc_conn_t *c, int32_t x, int32_t y, int32_t z, 
         return -1;
     }
     (void)mc_world_remove_block_entity(world, x, y, z);
-    if (mc_world_flush_block(world, x, y, z) != 0) {
+    if (mc_world_request_block_save(world, x, y, z) != 0) {
         if (have_container) mc_container_instance_clear(&container);
         return -1;
     }
@@ -3581,7 +3581,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
         if (mc_world_set_block(world, x, y, z, ids->air) != 0) return -1;
         int64_t break_set_us = break_perf ? mc_now_us() - break_start_us - break_drop_us : 0;
         int64_t phase_start_us = break_perf ? mc_now_us() : 0;
-        if (mc_world_flush_block(world, x, y, z) != 0) return -1;
+        if (mc_world_request_block_save(world, x, y, z) != 0) return -1;
         int64_t break_flush_us = break_perf ? mc_now_us() - phase_start_us : 0;
         phase_start_us = break_perf ? mc_now_us() : 0;
         if (send_block_update_packet(c, x, y, z, ids->air) != 0) return -1;
@@ -3597,7 +3597,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
                     door_base_and_half(other_state, other_base, sizeof(other_base), other_half, sizeof(other_half)) &&
                     strcmp(door_base, other_base) == 0 && strcmp(door_half, other_half) != 0) {
                     if (mc_world_set_block(world, x, other_y, z, ids->air) != 0) return -1;
-                    if (mc_world_flush_block(world, x, other_y, z) != 0) return -1;
+                    if (mc_world_request_block_save(world, x, other_y, z) != 0) return -1;
                     if (send_block_update_packet(c, x, other_y, z, ids->air) != 0) return -1;
                 }
             }
@@ -3645,7 +3645,7 @@ static int try_open_target_container(mc_conn_t *c, int32_t x, int32_t y, int32_t
     int32_t normalized_state = mc_world_normalize_container_state_id(state_id);
     if (normalized_state != state_id) {
         (void)mc_world_set_block(world, x, y, z, normalized_state);
-        (void)mc_world_flush_block(world, x, y, z);
+        (void)mc_world_request_block_save(world, x, y, z);
         (void)resend_authoritative_chunk_at(c, world, x, z);
         if (debug_container_pos_match(x, y, z)) {
             log_info("containers debug: open normalize pos=(%d,%d,%d) old=%d new=%d old_key=%s new_key=%s", x, y, z, state_id,
@@ -5316,7 +5316,7 @@ static bool command_allowed(const mc_conn_t *c, const char *name) {
     if (!c->command_authorized) return false;
     if (!strcmp(name, "qa")) return c->cfg && c->cfg->qa_enabled;
     static const char *admin[] = {"gamemode", "tp", "teleport", "setblock",
-        "difficulty", "difficulte", "food", "health", "vie", "kill"};
+        "difficulty", "difficulte", "food", "health", "vie", "kill", "save-all"};
     for (size_t i = 0; i < sizeof(admin)/sizeof(admin[0]); i++)
         if (!strcmp(name, admin[i])) return true;
     return false;
@@ -5356,6 +5356,11 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
              allowed ? 1 : 0, logged_command, truncated ? "..." : "");
     if (!allowed)
         return proto_play_send_system_message(c, "Command denied (authorization or QA mode required).");
+
+    if (strcmp(cmd_lower,"save-all")==0) {
+        int rc=mc_world_flush_saves(get_world(c));
+        return proto_play_send_system_message(c,rc==0?"GoatCore: loaded chunks durably saved.":"GoatCore: chunk save FAILED; durability not confirmed.");
+    }
 
     if (strcmp(cmd_lower, "gamemode") == 0) {
         char *mode = strtok_r(NULL, " ", &save);
@@ -5763,7 +5768,7 @@ static int handle_command(mc_conn_t *c, char *cmdline) {
             mc_container_instance_clear(&container);
             if (send_block_update_packet(c, x, y, z, chest_state) != 0) return -1;
             int nbt_rc = send_block_entity_data_packet(c, chest_state, x, y, z);
-            (void)mc_world_flush_block(world, x, y, z);
+            (void)mc_world_request_block_save(world, x, y, z);
             int refresh_rc = resend_authoritative_chunk_at(c, world, x, z);
             char msg[128];
             snprintf(msg, sizeof(msg), "QA chest pos=%d %d %d placed=1 nbt=%d refreshed=%d slot0=stonex8",
@@ -7800,8 +7805,8 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                             placed_block = true;
                             authoritative_state_id = normalized_state_id;
                             network_state_id = normalized_state_id;
-                            if (mc_world_flush_block(world, px, py, pz) != 0) return -1;
-                            if (mc_world_flush_block(world, px, py + 1, pz) != 0) return -1;
+                            if (mc_world_request_block_save(world, px, py, pz) != 0) return -1;
+                            if (mc_world_request_block_save(world, px, py + 1, pz) != 0) return -1;
                             if (send_block_update_packet(c, px, py, pz, normalized_state_id) != 0) return -1;
                             if (send_block_update_packet(c, px, py + 1, pz, upper_state) != 0) return -1;
                             if (has_sequence && queue_block_changed_ack_packet(c, seq) != 0) return -1;
@@ -7849,7 +7854,7 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                             mc_container_instance_clear(&fresh_container);
                         }
                         if (send_block_entity_data_packet(c, authoritative_state_id, px, py, pz) != 0) return -1;
-                        if (mc_world_flush_block(world, px, py, pz) != 0) return -1;
+                        if (mc_world_request_block_save(world, px, py, pz) != 0) return -1;
                         if (resend_authoritative_chunk_at(c, world, px, pz) != 0) return -1;
                         if (debug_container_pos_match(px, py, pz)) {
                             log_info("containers debug: place pos=(%d,%d,%d) mapped=%d requested=%d normalized=%d authoritative=%d network=%d requested_key=%s normalized_key=%s authoritative_key=%s",

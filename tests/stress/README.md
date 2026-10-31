@@ -700,3 +700,82 @@ traces et journaux volumineux restent dans `results/storage-s3b/`, ignoré par
 Git. Protochunks, types BE non couverts, ticks actifs et `.mcc` restent protégés
 ou refusés. Aucune simulation de BE, migration ou activation S2 ; `.bin` reste
 le défaut. Voir le rapport S3B pour les garanties et les limites exactes.
+
+## S4 — Sauvegardes groupées et asynchrones expérimentales
+
+Le défaut reste `.bin` avec `anvil-save-mode=immediate`. Pour une **copie jetable**
+Anvil uniquement, configurer `chunk-storage=anvil-atomic-experimental` et
+`anvil-save-mode=batched` ou `async`. Le second mode crée un seul worker I/O,
+sans simulation parallèle. S2 reste séparé. Aucun format n'est migré.
+
+`run_block_checks.py --anvil-save-mode async` réutilise les suites existantes de
+placement, escaliers, ramassage et conservation complexe. Toujours préciser le
+binaire, un port temporaire libre, un nouveau répertoire de résultats et, pour
+les données officielles, `--world-template` sur une fixture immuable. Le runner
+travaille sur une copie et vérifie les états après ses redémarrages.
+
+La comparaison à travail fixé s'exécute ainsi, avec des binaires figés et des
+répertoires de résultats neufs :
+
+```sh
+cc -std=c11 -shared -fPIC -O2 -o /resultats/profile_fsync.so \
+  tests/stress/profile_fsync.c -ldl -pthread
+python3 tests/stress/profile_tick.py \
+  --binary bin=/binaires/S4/mc_server \
+  --binary s3b=/binaires/S3B/mc_server \
+  --binary batched=/binaires/S4/mc_server \
+  --binary async=/binaires/S4/mc_server \
+  --storage-backend s3b=anvil-atomic-experimental \
+  --storage-backend batched=anvil-atomic-experimental \
+  --storage-backend async=anvil-atomic-experimental \
+  --save-mode batched=batched --save-mode async=async \
+  --bots 1 10 25 50 --repetitions 3 --cycles 100 --warmup 3 --idle 3 \
+  --save-trace --fsync-probe /resultats/profile_fsync.so \
+  --result-dir /resultats/S4-nouveau
+```
+
+Le client attend l'état alterné ET le BlockChangedAck de sa séquence, sans
+confondre cet ACK avec une sauvegarde. Les templates `.bin`/Anvil ont les mêmes
+blocs vérifiés. Préparation, échauffement, charge active entière, repos et arrêt
+restent séparés. Après la charge, une pose supplémentaire par bot laisse un
+état final non vide à vérifier ; elle est comptée séparément. La sauvegarde
+finale et le drainage font partie des mesures de processus et de disque.
+Chaque essai relit les blocs sur disque puis démarre une copie du résultat,
+avec le même binaire/backend, pour vérifier les états par le protocole. Ce
+redémarrage de vérification est chronométré séparément.
+
+Les traces conservent tous les ticks, y compris les passes rapides entre ticks.
+Le résumé expose les intervalles de frontière qui débordent la phase active :
+ne pas présenter leur coût agrégé comme une découpe temporelle exacte. La sonde
+préchargée est réservée aux tests et conserve les retours d'erreur de fsync.
+Elle collecte aussi CPU/IO finaux avant la disparition de `/proc/PID`. Le pic
+RSS publié est le maximum **observé** parmi les échantillons et VmHWM final ;
+ce n'est pas une garantie d'échantillonnage de chaque pic d'allocation.
+
+`profile_save_batches.py` compare séparément le stockage, sans serveur :
+
+```sh
+python3 tests/stress/profile_save_batches.py \
+  --probe /binaires/S4/mc_native_bench \
+  --baseline-probe /binaires/S3B/mc_native_bench \
+  --fixture-world /fixtures/officiel-7BE/world \
+  --dense-world /fixtures/officiel-160BE/world \
+  --opaque-world /fixtures/synthetique-opaque/world \
+  --fsync-probe /resultats/profile_fsync.so --repetitions 3 \
+  --result-dir /resultats/S4-micro-nouveau
+```
+
+Le probe S3B se construit avec le même outil et `MC_NATIVE_BENCH_BASELINE`, lié
+aux sources S3B. Les cas 256/1024 chunks ont 100 mutations ; un batch serveur
+contient au plus 64 snapshots, donc 100 chunks distincts nécessitent deux
+publications. Les versions intermédiaires durablement publiées diffèrent
+volontairement selon la politique : seuls le travail logique et l'état final
+sont communs. Les fichiers non concernés, les données opaques et tous les blocs
+finaux sont comparés. Ne pas annoncer de P99 statistiquement robuste à partir
+de trois durées globales ; les latences individuelles restent dans les traces.
+
+Arrêter les autres tests/compilations pendant les chronométrages. Conserver les
+JSON/CSV, configurations, empreintes, erreurs et essais incomplets. Les mesures
+locales autorisées pendant la maintenance ne représentent pas le Xeon/HDD RAID.
+Avant tout déploiement, rejouer cette procédure sur des instances distantes
+isolées, sans toucher aux services principaux ni aux mondes existants.

@@ -56,6 +56,18 @@ int mc_anvil_write_chunk_nbt(const char *region_path, int local_x, int local_z, 
  * expected==NULL requires an absent slot; mismatches return ESTALE unchanged. */
 int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
                                       const uint8_t *expected, size_t expected_length);
+typedef struct {
+    unsigned slot;
+    const uint8_t *nbt;
+    size_t length;
+    const uint8_t *expected;
+    size_t expected_length;
+} mc_anvil_chunk_write_t;
+/* One region, unique slots, immutable input, <=64 MiB total NBT. All expected
+ * sources are checked under the publication lock before writing. One durable
+ * atomic replacement commits every entry, or none before rename; -2 describes
+ * an all-entry visible replacement whose durability is uncertain. */
+int mc_anvil_write_batch_expected(const char *path, const mc_anvil_chunk_write_t *writes, size_t count);
 bool mc_native_state_sensitive(uint32_t state);
 
 /* Strict 4788/padded native path, preserving source NBT outside block edits.

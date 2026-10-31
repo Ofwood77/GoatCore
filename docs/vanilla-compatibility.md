@@ -3871,3 +3871,753 @@ L'adoption de nouveaux types de BEs exige un corpus officiel et des tests de
 relations aux blocs/entités/ticks ; les protochunks et `.mcc` nécessitent des
 travaux distincts. Rejouer l'intégration, les interruptions et les performances
 sur Xeon/HDD RAID avant toute activation hors copies jetables.
+
+## S4 — Snapshots, sauvegardes groupées et I/O asynchrones (31 octobre 2026)
+
+### Point de départ et périmètre
+
+HEAD initial vérifié : `c2b8824acff47001cd052bda5e1bd963538ba169` (S3B),
+arbre suivi propre. `.vscode/`, `src/main.py` et `start-aider.sh` personnels
+restent hors du commit. S1/S2/S3A/S3B sont réutilisés. Cette intervention ne
+modifie ni le protocole 775, ni les règles des blocs/Survival, ni le scheduler
+de simulation. Aucun `simulation_workers`, aucune migration, aucun accès SSH
+ou déploiement. Les tests utilisent l'exception locale pendant la maintenance.
+
+Avant S4, `mc_world_flush_block` était une barrière synchrone dans chaque
+handler de casse, également utilisée pour les conteneurs et blocs multiparties.
+Les poses ordinaires marquaient le chunk dirty ; `mc_world_tick_profiled`
+sauvegardait au plus un chunk par passe, puis l'arrêt sauvait les autres un par
+un. Chaque sauvegarde native sérialisait le NBT et reconstruisait toute la
+région, même si la précédente sauvegarde venait de publier un autre chunk de
+la même région. Les workers de chargement possédaient leurs chunks privés ;
+les chunks READY et mutations appartenaient au tick.
+
+Le profil P0 (`tests/stress/results/storage-s4/p0-baseline/`) reprend le binaire
+S3B immuable et le scénario historique de 100 cycles par bot. Une répétition
+1/10/25/50, aucune action manquante selon ses confirmations d'état :
+
+| Bots | Poses / casses | TPS observés | MSPT P99 (ms) | Reconstructions actives | Octets logiques écrits |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 100 / 100 | 19,993 | 4,723 | 149 | 70 184 960 |
+| 10 | 1 000 / 1 000 | 20,059 | 8,901 | 1 170 | 556 773 376 |
+| 25 | 2 500 / 2 500 | 19,992 | 40,922 | 2 653 | 1 260 883 968 |
+| 50 | 5 000 / 5 000 | 5,543 | 230,999 | 5 139 | 2 447 699 968 |
+
+À 50 bots, `region_total` représente 10,101 s murales / 2,855 s CPU ;
+`atomic_file_sync` 4,726 s murales, et les flush des handlers 13,268 s. Ces
+spans sont imbriqués et ne s'additionnent pas. `native_chunk_total` et les
+coordonnées des traces permettent d'identifier les reconstructions répétées
+par région. Sérialisation, copie, barrières et réseau contribuent ; le disque
+n'explique pas seul la durée totale. Ce P0 utilise les confirmations d'état
+historiques. La campagne finale renforce le client avec les ACK de séquence ;
+les gains sont calculés entre versions de cette même campagne finale, pas en
+mélangeant leurs méthodes avec P0 ou avec les anciens chiffres Xeon.
+
+### Architecture et activation explicite
+
+Le backend et la politique de sauvegarde sont distincts :
+
+```ini
+chunk-storage=bin
+anvil-save-mode=immediate
+```
+
+C'est le défaut. Le chemin `.bin`, son packing, sa lecture 4785 et ses barrières
+antérieures restent utilisés ; la nouvelle fonction de demande appelle la
+barrière historique dans ce mode. Pour une copie Anvil jetable seulement :
+
+```ini
+chunk-storage=anvil-atomic-experimental
+anvil-save-mode=batched
+# ou explicitement : anvil-save-mode=async
+```
+
+`immediate` reste le comportement natif S3B. `batched` capture et écrit sur le
+tick ; `async` capture sur le tick et confie les écritures à **un** worker I/O.
+Une politique autre que immediate avec `.bin`, une valeur inconnue ou une
+reconfiguration après le début du chargement est refusée. Le marqueur durable
+de backend du monde reste inchangé ; aucune bascule ou récupération S2 cachée.
+Revenir à immediate exige un redémarrage explicitement configuré, pas une
+migration des régions. Le backend S2 n'est toujours pas lié à `mc_server`.
+
+Le pipeline est : action validée → mutation/dirty → demande de persistance →
+copie indépendante → regroupement par région → encodage NBT → remplacement
+atomique → complétion → acquittement des générations sur le tick.
+`play.c` ne contient aucun ordonnanceur : ses appels de persistance passent
+par `mc_world_request_block_save`. `mc_world_flush_block` conserve son sens de
+barrière, et `mc_world_flush_saves` fournit une barrière de monde chargé. Le
+handler administrateur `save-all` appelle cette dernière et distingue succès
+durable et échec. Une confirmation de bloc du protocole n'est jamais une
+confirmation de sauvegarde disque.
+
+`mc_save_pipeline` regroupe les copies, trie les coordonnées signées de région
+et les slots, puis appelle `mc_storage_write_region`. Chaque région est une
+transaction indépendante ; il n'y a pas de transaction globale entre régions.
+Les contrôles de source de **tous** ses chunks précèdent la publication. Une
+source périmée fait échouer tout le groupe de cette région, sans publication
+partielle des autres entrées du groupe. Les autres régions d'un batch ont leurs
+propres résultats. Le writer générique sert aussi le chemin singleton natif et
+les outils atomiques existants.
+
+### Propriété mémoire et générations
+
+`mc_chunk_save_snapshot` produit une copie indépendante des palettes, mots
+compactés, NBT source et bitmap de protection. Elle n'emprunte aucun buffer de
+chunk vivant, cache réseau, store d'inventaires ou liste du monde. Le NBT source
+inclut les biomes, données de génération et sous-arbres opaques préservés en
+S3B ; aucun nouveau modèle incomplet de block entities n'est introduit.
+La copie est publiée une fois, devient privée au writer, puis revient comme
+complétion au tick. Celui-ci transfère son nouveau NBT source visible au chunk
+vivant et détruit la copie une seule fois. Les block states vivants ne sont
+jamais remplacés par ceux d'une complétion ancienne.
+
+Les champs runtime `save_generation`, `durable_generation`,
+`inflight_generation` et `save_pending` distinguent état courant, confirmation
+et capture en cours. Les générations ne sont pas des tags Vanilla. Au chargement
+natif, une nouvelle époque commence à zéro : les appels aux setters employés
+pour décoder les palettes ne comptent pas comme mutations de gameplay. Cette
+initialisation n'acquitte aucune opération disque incertaine d'un autre
+processus. Un test ajouté pendant l'audit a révélé ce décalage de compteur ;
+il est corrigé et rejoué avec le candidat final.
+
+Une mutation après la capture G avance la génération courante ; la confirmation
+G conserve alors dirty. Seul un résultat **0** fait avancer la génération
+durable. Une erreur la laisse inchangée. Un résultat **-2** transfère le NBT
+nouvellement visible pour permettre un retry sûr, mais ne nettoie pas dirty.
+Une complétion sans propriétaire/génération correspondante est refusée ; un
+flush sans progrès possible échoue au lieu de boucler. Le débordement d'une
+génération ou révision est refusé avant de modifier un bloc.
+
+Les sources attendues sont comparées sous le verrou de publication Anvil ;
+l'exclusivité du monde, la file unique et l'interdiction de décharger un chunk
+pending empêchent les publications hors ordre du pipeline. Le CAS de NBT brut
+n'est pas présenté comme un numéro de génération global persistant ou une
+protection ABA générale pour des appelants indépendants hors de ce protocole.
+Les workers de chargement continuent de produire des chunks privés. Le chemin
+existant de normalisation privée conserve ses verrous de région ; il ne reçoit
+pas de chunk READY du tick.
+
+### Bornes, saturation et erreurs
+
+Un batch contient au plus **64 snapshots** et **64 Mio de copies**. Une seule
+place existe dans la file asynchrone, y compris pour le travail en cours ou
+terminé en attente de complétion. Si elle est occupée, aucune nouvelle copie
+n'est allouée : les mutations restent dans l'état dirty du monde et coalescent
+avant une capture ultérieure. Les limites portent sur la file et ses copies,
+pas sur la mémoire totale du serveur, du parseur NBT ou du client Python.
+Le worker a également besoin de buffers d'encodage/compression et des métadonnées
+de région. Un snapshot trop grand ou un groupe dépassant la limite de NBT est
+refusé explicitement ; le mode immediate reste disponible par choix explicite.
+
+La politique groupée programme un flush à la passe monde suivante, sans timer
+supplémentaire : normalement un tick de regroupement. L'attente réelle peut
+croître si le tick ou le disque est lent. L'asynchrone n'offre pas une borne
+de latence murale en cas de blocage du stockage. Les traces enregistrent
+snapshots, octets en file, soumissions, complétions et backpressure. Les chunks
+dirty/pending sont retenus lors des évictions ; leurs modifications récentes
+ne disparaissent pas à l'acquittement d'une copie précédente.
+
+Une erreur du writer est mémorisée, bloque les nouvelles mutations natives et
+arrête les retries automatiques par tick. Les données dirty restent présentes
+tant que le monde est ouvert ; un arrêt qui échoue signale les données non
+sauvegardées, puis termine avec un statut d'erreur.
+Une barrière explicite ou l'arrêt tente une reprise contrôlée après drainage,
+puis signale l'échec s'il persiste. Aucun rollback destructif, fallback `.bin`,
+regénération après une erreur de lecture ou suppression de `.mcc`. Les tests
+simulent notamment ENOMEM, compression impossible, EIO, ENOSPC, EDQUOT, EINTR,
+écritures courtes, erreurs de synchronisation/rename et sources périmées.
+
+L'arrêt normal rejoint les loaders, intègre leurs derniers résultats, capture
+les derniers états dirty, draine les sauvegardes et joint le worker avant de
+libérer les chunks ou fermer le stockage. `mc_world_destroy_checked` et
+`net_server_destroy_checked` remontent un échec jusqu'au code de sortie du
+serveur. Les wrappers historiques void restent disponibles pour les appelants
+existants ; ils ne masquent pas les diagnostics. Un échec de join conserve les
+ressources que le worker pourrait encore utiliser, plutôt que de créer un UAF.
+
+### Points de durabilité et interruptions
+
+Chaque publication conserve : temporaire unique dans le même répertoire,
+écritures vérifiées, fsync du fichier, rename atomique et fsync du parent.
+Le fichier existant n'est jamais tronqué. Le regroupement économise les
+**publications entières**, pas les barrières nécessaires d'une publication.
+Les tables Anvil, timestamps, limites de secteurs et codecs restent Vanilla.
+Les autres records, dont ceux des protochunks, sont recopiés sans interprétation.
+Les régions externes/non prises en charge restent refusées conformément à S3B.
+
+En mode expérimental groupé/asynchrone, une demande et un ACK réseau peuvent
+précéder le flush durable. SIGKILL peut perdre ces changements encore en mémoire,
+qui ne sont jamais annoncés durables. Les inventaires joueurs conservent leur
+politique distincte : **aucune transaction globale chunks/inventaires/items**
+n'est ajoutée. Une interruption dans cette fenêtre peut laisser ces sous-systèmes
+décalés, y compris un risque de duplication/perte croisée. Ce lot ne démontre
+pas l'exactly-once inter-fichiers après crash. Le mode immediate conserve les
+points de synchronisation précédents ; les nouveaux modes restent réservés aux
+copies jetables explicitement configurées.
+
+Les tests d'interruption sont des SIGKILL contrôlés et injections système,
+**pas des coupures électriques**. Avant rename, l'ancienne région reste intacte.
+Après rename, le lecteur trouve une région cohérente ; avant le fsync du parent,
+sa durabilité reste incertaine. Après succès des deux barrières, la nouvelle
+version est acquittable dans les limites du FS et du matériel. Les temporaires
+orphelins ne sont jamais promus automatiquement. Aucune récupération S2 n'est
+nécessaire pour ces remplacements atomiques, et aucun journal ambigu n'est effacé.
+
+### Validation fonctionnelle S4 sur le binaire final
+
+Le binaire optimisé figé est
+`tests/stress/results/storage-s4/release-bin/mc_server`, SHA-256
+`51e05f50a2dc94edff99f472eeb2c960a42610a019966a751dc530cd8af46834`.
+`release-production-sources.json` conserve les empreintes des sources de
+production associées. Les binaires pilote précédents sont distincts et leurs
+mesures ne constituent pas la campagne finale. La référence S3B est le commit
+`c2b8824acff47001cd052bda5e1bd963538ba169`, binaire SHA-256
+`f041766a37cefdd06e0fee34bfdfdba02e73065bc03fb1ec2e84cf9401b54099`.
+
+Les 22 scénarios de `release_gameplay.py` passent, chacun avec trois
+redémarrages propres. Les rapports/logs sont sous `results/storage-s4/release-*`.
+
+| Mode/scénario | Observations réellement vérifiées | Résultat |
+|---|---|---|
+| `.bin` immediate | 18 cas de placement, orientations, dalles/fusion, refus, inventaire, deux observateurs, reconnexion ; test shulker historique | Réussi |
+| Anvil immediate/batched/async | Les mêmes 18 cas ordinaires, plus quatre états aux frontières de régions et coordonnées négatives | Réussi pour chaque mode |
+| Escaliers, quatre modes | 192 observations par scénario, formes/voisinage, état autoritaire et relecture | Réussi, référence Vanilla historique conservée |
+| Ramassage, quatre modes | 100 objets, inventaire conservé après redémarrage | Réussi ; pas une transaction globale résistante au crash |
+| Chunks officiels complexes, trois modes | Sept BE : coffre, four froid, panneau, bannière, shulker, tonneau, pot ; modification ordinaire éloignée | Données/inventaires/types NBT préservés |
+| NBT opaque synthétique, async | Champs inconnus imbriqués, types et valeurs ; protection des positions BE | Conservés exactement par GoatCore |
+| Serveur ASan/UBSan | `.bin` placement, async escaliers et chunk complexe | Réussi avec redémarrages |
+
+Les suites de frontières et de placement ordinaire sont lancées séparément :
+le mode frontières du runner retourne après ses quatre cas et ne couvre pas
+implicitement les 18 cas ordinaires. La distance de vue du test de ramassage
+reste 10, nécessaire à sa fixture ; une première tentative à 2 n'était pas une
+validation et a été remplacée par la campagne correcte.
+
+Les 483 fichiers `.bin` du scénario historique ont aussi été comparés aux
+sorties S3B : identité octet par octet (`release-bin-equivalence.json`). Aucun
+changement de format ni activation du pipeline natif dans ce mode.
+
+### Relecture par le serveur officiel et conservation S3B
+
+Le JAR serveur officiel interne 26.1.1 utilisé est SHA-256
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Onze scénarios Vanilla passent, chacun ouvert deux fois : trois chunks complexes
+selon les politiques immediate/batched/async, une sortie opaque et son témoin
+Vanilla sans mutation, puis les six mondes neufs batched/async de placement,
+frontières et escaliers. Les mondes neufs de ce dernier groupe utilisent une
+composition **jetable** de métadonnées globales officielles et régions GoatCore ;
+les entités et POI sans rapport sont retirés de cette copie de test. Il ne
+s'agit ni d'une migration, ni d'une preuve de compatibilité globale des mondes.
+
+Les comparaisons indépendantes ne se limitent pas à l'ouverture du serveur :
+
+- 310 chunks neufs sont comparés sur l'intégralité de leurs 98 304 block states
+  après réouverture Vanilla : 35 escaliers + 85 frontières + 35 placement,
+  pour chacun des deux modes groupés. Aucun état différent.
+- Les trois chunks officiels complexes modifiés sont également comparés sur
+  tous leurs blocs ; les sept BE gardent leurs types/valeurs/inventaires après
+  sauvegarde GoatCore et réouverture Vanilla.
+- Les corpus sources contiennent respectivement 1 328 et 1 348 chunks. Chez
+  GoatCore, seul le chunk ciblé change ; les NBT bruts des autres chunks et les
+  fichiers globaux/entités/POI restent identiques. Les preuves nomment les
+  fichiers et les empreintes, sans prétendre que Vanilla ne les réécrit jamais.
+- Les champs opaques synthétiques sont conservés exactement par GoatCore.
+  Vanilla peut normaliser ou retirer des champs non enregistrés ; la comparaison
+  après Vanilla utilise donc un témoin soumis à la même réouverture, pas une
+  promesse de conservation arbitraire par Vanilla.
+
+`release_compare.py`, `release-comparisons.log` et les
+`release-proof-*.json` gardent les assertions et preuves. Le corpus S3B reste
+identifié comme 12 régions officielles/4 003 chunks catalogués ; cela ne signifie
+pas que ces 4 003 chunks ont tous été modifiés dans ce lot.
+
+Les quatre cas du corpus de refus rejouent 18 opérations dangereuses, toutes
+refusées : BE malformée/inconnue, positions incohérentes, voisinages protégés,
+four actif, ticks, protochunk, NBT/codec invalide, externe manquant ou présent.
+Les empreintes des originaux et `.mcc` sont inchangées ; aucun fallback `.bin`.
+Les fixtures synthétiques restent distinctes des données générées officiellement.
+La matrice de propriété et de refus S3B reste applicable : conservation opaque
+ne signifie pas simulation des coffres, fours ou autres block entities.
+
+### Tests de générations, erreurs et interruptions
+
+`test_save_pipeline` étend les suites C existantes sans nouveau framework.
+Il vérifie palettes et mots copiés, NBT source/guards indépendants, absence de
+cache réseau partagé, budget/count/overflow, refus des doublons et sources
+périmées. L'encodage du snapshot A est identique avant et après sa sauvegarde
+pendant que l'état live B change. L'enveloppe privée de persistance peut recevoir
+le nouveau NBT source ; les blocs capturés restent immuables.
+
+Le test bloque réellement le writer dans fsync : le tick continue, modifie B,
+conserve le dirty après l'ACK A, diffère l'éviction et recharge finalement B.
+Une variante ajoute une mutation C pendant l'écriture B et une erreur du fsync
+parent : le résultat -2 ne change pas la génération durable, B reste lisible,
+et le retry publie C. Le shutdown draine aussi une tâche acceptée. Allocation,
+compression, saturation et erreur persistante conduisent à un échec explicite,
+sans boucle infinie ni abandon silencieux des snapshots.
+
+| Checkpoint SIGKILL async (trois chunks d'une région) | Relecture répétée après arrêt |
+|---|---|
+| Avant capture | Ancien état complet |
+| Temporaire écrit, avant fsync fichier | Ancien état complet |
+| Fichier synchronisé, avant rename | Ancien état complet |
+| Après rename, avant fsync parent | Snapshot A complet visible, durabilité non garantie |
+| Après fsync parent, avant ACK tick | Snapshot A complet |
+| A durable puis mutation B uniquement en mémoire | A complet ; B n'est jamais annoncé durable |
+
+Chaque cas est relu deux fois, sans mélange entre chunks. Les processus de test
+utilisent fork puis exec et des répertoires marqués jetables. Le test atomique
+existant est étendu à deux chunks publiés ensemble et un troisième record opaque
+inchangé : écritures courtes/nulles, EINTR/EIO/ENOSPC/EDQUOT, erreurs de lecture,
+fsync/rename/close/lock et six points d'interruption. Les tests de génération,
+capture, regroupement, arrêt et éviction sont complémentaires ; tous les
+18 instants conceptuels de P6 ne disposent pas d'un SIGKILL distinct.
+
+Une anomalie de comptabilité a été détectée pendant S4 : les setters employés
+au décodage incrémentaient les générations comme des mutations gameplay.
+Un chargement natif réussi commence maintenant une nouvelle époque runtime à
+zéro ; un test le vérifie. Ce zéro n'acquitte aucune opération incertaine d'un
+processus précédent. Les données Vanilla et le format disque restent inchangés.
+
+### Méthode de mesure finale S4
+
+Machine locale autorisée pendant maintenance : Ryzen 7 7840HS, 16 CPU logiques,
+Linux 7.0.0-38/glibc 2.43, ext4 sur NVMe. Compilation C11 `-O2` identique pour
+les binaires normaux. Un worker réseau, deux loaders de chunks, tick 20 Hz,
+distances de vue/simulation 10 ; un seul worker de sauvegarde supplémentaire
+dans le mode async. Aucun autre test, serveur de référence ou compilation
+concurrent pendant les mesures. Les autres processus de l'utilisateur sont
+laissés en place et capturés dans `processes-before.txt` pour chaque essai.
+Il ne s'agit pas d'une machine isolée de laboratoire ni du Xeon/HDD distant.
+
+La campagne finale emploie le même client renforcé dans les quatre modes :
+`.bin` S4, Anvil S3B, S4 batched et S4 async. À chaque charge, trois répétitions
+alternent l'ordre des versions. Chaque bot effectue 100 poses/casses à sa
+position privée, attend l'état correspondant **et l'ACK de sa séquence** avant
+de poursuivre. Les templates `.bin` et Anvil sont indépendants mais leurs blocs
+complets sont comparés avant la charge. Les comptes proposé/reçu/traité/confirmé
+sont contrôlés avec les traces client, enqueue et handlers serveur.
+
+La période active entière est conservée ; aucune fenêtre privilégiée de
+100 ticks. Les TPS sont le nombre réel de débuts de ticks divisé par la durée
+active, sans déduire 20 TPS d'une simple moyenne MSPT. Les ticks qui croisent
+les bornes restent inclus dans les distributions. Les passes rapides entre
+ticks ont leur résumé séparé ; leurs agrégats de frontière peuvent contenir du
+travail adjacent à la période, ce qui est explicitement compté. Les tableaux
+de percentiles indiquent la médiane des percentiles des trois essais, pas un
+percentile artificiel de leurs trois moyennes.
+
+Préparation, échauffement de 3 s, repos de 3 s avant/après charge, queue,
+validation finale et arrêt sont séparés. Une pose de pierre supplémentaire
+par bot après la charge laisse un résultat positif à vérifier et est comptée
+hors des 100 cycles. Chaque essai doit s'arrêter avec succès, relire ces blocs
+depuis le NBT, puis redémarrer **une copie** avec le même binaire/backend et les
+requêter par le protocole. La durée de ce redémarrage de contrôle est séparée
+de la durée du processus mesuré. Le coût différé jusqu'à l'arrêt et le volume
+total écrit ne sont jamais retirés du bilan.
+
+`region_total.bytes` mesure les octets logiquement écrits dans les temporaires
+de région, copies/header/records compris ; ce n'est pas une mesure physique du
+NVMe. La valeur est sans objet pour `.bin`, qui n'écrit pas de région active.
+Les compteurs finaux `/proc/self/io` comprennent aussi fichiers joueurs, logs,
+traces, préparation et arrêt. Les deux mesures sont conservées, sans les rendre
+interchangeables. Les fsync observés incluent les sauvegardes joueurs distinctes.
+Les spans d'encodage, région et flush étant imbriqués, ils ne s'additionnent pas.
+Le temps mural moins CPU indique de l'attente/ordonnancement, sans l'attribuer
+entièrement au disque. Le pic mémoire est un maximum **observé** des samples et
+du VmHWM final ; il n'est pas une preuve d'absence de tout pic bref.
+
+Une première campagne complète a été interrompue par une erreur du collecteur
+`/proc` : un processus terminé/zombie n'expose plus toujours `VmRSS`. Aucun
+échec serveur n'en découle ; ces essais incomplets restent conservés à part.
+Le collecteur distingue maintenant ce cas, sauvegarde ses samples même sur
+erreur et possède un test de régression créant un vrai processus zombie.
+Les neuf tests Python passent. Les données finales proviennent exclusivement
+de `final-bots-complete`, sans fusion avec ces essais ni avec les pilotes P0/P8.
+
+### Résultats finaux de non-régression et sanitizers
+
+La dernière exécution `make -B precommit-check` sur export propre réussit :
+**28 suites C**, démarrage isolé, multi-epoll/login, générateurs et Python
+(3 tests générateurs, 12 stress, 9 profilage). `final-gate.log` conserve la
+sortie complète. Les erreurs EIO/ENOMEM et l'arrêt en échec volontaire présents
+dans ce log sont les assertions attendues des tests de panne, pas un échec du
+gate. La reconstruction finale produit exactement le SHA-256 du binaire figé
+utilisé par les campagnes Minecraft et de performance.
+
+Quinze suites C passent sous **ASan + UBSan**, dont NBT, régions, transactions
+S2 isolées, stockage natif, snapshots, monde, registre, palettes, escaliers,
+inventaires et codec réseau. Sept passent sous **TSan local** : pipeline,
+stockage natif, persistance atomique, index région, transactions S2, cohérence
+monde et configuration de performance. Le test de pipeline final est rejoué
+sous les deux instrumentations après sa dernière extension : environ 8 950
+assertions selon les réveils de condition, dont les six SIGKILL à trois chunks.
+Le serveur complet TSan passe aussi le scénario complexe async avec deux bots
+et deux redémarrages (`release-tsan-async-complex`). Aucun diagnostic sanitizer
+dans ces exécutions. Cela ne prouve pas l'absence de toute race possible et ne
+réhabilite pas le runtime TSan du serveur distant, qui n'a pas été testé ici.
+
+Quatre configurations dangereuses sont refusées avant création du monde ou
+listener : `.bin` avec async/batched, valeur de politique inconnue, async sans
+backend Anvil explicite. Le changement de politique après configuration est
+également refusé par le test C. Les droits/authentifications des services
+principaux n'ont fait l'objet d'aucune intervention.
+
+### Benchmarks gameplay finaux : 48 essais
+
+Tous les essais confirment exactement **100 cycles par bot**, donc respectivement
+100/1 000/2 500/5 000 poses ET autant de destructions. Zéro action manquante,
+échec ou déconnexion inattendue. Les comptes enqueue/handler/ACK sont identiques
+aux propositions. Chaque essai ajoute hors charge une pose de validation par
+bot, vérifie le NBT final et réussit son vrai redémarrage de contrôle.
+Les valeurs suivantes sont les médianes et intervalles des trois répétitions.
+`Max` est le maximum des essais, `>50` leur nombre total de ticks fixes dépassant
+50 ms. Les distributions ne sont pas réduites à une fenêtre de 100 ticks.
+
+| Bots | Mode | TPS médiane [min–max] | MSPT P50/P95/P99 (médianes des essais) | Max ms | >50 ms (somme) |
+|---:|---|---:|---:|---:|---:|
+| 1 | bin | 20.101 [19.925–20.112] | 0.131/2.971/3.360 | 18.637 | 0 |
+| 1 | s3b | 19.976 [19.955–20.052] | 0.091/4.776/11.013 | 35.484 | 0 |
+| 1 | batched | 20.004 [19.803–20.078] | 4.035/4.935/13.434 | 40.665 | 0 |
+| 1 | async | 20.072 [19.989–20.111] | 0.094/0.218/0.377 | 0.517 | 0 |
+| 10 | bin | 20.006 [19.911–20.033] | 4.513/5.794/6.180 | 11.533 | 0 |
+| 10 | s3b | 19.958 [19.936–20.021] | 5.785/7.394/22.413 | 25.079 | 0 |
+| 10 | batched | 19.935 [19.912–20.021] | 14.779/16.704/21.489 | 33.374 | 0 |
+| 10 | async | 19.997 [19.894–20.123] | 3.670/4.529/4.758 | 5.026 | 0 |
+| 25 | bin | 19.962 [19.928–19.970] | 10.090/22.364/27.374 | 34.454 | 0 |
+| 25 | s3b | 19.975 [19.952–19.982] | 24.459/41.264/49.888 | 60.923 | 5 |
+| 25 | batched | 19.952 [19.946–19.955] | 21.113/24.686/25.329 | 33.483 | 0 |
+| 25 | async | 20.004 [19.945–20.020] | 10.167/13.487/18.517 | 19.684 | 0 |
+| 50 | bin | 15.797 [15.544–16.396] | 44.668/80.369/94.396 | 123.338 | 442 |
+| 50 | s3b | 5.172 [4.507–5.530] | 118.822/223.603/260.874 | 307.116 | 460 |
+| 50 | batched | 19.158 [18.644–19.586] | 34.434/65.445/93.276 | 122.169 | 176 |
+| 50 | async | 19.978 [19.868–19.990] | 15.218/37.528/52.741 | 81.272 | 19 |
+
+Le volume et les synchronisations ci-dessous couvrent le processus entier,
+préparation, repos, pose finale et arrêt compris. `0` octet de région pour `.bin`
+signifie absence de fichier Anvil actif ; ses écritures figurent dans
+`write_bytes`. La durée totale inclut le drainage mais pas le redémarrage de
+contrôle indépendant. Les durées actives différentes sont mesurées pour le
+même nombre d'actions, sans réduire silencieusement le travail.
+
+| Bots | Mode | Durée active s [min–max] | Durée totale s [min–max] | Reconstructions (médiane) | fsync total (médiane) | Octets régions (médiane) | write_bytes processus (médiane) |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | bin | 4.873 [4.818–5.323] | 19.537 [19.445–20.009] | 0 | 430 | 0 | 864256 |
+| 1 | s3b | 5.412 [5.336–5.907] | 20.065 [20.034–20.605] | 146 | 406 | 68771840 | 67272704 |
+| 1 | batched | 4.599 [4.595–5.180] | 19.292 [19.257–19.835] | 92 | 298 | 43335680 | 42463232 |
+| 1 | async | 4.783 [4.724–4.803] | 19.443 [19.382–19.467] | 96 | 306 | 45219840 | 44310528 |
+| 10 | bin | 9.534 [9.497–9.593] | 24.390 [24.389–24.488] | 0 | 2808 | 0 | 6995968 |
+| 10 | s3b | 9.340 [8.167–9.932] | 24.231 [23.017–24.796] | 1184 | 2794 | 564387840 | 552275968 |
+| 10 | batched | 7.834 [7.692–7.976] | 22.733 [22.639–22.819] | 617 | 1632 | 291303424 | 285609984 |
+| 10 | async | 6.585 [6.460–6.601] | 21.437 [21.386–21.490] | 516 | 1406 | 243666944 | 239017984 |
+| 25 | bin | 6.473 [6.162–6.560] | 21.660 [21.346–21.792] | 0 | 5736 | 0 | 14729216 |
+| 25 | s3b | 9.712 [9.473–9.959] | 24.953 [24.754–25.153] | 2679 | 5894 | 1273499648 | 1245298688 |
+| 25 | batched | 5.362 [5.213–5.465] | 20.511 [20.390–20.648] | 429 | 1318 | 202600448 | 199536640 |
+| 25 | async | 4.296 [4.262–4.299] | 19.494 [19.464–19.509] | 345 | 1116 | 162861056 | 160628736 |
+| 50 | bin | 21.896 [21.460–23.160] | 37.808 [37.361–39.103] | 0 | 11254 | 0 | 29376512 |
+| 50 | s3b | 36.738 [36.167–37.797] | 52.876 [52.278–53.879] | 5145 | 10934 | 2450186240 | 2395742208 |
+| 50 | batched | 21.393 [21.244–22.688] | 37.382 [37.202–38.662] | 1400 | 3458 | 661102592 | 648744960 |
+| 50 | async | 21.693 [20.973–23.362] | 37.620 [36.886–39.367] | 1309 | 3308 | 619851776 | 608505856 |
+
+À 50 bots, les écritures logiques médianes de régions passent de
+**2 450 186 240 octets** à **661 102 592** en groupé (-73,02 %) et
+**619 851 776** en async (-74,70 %). Les reconstructions passent de 5 145 à
+1 400/1 309. Les coûts ne sont pas laissés en attente à la fin de la mesure :
+les 48 drains et redémarrages sont vérifiés. Ces politiques expérimentales
+publient moins d'états intermédiaires ; elles ne promettent pas la même
+confirmation durable individuelle que les anciennes barrières synchrones.
+
+| Bots | Mode | CPU processus total s [min–max] | RSS observé max Kio | CPU client actif % (médiane) | Latence actions P50/P95/P99 ms (médianes) | Arrêt s [min–max] |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | bin | 2.523 [2.487–2.528] | 26236 | 2.43 | 2.586/41.907/43.543 | 0.064 [0.032–0.064] |
+| 1 | s3b | 2.885 [2.871–2.903] | 31852 | 2.38 | 4.390/42.402/52.110 | 0.114 [0.064–0.114] |
+| 1 | batched | 2.779 [2.766–2.807] | 31988 | 2.57 | 0.296/42.031/43.573 | 0.064 [0.032–0.064] |
+| 1 | async | 2.796 [2.791–2.825] | 32072 | 2.65 | 0.319/41.766/42.271 | 0.064 [0.064–0.064] |
+| 10 | bin | 3.735 [3.718–3.744] | 29616 | 8.69 | 38.274/42.330/44.344 | 0.114 [0.064–0.114] |
+| 10 | s3b | 5.371 [5.292–5.377] | 34800 | 8.94 | 38.042/42.259/45.434 | 0.064 [0.064–0.064] |
+| 10 | batched | 4.400 [4.369–4.469] | 34832 | 11.53 | 27.244/42.173/53.930 | 0.032 [0.032–0.064] |
+| 10 | async | 4.259 [4.195–4.264] | 35104 | 13.51 | 18.765/40.400/42.795 | 0.064 [0.032–0.064] |
+| 25 | bin | 6.445 [6.392–6.576] | 34192 | 53.09 | 16.738/32.115/39.540 | 0.064 [0.064–0.064] |
+| 25 | s3b | 10.194 [10.075–10.277] | 39092 | 41.32 | 33.397/52.531/61.371 | 0.114 [0.064–0.114] |
+| 25 | batched | 6.509 [6.206–6.655] | 39284 | 63.94 | 14.693/25.809/29.041 | 0.064 [0.064–0.064] |
+| 25 | async | 6.292 [6.256–6.569] | 40132 | 77.53 | 6.263/14.111/18.410 | 0.064 [0.064–0.064] |
+| 50 | bin | 26.724 [25.788–29.129] | 42340 | 95.03 | 57.194/109.102/137.374 | 0.114 [0.114–0.114] |
+| 50 | s3b | 46.486 [45.282–46.849] | 46748 | 84.72 | 104.967/301.093/382.697 | 0.114 [0.114–0.114] |
+| 50 | batched | 28.088 [27.707–29.981] | 46344 | 98.74 | 47.610/93.703/117.822 | 0.114 [0.114–0.114] |
+| 50 | async | 28.945 [27.730–30.755] | 45708 | 99.81 | 37.800/93.220/125.098 | 0.114 [0.114–0.164] |
+
+Le temps d'arrêt observé inclut la granularité d'attente du processus Python ;
+ce n'est pas la latence exacte d'un seul fsync. Le span `world_shutdown_save`
+et les barrières individuelles restent disponibles dans les traces. Le délai
+après la dernière action inclut volontairement le repos de 3 s et la pose de
+validation ; il n'est pas entièrement attribué au stockage.
+
+| Bots | Mode | Tick + passes rapides P99 ms (médiane) | Max ms (tous essais) | Snapshots actifs (médiane) | CPU capture ms (médiane) | Queue max/budget observé octets | Backpressure total |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | bin | 11.977 | 22.535 | 0 | 0.000 | 0/0 | 0 |
+| 1 | s3b | 16.505 | 38.040 | 0 | 0.000 | 0/0 | 0 |
+| 1 | batched | 13.548 | 40.816 | 90 | 0.612 | 1/17480 | 0 |
+| 1 | async | 0.477 | 0.684 | 95 | 0.594 | 1/17480 | 0 |
+| 10 | bin | 25.472 | 30.818 | 0 | 0.000 | 0/0 | 0 |
+| 10 | s3b | 38.372 | 44.591 | 0 | 0.000 | 0/0 | 0 |
+| 10 | batched | 22.097 | 34.534 | 613 | 3.769 | 1/69920 | 0 |
+| 10 | async | 6.070 | 6.466 | 512 | 3.028 | 1/69920 | 0 |
+| 25 | bin | 66.996 | 77.752 | 0 | 0.000 | 0/0 | 0 |
+| 25 | s3b | 87.611 | 95.793 | 0 | 0.000 | 0/0 | 0 |
+| 25 | batched | 34.237 | 39.313 | 425 | 2.408 | 1/69920 | 0 |
+| 25 | async | 26.581 | 29.207 | 341 | 1.816 | 1/69920 | 0 |
+| 50 | bin | 141.396 | 162.114 | 0 | 0.000 | 0/0 | 0 |
+| 50 | s3b | 360.312 | 399.072 | 0 | 0.000 | 0/0 | 0 |
+| 50 | batched | 106.272 | 148.856 | 1396 | 7.865 | 1/69920 | 0 |
+| 50 | async | 86.009 | 146.747 | 1304 | 6.983 | 1/69920 | 29 |
+
+La colonne tick + passes rapides est un agrégat par intervalle entre ticks,
+avec ses frontières exposées, pas la durée exacte de chaque invocation rapide.
+Le `1` de la colonne queue en mode batched désigne un lot synchrone ; il n'y a
+pas de thread I/O dans ce mode. En async, les traces confirment une seule place,
+69 920 octets au plus observés et 29 passages de backpressure sur les trois
+essais à 50 bots. Le test C force aussi la saturation et une écriture bloquée,
+contrairement à cette petite occupation en charge réelle.
+
+**20 TPS constants ne sont pas démontrés.** À 50 bots, async varie de
+19,868 à 19,990 TPS ; P99 fixe médian 52,741 ms, maximum 81,272 ms et 19 ticks
+fixes >50 ms sur trois essais. L'agrégat fixe + passes rapides atteint
+146,747 ms. Le groupé synchrone améliore les TPS mais conserve des pauses disque
+sur le tick. À faible charge, sa distribution fixe peut être plus coûteuse que
+S3B, qui effectuait aussi des flush dans les passes rapides : comparer les deux
+mesures plutôt qu'ignorer ce déplacement du travail.
+
+### Profil des coûts et limites du générateur
+
+À 50 bots, médianes de temps muraux actifs, en secondes :
+
+| Span | S3B | S4 groupé | S4 async |
+|---|---:|---:|---:|
+| Sauvegardes natives complètes sur le tick, ancien chemin | 15,231 | sans objet | sans objet |
+| Reconstruction/publication `region_total` | 10,702 | 3,356 | 3,445 sur I/O |
+| fsync fichier atomique (y compris autres fichiers) | 4,793 | 1,691 | 1,642 |
+| fsync parent atomique (y compris autres fichiers) | 2,973 | 0,816 | 0,814 |
+| Copie de région | 0,827 | 0,240 | 0,233 |
+| Encodage natif explicite | inclus ancien span | 1,291 | 1,306 sur I/O |
+| Phase sauvegarde du monde sur tick | 0,491 | 4,676 | 0,015 |
+| Phase items sur tick | 13,220 | 8,255 | 6,157 |
+| Handler pose | 6,407 | 4,565 | 6,141 |
+| Handler casse | 15,129 | 0,484 | 0,510 |
+
+Les spans se recouvrent : **ne pas additionner les lignes**. Les anciens
+handlers incluent leurs propres flush ; la phase monde ne les comptait pas.
+Les fsync atomiques comprennent aussi les fichiers joueurs. Les captures
+actives async coûtent environ 6,983 ms CPU cumulées pour la médiane de
+1 304 snapshots à 50 bots. Les attentes de verrou de région sont faibles dans
+ce scénario (environ 24 ms cumulées), sans démontrer qu'elles le seront pour
+tous les mondes. Les threads des publications async sont distincts du thread
+des handlers dans les 12 essais ; aucun writer n'a accès aux chunks vivants.
+
+La cause principale démontrée est la **répétition de publications complètes**,
+puis la sérialisation répétée des générations intermédiaires. Le regroupement
+réduit réellement ces travaux ; async déplace ceux qui restent. Le disque ne
+suffit pas à expliquer toutes les pauses : les items, sauvegardes joueurs,
+validations, buffers et fanout restent sur leurs chemins existants. Le coût du
+handler pose n'isole pas à lui seul chaque fonction réseau.
+
+Le client Python atteint environ **99,81 % d'un CPU** actif en async à 50 bots
+(95,03 % en `.bin`, 84,72 % en S3B). Les attentes enqueue sont des latences de
+plusieurs paquets qui se recouvrent, pas un coût CPU additionnable. Les durées
+actives ne croissent pas monotoniquement entre 10 et 25 bots et les latences
+présentent des paliers proches de 40 ms : l'ordonnancement du client et les
+échanges réseau n'ont pas été isolés de façon causale. Aucune optimisation
+réseau spéculative n'est ajoutée. Les essais Creative historiques génèrent
+aussi des items via leur chemin de casse préexistant ; les ticks et ramassages
+peuvent différer selon le rythme, même avec des actions principales identiques.
+Les microbenchmarks suivants isolent le stockage. Aucune parité Creative
+complète ni capacité maximale de GoatCore n'est déduite de ces charges.
+
+### Microbenchmarks : neuf cas, trois modes, trois répétitions
+
+Les 81 essais comparent le même outil lié à S3B, S4 singleton et S4 groupé.
+Les régions synthétiques sont clairement distinctes des fixtures officielles.
+Le travail est une création dans le cas vide, 100 mutations ailleurs. Le mode
+serial confirme chaque état intermédiaire ; le groupé confirme les derniers
+états seulement. Chaque résultat final est relu ; les blocs sont comparés
+entre variantes et les NBT/chunks non concernés préservés. Ce ne sont pas des
+latences équivalentes de durabilité de chaque état intermédiaire.
+
+| Cas | Mode | Travail | Durée ms médiane [min–max] | CPU ms médiane | Reconstructions | fsync fichier+parent | Octets régions | RSS max Kio |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| empty | S3B-serial | 1 | 10.478 [5.355–11.063] | 2.785 | 1 | 2 | 20480 | 8288 |
+| empty | S4-serial | 1 | 6.346 [4.380–8.653] | 2.894 | 1 | 2 | 20480 | 8280 |
+| empty | S4-grouped | 1 | 5.759 [4.964–5.879] | 2.557 | 1 | 2 | 20480 | 8380 |
+| 256-same | S3B-serial | 100 | 516.720 [492.986–523.198] | 161.040 | 100 | 200 | 106905600 | 11764 |
+| 256-same | S4-serial | 100 | 533.479 [364.116–545.471] | 163.253 | 100 | 200 | 106905600 | 11572 |
+| 256-same | S4-grouped | 100 | 5.927 [5.332–6.770] | 1.925 | 1 | 2 | 1069056 | 9772 |
+| 256-spread | S3B-serial | 100 | 290.769 [289.574–588.007] | 140.616 | 100 | 200 | 106905600 | 11436 |
+| 256-spread | S4-serial | 100 | 584.837 [295.416–640.255] | 176.110 | 100 | 200 | 106905600 | 11836 |
+| 256-spread | S4-grouped | 100 | 67.972 [67.405–75.418] | 60.515 | 2 | 4 | 2539520 | 10556 |
+| 1024-same | S3B-serial | 100 | 637.376 [615.083–702.603] | 358.943 | 100 | 200 | 421478400 | 15572 |
+| 1024-same | S4-serial | 100 | 630.218 [625.169–723.886] | 356.696 | 100 | 200 | 421478400 | 15588 |
+| 1024-same | S4-grouped | 100 | 15.600 [14.592–26.071] | 3.723 | 1 | 2 | 4214784 | 13672 |
+| 1024-spread | S3B-serial | 100 | 640.305 [628.354–651.311] | 357.774 | 100 | 200 | 421478400 | 15376 |
+| 1024-spread | S4-serial | 100 | 638.948 [638.028–643.682] | 353.924 | 100 | 200 | 421478400 | 15360 |
+| 1024-spread | S4-grouped | 100 | 75.400 [72.455–84.480] | 64.836 | 2 | 4 | 8830976 | 14376 |
+| regions | S3B-serial | 100 | 200.641 [197.311–205.359] | 82.104 | 100 | 200 | 2457600 | 10324 |
+| regions | S4-serial | 100 | 197.318 [193.708–202.746] | 81.625 | 100 | 200 | 2457600 | 10464 |
+| regions | S4-grouped | 100 | 5.916 [5.795–6.441] | 2.503 | 3 | 6 | 73728 | 8564 |
+| opaque-be | S3B-serial | 100 | 358.167 [351.743–359.305] | 186.531 | 100 | 200 | 142540800 | 9428 |
+| opaque-be | S4-serial | 100 | 347.320 [345.738–358.665] | 185.477 | 100 | 200 | 142540800 | 9392 |
+| opaque-be | S4-grouped | 100 | 4.290 [4.230–4.869] | 2.587 | 1 | 2 | 1425408 | 9572 |
+| dense-be | S3B-serial | 100 | 374.427 [368.825–377.181] | 205.916 | 100 | 200 | 142131200 | 9544 |
+| dense-be | S4-serial | 100 | 373.812 [368.230–376.004] | 205.467 | 100 | 200 | 142131200 | 9696 |
+| dense-be | S4-grouped | 100 | 4.526 [4.340–4.570] | 2.750 | 1 | 2 | 1421312 | 9872 |
+| opaque-fields | S3B-serial | 100 | 465.381 [456.611–469.817] | 293.067 | 100 | 200 | 156057600 | 11336 |
+| opaque-fields | S4-serial | 100 | 465.209 [463.792–467.648] | 293.837 | 100 | 200 | 156057600 | 11308 |
+| opaque-fields | S4-grouped | 100 | 5.204 [5.168–5.880] | 3.615 | 1 | 2 | 1560576 | 9736 |
+
+Les lectures restent séparées des écritures : pour 256-spread, chargement
+médian 270,293 ms S3B / 278,969 ms S4 groupé ; pour 1024-spread,
+1 435,494 / 1 493,096 ms. Ce lot ne revendique pas d'amélioration de lecture.
+Les traces conservent les latences de chaque publication, CPU, compression,
+encodage, copie et synchronisations ; trois durées globales ne suffisent pas
+à établir un P99 statistiquement robuste d'une campagne complète.
+
+Pour 100 chunks distincts, 106 905 600 octets deviennent 2 539 520 dans la région
+de 256 chunks, et 421 478 400 deviennent 8 830 976 dans celle de 1 024 chunks.
+Le pipeline respecte sa borne de 64 : deux publications/quatre fsync. L'API
+région bas niveau sait aussi publier les 100 chunks en une opération, vérifiée
+par le test C sur 256 et 1 024 emplacements. Pour 100 mutations du même chunk,
+une seule dernière génération suffit : 1 publication/2 fsync au lieu de 100/200.
+
+Le nouveau chemin **singleton n'est pas une optimisation générale**. En
+256-spread, sa médiane 584,837 ms contre 290,769 ms S3B est défavorable, avec
+intervalles [295,416–640,255] et [289,574–588,007] ms. La variance NVMe/hôte
+n'est pas causalement isolée ; les CPU et données brutes sont conservés. Aucun
+gain de ce chemin n'est annoncé ni une seconde optimisation ajoutée pour
+masquer ce résultat. Les modes groupés et les cas 1024 ont leurs propres
+résultats, sans sélection des meilleures répétitions.
+
+Le premier passage complexe du collecteur avait inclus le fsync initial du
+marqueur backend : l'assertion comptait 101 barrières fichier pour 100 régions.
+Le résultat de sauvegarde et sa relecture étaient corrects. Le collecteur
+mesure désormais la fenêtre des publications, avec un test Python dédié.
+Les 54 cas synthétiques valides sont conservés dans `final-micro`, les 27 cas
+complexes refaits dans `final-micro-complex` ; aucune mesure défaillante n'est
+fusionnée. L'analyse finale revalide les compteurs depuis les CSV des 81 essais.
+
+Les sorties groupées à 7 BE, **160 BE** et champs opaques sont chacune rouvertes
+deux fois par Vanilla. Les trois chunks modifiés sont comparés sur tous leurs
+blocs ; les types/valeurs NBT et inventaires sont conservés. Pour les champs
+non enregistrés, le même témoin Vanilla que précédemment est utilisé.
+`final-micro-vanilla-proof.json` conserve les comparaisons indépendantes.
+
+### S2 : évaluation secondaire isolée
+
+S2 n'a subi aucun changement et n'est pas lié au serveur. Le runner existant
+`profile_region_txn.py` compare 18 passes sur régions synthétiques de 256 chunks,
+100 transactions chacune, trois motifs/trois répétitions. Six passes ptrace
+séparées comptent les syscalls ; leurs durées perturbées ne sont pas utilisées
+pour les latences. Les charges/payloads diffèrent de ceux des microbenchmarks
+natifs : ne pas comparer leurs durées directement entre tableaux.
+
+| S2 isolé, 256 chunks | Backend | Durée totale ms médiane [min–max] | CPU ms | Latence P50/P95/P99 ms (médianes) | fsync /100 transactions | Octets write/pwrite tracés |
+|---|---|---:|---:|---:|---:|---:|
+| single | atomic | 233.894 [226.759–236.699] | 64.546 | 2.263/2.573/2.895 | 200 | 107315200 |
+| single | s2 | 436.711 [407.017–452.290] | 81.389 | 4.297/4.956/5.061 | 700 | 3927200 |
+| spread | atomic | 224.494 [221.186–225.040] | 62.142 | 2.211/2.461/2.528 | 200 | 107315200 |
+| spread | s2 | 442.009 [438.723–508.206] | 83.574 | 4.382/4.835/4.896 | 700 | 3927200 |
+| regions | atomic | 235.202 [229.393–243.475] | 69.793 | 2.331/2.743/2.779 | 200 | 107315200 |
+| regions | s2 | 437.131 [435.930–447.663] | 86.956 | 4.322/4.763/5.134 | 700 | 3927200 |
+
+S2 réduit ici le volume tracé d'environ 96,34 %, mais reste environ deux fois
+plus lent et effectue 700 fsync contre 200. Aucune barrière n'est supprimée.
+Neuf interruptions supplémentaires (en-tête partiel ou transaction validée)
+sont récupérées sur leurs inodes originaux, puis récupérées à nouveau : mêmes
+NBT attendus, aucune corruption. Récupération mesurée entre 2,956 et 4,486 ms.
+Les journaux ne sont jamais présentés directement à Vanilla sans récupération.
+Aucune activation gameplay ni modification du protocole transactionnel S2.
+
+### Charge bornée, reconnexion et fichiers de preuve
+
+Le test async de 10 bots ×1 000 cycles confirme **10 000 poses et 10 000 casses**
+en 67,094 s actives : 1 342 ticks, 20,002 TPS observés, MSPT P50/P95/P99
+3,541/4,643/4,999 ms, maximum 5,965 ms et aucun tick fixe >50 ms. RSS maximal
+observé 35 636 Kio ; `write_bytes` total 2 457 403 392 octets. La pose finale,
+le drainage, la relecture NBT et le redémarrage passent. C'est une charge bornée
+d'environ une minute active, **pas un test d'endurance de plusieurs heures** ni
+une preuve générale d'absence de fuite. La réécriture de régions reste coûteuse
+sur une charge soutenue et devra être mesurée sur HDD.
+
+Le test de cycle de vie supplémentaire passe neuf déconnexions brutales
+simultanées avec observation des retraits et reconnexion immédiate, puis dix
+abandons pendant le streaming des chunks et reconnexion. L'instance Anvil
+async s'arrête avec succès. Toutes les instances temporaires sont arrêtées.
+Les copies de mondes/traces utiles sont conservées dans les résultats ignorés,
+jamais intégrées en masse dans Git.
+
+`tests/fixtures/vanilla-26.1.1-s4-validation.json` décrit les empreintes,
+scénarios et résultats finaux. Les résultats bruts sont sous
+`tests/stress/results/storage-s4/` : `final-bots-complete`, `final-derived.json`,
+`final-micro*`, `final-s2`, `final-soak`, `final-lifecycle`, `final-gate.log`,
+`release-proof-*`, rapports Vanilla et sanitizers. Les scripts/probes
+reproductibles sont documentés dans le README de stress. Les essais pilotes
+et erreurs de collecteur restent identifiés séparément.
+
+Fichiers de code : nouvelle couche `mc_save_pipeline.h`/`save_pipeline.c` ;
+interfaces et implémentations chunk, world, world_storage, Anvil ; configuration
+`main.c`, initialisation/arrêt `net/server.c`, appels de persistance et barrière
+administrateur dans `play.c`. Le Makefile lie le module et ajoute sa suite.
+Tests/outils : `test_save_pipeline.c`, `test_atomic_persistence.c`,
+`mc_native_bench.c`, `profile_save_batches.py`, `profile_tick.py`,
+`test_tick_profile.py`, sonde `profile_fsync.c`, option de runner
+`run_block_checks.py`. Documentation : présent rapport, audit de concurrence,
+README et manifeste de validation. Aucun changement de logique des blocs.
+
+### Conditions avant généralisation et prochaine intervention
+
+Les modes groupé/asynchrone restent explicitement expérimentaux. Les limites
+S3B sur ticks, fluides, éclairage dérivé, protochunks, `.mcc`, codecs et BE non
+simulées restent en place. Aucun changement de règle de placement, simulation
+parallèle, worker de région ou mécanisme de migration n'est livré. Une région
+entière reste recopiée à chaque publication : le regroupement réduit la
+fréquence, pas le coût asymptotique d'une publication. Un lot de 100 chunks
+distincts dépasse la borne de 64 et nécessite au moins deux publications.
+
+Avant activation hors copies jetables :
+
+1. Reproduire la campagne sur Xeon/HDD RAID après maintenance, avec les binaires
+   et sources figés, mêmes options et quantités de travail. Les deux services
+   principaux doivent rester hors de la campagne ; employer des instances et
+   ports temporaires, sans Git ni migration sur la machine distante.
+2. Mesurer CPU/cpuset, charge des autres processus, mémoire, espace libre et
+   configuration réelle. Utiliser les scripts existants de transfert/compilation
+   après inspection, puis le protocole `profile_tick.py` documenté dans le README
+   de stress : 1/10/25/50 bots, 100 cycles, trois répétitions alternées, mêmes
+   workers et distances. Séparer préparation, charge, drainage, arrêt et relecture.
+3. Conserver les CSV complets, empreintes et journaux, vérifier les comptes
+   proposé/reçu/confirmé et les états non vides après redémarrage. Mesurer latences
+   fichier/répertoire fsync, volume logique et `/proc`/outils hôte, queue,
+   snapshots et durée d'arrêt. Ajouter `iostat`/pression I/O si disponibles,
+   sans les confondre avec du CPU. Ne comparer que des charges équivalentes.
+4. Rejouer sur copies les erreurs/interruption et sanitizers compatibles avec
+   l'hôte. Ne pas annoncer TSan fonctionnel si son runtime échoue avant les tests.
+   Une panne physique et les caches du RAID restent un domaine de validation
+   distinct ; ne jamais couper volontairement le matériel de production.
+5. Définir une politique d'autosave et de durabilité croisée avant de promettre
+   des inventaires/items exactement cohérents après crash. Le présent pipeline
+   ne fournit pas de transaction globale. Mesurer aussi un disque réellement
+   lent et une durée de drainage bornée par des critères opérationnels, sans
+   annuler un writer actif de façon dangereuse.
+
+S3C nécessite encore un inventaire des mondes `.bin`/DataVersion 4785, validation
+complète des identifiants 4788, une stratégie de sauvegarde hors place, manifeste
+et comparaison des chunks/inventaires/données opaques, refus des cas ambigus,
+espace disque prévu, réouverture Vanilla et rollback par conservation des
+originaux. Aucun convertisseur, déplacement de `.bin` ou mélange de backends
+n'est introduit ici. Compatibilité Anvil ne signifie toujours pas monde Vanilla
+complet : entités, POI, fichiers globaux, biomes et moteur d'éclairage exigent
+leurs validations propres.
+
+S5 devrait d'abord étudier les goulets d'étranglement restant mesurés, le budget
+de capture sur tick et la politique d'autosave, avant de complexifier les files
+ou de promouvoir S2. La reprise des blocs de phase 2 pourra ensuite conserver
+ces interfaces sans ajouter la logique de stockage au handler réseau. Les
+services 25565/25587 n'ont été ni interrogés ni modifiés pendant la maintenance ;
+leur état effectif n'est donc pas réaffirmé par ce rapport.

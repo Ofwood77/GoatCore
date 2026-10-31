@@ -341,6 +341,13 @@ int mc_storage_read(const mc_world_storage_t *s, int32_t cx, int32_t cz, mc_chun
             errno = e;
         }
     }
+    /* Loading constructs palettes through setters, but is not a new gameplay
+     * mutation. Begin a runtime epoch at the visible source. This is not an
+     * acknowledgement of any previous process's uncertain disk operation. */
+    if (rc==0 && s->kind==MC_STORAGE_ANVIL_ATOMIC) {
+        out->save_generation=0;
+        out->durable_generation=0;
+    }
     mc_save_profile_end("storage_load", cx, cz, span, 0, rc);
     return rc;
 }
@@ -369,9 +376,55 @@ int mc_storage_write(const mc_world_storage_t *s, mc_chunk_t *chunk,
         chunk->storage_nbt_len = n;
         raw = NULL;
     }
+    if(rc==0)chunk->durable_generation=chunk->save_generation;
     int saved = errno;
     free(raw);
     errno = saved;
     mc_save_profile_end("native_chunk_total", chunk->cx, chunk->cz, span, n, rc);
+    return rc;
+}
+
+int mc_storage_write_region(const mc_world_storage_t *s, mc_chunk_t *const *chunks, size_t count) {
+    if (!mc_storage_is_native(s) || !chunks || !count || count > MC_REGION_SLOTS) {
+        errno = EINVAL;
+        return -1;
+    }
+    mc_save_clock_t span = mc_save_profile_begin();
+    mc_anvil_chunk_write_t *writes = calloc(count, sizeof(*writes));
+    if (!writes) return -1;
+    char path[4096], candidate[4096];
+    int rc = -1;
+    size_t total = 0;
+    bool seen[MC_REGION_SLOTS] = {0};
+    for (size_t i = 0; i < count; i++) {
+        unsigned slot;
+        if (!chunks[i] || region_path(s,chunks[i]->cx,chunks[i]->cz,candidate,&slot) != 0) goto done;
+        if (seen[slot] || (i && strcmp(path,candidate))) { errno = EINVAL; goto done; }
+        seen[slot] = true;
+        if (!i) memcpy(path,candidate,strlen(candidate)+1);
+        uint8_t *raw = NULL; size_t n = 0;
+        mc_save_clock_t encode = mc_save_profile_begin();
+        if (mc_anvil_encode_native(chunks[i],NULL,&raw,&n) != 0) goto done;
+        mc_save_profile_end("native_encode",chunks[i]->cx,chunks[i]->cz,encode,n,0);
+        writes[i] = (mc_anvil_chunk_write_t){slot,raw,n,chunks[i]->storage_nbt,chunks[i]->storage_nbt_len};
+        if (n > 64u*1024u*1024u - total) { errno = EFBIG; goto done; }
+        total += n;
+    }
+    rc = mc_anvil_write_batch_expected(path,writes,count);
+    if (rc == 0 || rc == MC_SAVE_DURABILITY_UNCERTAIN) {
+        for (size_t i = 0; i < count; i++) {
+            free(chunks[i]->storage_nbt);
+            chunks[i]->storage_nbt = (uint8_t *)writes[i].nbt;
+            chunks[i]->storage_nbt_len = writes[i].length;
+            if(rc==0)chunks[i]->durable_generation=chunks[i]->save_generation;
+            writes[i].nbt = NULL;
+        }
+    }
+done:;
+    int saved = errno;
+    for (size_t i = 0; i < count; i++) free((void *)writes[i].nbt);
+    free(writes);
+    errno = saved;
+    mc_save_profile_end("native_batch_total",chunks[0] ? chunks[0]->cx : 0,chunks[0] ? chunks[0]->cz : 0,span,total,rc);
     return rc;
 }

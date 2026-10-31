@@ -21,4 +21,8 @@ int mc_storage_read(const mc_world_storage_t *store, int32_t cx, int32_t cz, mc_
  * retains dirty but advances the visible source snapshot for safe retry. */
 int mc_storage_write(const mc_world_storage_t *store, mc_chunk_t *chunk,
                      const mc_block_entity_store_t *entities);
+/* Native only. All chunks belong to ONE region, owned exclusively by caller.
+ * Serializes each once and atomically replaces the region once. On 0/-2 all
+ * private source buffers advance; no live-world pointer is retained. */
+int mc_storage_write_region(const mc_world_storage_t *store, mc_chunk_t *const *chunks, size_t count);
 #endif

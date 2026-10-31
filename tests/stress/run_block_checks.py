@@ -89,7 +89,7 @@ def run(args):
         env=os.environ.copy()
     else:
         (runtime/"assets").symlink_to(ROOT/"assets")
-        (runtime/"server.config").write_text(f"online-mode=false\noffline-skins=false\nchunk-storage={args.chunk_storage}\nview-distance={args.view_distance}\n")
+        (runtime/"server.config").write_text(f"online-mode=false\noffline-skins=false\nchunk-storage={args.chunk_storage}\nanvil-save-mode={args.anvil_save_mode}\nview-distance={args.view_distance}\n")
         env=dict(os.environ,MC_WORLD_PATH=str(runtime/"world"),MC_BIND_PORT=str(args.port),
                  MC_SETUP_FILE=str(ROOT/"tests/stress/network/one.conf"),MC_QA_MODE="1",MC_ADMIN_USERNAME="Ofwood_")
         command=[str(args.server_binary.resolve())]
@@ -138,7 +138,7 @@ def run(args):
             if proc.returncode:raise RuntimeError(f"server shutdown exit {proc.returncode}")
             if args.fsync_probe and args.kind=="goatcore" and not (result/f"fsync-{phase}.csv").is_file():
                 raise RuntimeError("fsync probe did not produce a trace")
-    metadata={"chunk_storage":args.chunk_storage if args.kind=="goatcore" else None,"world_template":str(args.world_template) if args.world_template else None,"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
+    metadata={"chunk_storage":args.chunk_storage if args.kind=="goatcore" else None,"world_template":str(args.world_template) if args.world_template else None,"anvil_save_mode":args.anvil_save_mode,"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
     if args.kind=="goatcore":metadata["binary_sha256"]=hashlib.sha256(args.server_binary.read_bytes()).hexdigest()
     (result/"metadata.json").write_text(json.dumps(metadata,indent=2))
     print(json.dumps({**metadata,"results":str(result)}))
@@ -160,6 +160,7 @@ if __name__=="__main__":
     parser.add_argument("--level-type",default="minecraft:flat",choices=("minecraft:flat","minecraft:normal"))
     parser.add_argument("--level-seed",type=int,default=0)
     parser.add_argument("--complex-dense",action="store_true")
+    parser.add_argument("--anvil-save-mode",choices=("immediate","batched","async"),default="immediate")
     parser.add_argument("--region-boundaries",action="store_true",help="placement suite: region boundary scenarios")
     parser.add_argument("--verify-only",action="store_true",help="verify a supplied saved snapshot without editing the copied world")
     parser.add_argument("--snapshot-template",type=Path)

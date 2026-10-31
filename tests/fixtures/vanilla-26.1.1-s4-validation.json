@@ -1,0 +1,1093 @@
+{
+  "schema": 1,
+  "lot": "S4",
+  "date": "2026-10-31",
+  "baseline_commit": "c2b8824acff47001cd052bda5e1bd963538ba169",
+  "final_binary": {
+    "path": "tests/stress/results/storage-s4/release-bin/mc_server",
+    "sha256": "51e05f50a2dc94edff99f472eeb2c960a42610a019966a751dc530cd8af46834",
+    "clean_rebuild_sha256": "51e05f50a2dc94edff99f472eeb2c960a42610a019966a751dc530cd8af46834"
+  },
+  "baseline_binary": {
+    "path": "tests/stress/results/storage-s3b/validated-bin/mc_server",
+    "sha256": "f041766a37cefdd06e0fee34bfdfdba02e73065bc03fb1ec2e84cf9401b54099"
+  },
+  "official_jar_sha256": "3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081",
+  "production_source_sha256": {
+    "src/gameplay/block_drops.c": "6c9e59e7bf7680db7f422a8f0e6ee887c29c8589f526ddf643e48fcd98889d6a",
+    "src/gameplay/block_neighbors.c": "029ba06ba5e63e629148411423381edb03355041a0eef76c1ccda17847288428",
+    "src/gameplay/crafting.c": "f80116c3a0186befac080c737568e0de566c14e93d864ffc22315a787bb3c6e9",
+    "src/gameplay/furnace.c": "5d450cbc6008d5f6c60bbfeb4f4441f15c5f1c6593a538315bb2dcdd0b91995a",
+    "src/gameplay/mining.c": "05c93f02e4654c77fff10cbbcad12a2e48a96a242865622afdd62f21d3b43f61",
+    "src/gameplay/placement.c": "f659021bcafea919609319d2b6771992e92bf3e4a55a49e69a21a3ed1108151e",
+    "src/generated/generated_block_hardness.c": "1cdcb8903eecf5ec5cac419b1698fdc26d286c700bd412850f89cbe366532163",
+    "src/generated/generated_block_hardness.h": "be43a723c99a406c572d10efaaed3d41dcb6d1574bcbacfdd0cf8d1cf66a628c",
+    "src/generated/generated_block_ids.c": "a767cfe3d451e93460a6d56512f5f2844ca18720ef0c42a2a16d54d7869209d7",
+    "src/generated/generated_block_ids.h": "fe924e250b130c97a98af7f537bd1fbc1d480feeeb45d502c6eaef9097912f90",
+    "src/generated/generated_block_loot.c": "dfd86743a5a85d9c760e6a3fef5f269f9af510b46c05c74be156387865e1e418",
+    "src/generated/generated_block_loot.h": "1c4edebe1796c8cda432f64d06a990d68c1087e4abdd287c263b15b938929ae5",
+    "src/generated/generated_cooking_recipes.c": "44a8627a437399798e7291db1c58434eb086b63029394c7f44f27fb658c0c686",
+    "src/generated/generated_cooking_recipes.h": "a0fed8943988c1737e02bf8d49329406ebf57d9b23e76ba2afd4aac3a6067d72",
+    "src/generated/generated_crafting_recipes.c": "64e44e87f844f64042f39db645e8b99788f42a636d516e764167d6bc6d8ea057",
+    "src/generated/generated_crafting_recipes.h": "ec35849736e4dd908b877f011e4d4c835447b72d9b59b38e9dec5edb20428b7f",
+    "src/generated/generated_item_food.c": "f767ebcf97c8ba881db115a6a13feecb86e8b86290e12504a3cd8df6bd7cad83",
+    "src/generated/generated_item_food.h": "0170ac28eac26d9af23f5afa1ef2602ee0ec82cac4e04fbc7b8edd92847ac8ee",
+    "src/generated/generated_item_place.c": "6f7148644fde0d5eade9aefa9b849bd5d1bf7ee7bd40e5024f593064309746ec",
+    "src/generated/generated_item_place.h": "b97dc0cc2330199e56dca0a2adec3a466762350cdfb875803cffbdde7f6c851b",
+    "src/generated/generated_minecraft_ids.c": "277ccae3b315b991052f65ff9a07362480d0b0a8cbd703b4f94d64a3f54dc08d",
+    "src/generated/generated_minecraft_ids.h": "6b25fa0c9859545fa3c94caad0f33f847d849ac21330a5d40e6f863d40b0ca41",
+    "src/generated/generated_mining_data.c": "d27dc376e70079705dfbcd5c7db429f093ba722129ba8457c76b5f11fe274191",
+    "src/generated/generated_mining_data.h": "6436baff12db1f9426e1ab4107e012922a85635db43fd9e82d74a97e79124acf",
+    "src/generated/generated_native_be_blocks.h": "8a1dd8cc6b396d30b6e006555783bdb0f5b0e65932684cc497c2645f8bf0a59d",
+    "src/generated/generated_registries.c": "4f25c38471d5c240bc06ca9b202b398a2649d42e0678a5770f48d51a62b78c02",
+    "src/generated/generated_registries.h": "834849db92b9f29c1a39f719a1de5589b4f71125d75c4e88500a091bafd919ed",
+    "src/main.c": "c63e79d6136a29c36ceae9625212d5b9b745a6e943dc4c07999712b8cf6609a9",
+    "src/net/buffer.c": "66df7cba45079e1a3d408558a2f0dfecff73851c0a760927e961b0bc6bcd124b",
+    "src/net/server.c": "cdb5f76046a5a1840dfe7b1a53b262b7b6a9ca65410c99b664d0a737d449184a",
+    "src/net/task_queue.c": "fdfb09e60c752a3058c96a85e2873a1e267144da00db0737ac9a035497bed155",
+    "src/protocol/auth_service.c": "5095f2df219225d03445366a799f7ad2ec4805b4f382ecb1abf38c382b1bdb37",
+    "src/protocol/auth_stub.c": "07145f1948f690a64e11efcfe94faa8f63fa745bc46b96f6052b2eb77f047196",
+    "src/protocol/crypto_openssl.c": "97d5c6f6c39592054e6a451e76df2433e56c29cef8db0b735f0fce6d6c2ec283",
+    "src/protocol/crypto_stub.c": "53850d62d029ff6577339e0f0571dc72b87144fd0dc9b05c2ca10137a442433c",
+    "src/protocol/framing.c": "356939fc319e92675f1a7b16e13fe1686347d6a15baa89bbcb73c30cd01b750b",
+    "src/protocol/handlers/configuration.c": "68f1f823cb2e9ff4b2eefa61c40bc87d164aec28330de48d3eb5ec484f7a31cd",
+    "src/protocol/handlers/handshake.c": "4044defc184bea265e479e6ce939e9dda8beab5c336157096adfa283b3255de3",
+    "src/protocol/handlers/login.c": "1e8af8dc1e218b1ce7b01751a4b685ce812cc23ce9bf9ed297c82e8809a17b62",
+    "src/protocol/handlers/play.c": "7f51cb4e1483741997ae980b4d994f67756b42859630568724d325a168091fe6",
+    "src/protocol/handlers/status.c": "347ecf7e06be3b1d499d9020657d1ec4d43655ed13ac20f89398daaeebc93e94",
+    "src/protocol/inventory.c": "ac225cbaed60e7698e4ebed5ba600f48537c69a66005d91b5de16f735859a6c3",
+    "src/protocol/offline_uuid.c": "b74e5bec8872fc8ed6e9ec4e91f3384698afda63dfddbeb0980c0f638294d199",
+    "src/protocol/profile_json.c": "c2f34590b32763c931c01571791e6d86d47d7fbdf3ed02629e1447d614d3464b",
+    "src/protocol/profile_service.c": "4915c7b24fa85e1c6069a6ffc48966b0e54577c2414e047ba6e73d56858818a1",
+    "src/protocol/profile_wire.c": "11ef1f17453d6fde4dec1cfe7f5637468f93c79238d9b60834405e67185501a1",
+    "src/protocol/varint.c": "d6e41f5f48b186821a317b675f403655abd39e208e9d545c0d2c6579a8843962",
+    "src/util/arena.c": "47de144ba25f4c7f14dcacb1f9be4912d68e7219d09d20fb89e94654749273d3",
+    "src/util/arena.h": "406c62c29df325f842cfe304018d3002dc185c12bb3becf5c5e828c34a1a7c6b",
+    "src/util/atomic_file.c": "02f3e5443598e2d1222257868211f17f8a463dd5a6dfd3eb2ef3339c037d6368",
+    "src/util/mc_util.c": "72c62161b2baca3ab54d25faa9d67a2cb8a26f2651c431726f79a5188f37bfd7",
+    "src/util/setup.c": "848f54e7368b3d618eecb4f7f408c1716d3a30b1eaf17f9eafa8267c7958a36c",
+    "src/world/anvil.c": "876e6ac2603b18ca5e11f1d8d1c50ab2e23d86de6475e016727c0f25cfee637f",
+    "src/world/block_entity_store.c": "aadf7d0fcdb87efc5773c2cedfbfdcd7932ba509d1c5e864e19a52be8e6f87b5",
+    "src/world/block_entity_store.h": "615c14aea24a96838eed0eb9996509c3733e29fab46f7d694be056e19c402103",
+    "src/world/block_registry.c": "58b073730f4254069292c1fc14f12894b7d557bfcca8912f450fa42f67973f37",
+    "src/world/block_registry.h": "6a82abfa672a943076ae6612677cfb8c57437160c7e805dce5bbd140ba4248c2",
+    "src/world/block_state.c": "f73f48f832042a5afbe638ecd9c6c18997ec208c28a3cdb07c3c9081b6382fc7",
+    "src/world/chunk.c": "02363425110228112358b67129d5908ff3327cab2b1db13f552f2212a399cc41",
+    "src/world/chunk_store.c": "dea1f12ad6f221a1ba3979850fc36eb8fe529a58b3fd1e5981df2d3273850b8c",
+    "src/world/container_store.c": "e45b42afa4729663780f1605d5a5f7cec7c2f05ef3d40c09ef142566c37115b7",
+    "src/world/nbt.c": "6e6832cd9d86a1738a06b5eae444a1f47bf6982cce9ab8e48f8ca02117cffa49",
+    "src/world/packed.c": "772a489d075f5fb1c04b05a5afe0ddfe0e912db3ce4555ce79116e21a0847789",
+    "src/world/paletted_container.c": "58ad9fac9f9d57d1eb6fcf6880d87976ae86a5d8a5f279f81ef4f2aa16772bc8",
+    "src/world/paletted_container.h": "aae5d8cbe18bab23290e6dbc52275c5fbed0b9b95e7060af31b1903802983070",
+    "src/world/player_store.c": "cc727df94dcb5f9181766de33e44a96f47bf6a5d50f3ab98c3bcb11fe4d8de45",
+    "src/world/region_storage.c": "e6c3a45b398090727601f4a62eb14eaafd11699f5fae067d631d7bae6b532118",
+    "src/world/region_txn.c": "cf2b3e8150e87ac5b7a2fa112182a4af5ce28a4318a8365859445110db45fc2f",
+    "src/world/save_pipeline.c": "284932a8d3b328d8017ed819f49cb6ad6e32b35513385d3799d3da80ac59c954",
+    "src/world/world.c": "870c4bffcb4a7f3895cbdd89c5c7e9b2facc24061959a5e2471eaf18c2c60248",
+    "src/world/world_storage.c": "0d1ab9fa92dd33755cd51c5f354760476c5344ce242e19be0fe833ae4d86b894",
+    "include/mc_anvil.h": "ac794e6ffb1bd7bdd7020b8dc14956b4d942a8c1cad9ef05eabb7b44e56bc5e1",
+    "include/mc_atomic_file.h": "46a6419bd1f2d7b2b4e6d38c05fd0c65c34c3ba8028a1439f9e5d0c388dca10f",
+    "include/mc_auth.h": "19ea25a60f749db49876cb5a36af9cf1cf083c64f20501b4ef76b1d69e5819b1",
+    "include/mc_block_drops.h": "12f760c7494751871f217ecbb1075cff667bf85eb20ae8310c63099b84f35bc1",
+    "include/mc_block_neighbors.h": "68036c1f8031c181455a2459b96203b808e927da86125e478eac480fd3f77e21",
+    "include/mc_block_state.h": "60bc9de7802febdb0c2fea2b82ab450ebbe274bea184b1dd99839d47bcc95146",
+    "include/mc_chunk.h": "8f87d5ca729d982dffd1626689eea2fc35c973dd7fe1af0f21f8386f5e48a2e0",
+    "include/mc_chunk_store.h": "f055f8ba0e8e251c2257ebc759fab49fa9603caac701cf3dbc1044aaf5b6aa90",
+    "include/mc_container_store.h": "af5fd13dd372556452cce6bab89e0aa616ff02deea405a408dc582396b5a63c5",
+    "include/mc_crafting.h": "479eebe2c4f579b222963f276b5966aa603f70f1caf6af6b20001b888d94d5bf",
+    "include/mc_furnace.h": "ac749bf8655f2614c49e993d37022d1cfd2b8c0022d6a3eb7af19a8f7f0dd1a1",
+    "include/mc_inventory.h": "cdcd509c698521586f3ab7368817508d203a08fc84e1f99d472a03d432fab38d",
+    "include/mc_mining.h": "ba160ee31a36490c1b016161bf705bf12fedc319d87474ac02a4d4211fe15bfe",
+    "include/mc_nbt.h": "48054f23156330579333c8347672b9d3c15c8e579a9e45213b5e02217fae3ffc",
+    "include/mc_net.h": "1587ef4dc80103033699b9272919c5b46c58d23d3a90b87cf6910c50c4d3eb67",
+    "include/mc_packed.h": "ee927b1287750955288993aa51da6a1039cb6b506429b849edc4946eb78ab591",
+    "include/mc_placement.h": "543dcc6ec2172e481dd397d631265324e4da723904a8836d10914a46f0143f4c",
+    "include/mc_player_store.h": "15f59ac36b22d4f514a128a24dc1d6a70cd879635c3520b7dd0de9cb92af4309",
+    "include/mc_profile.h": "73d9ce624ce60f8b5fd0a406405b1733d718246afc45aa952f0244760d635faa",
+    "include/mc_protocol.h": "b888e208af7fe73348455317b1e0f63c4c66a4f93366e0cd04f14e64a0ac5e7e",
+    "include/mc_region_storage.h": "81cf71df01c888a8ba401ad16d144b07e106a764b7f981ae253d91bb76611639",
+    "include/mc_region_txn.h": "1933f348ad3b55c319932dc2f48628ad6d6ae3d979057aee5386cbe291233dd6",
+    "include/mc_save_pipeline.h": "6ce3269b968e37a35bb600828331865e13aa174bfbbe6a2396963897b1f2f74d",
+    "include/mc_server.h": "558862686aed279e21e9babdea9c730def58aa98d83ccbae57024070a8a092ab",
+    "include/mc_setup.h": "220abe5f52b1825bc3118da49e45c438b9e1105fd100663db198e05bba641066",
+    "include/mc_task_queue.h": "529392077a1a199131a995a4cb0c2f9916a215818bb43c6c31a2353893cb0915",
+    "include/mc_util.h": "ab7d65b113cc11462578e40fd9a852959155a2ce20cf41966513f0c0f534a365",
+    "include/mc_world.h": "b75d19589debb972adeb80508a0ed87fcf121197530a8f805a406c6a2282f779",
+    "include/mc_world_storage.h": "b1ba2411d9fb4445d1403a633d31ce8cbb28364a90e49a04a34bf7083dad9337",
+    "include/stb_perlin.h": "f0aeea5c70ab7aacc208708d3be61fa6eccd4066c0c118570257b2613635e283"
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 7 7840HS",
+    "logical_cpus": 16,
+    "kernel": "Linux 7.0.0-38",
+    "libc": "glibc 2.43",
+    "filesystem": "ext4",
+    "storage": "local NVMe",
+    "remote_validation": false
+  },
+  "configuration": {
+    "protocol": 775,
+    "data_version": 4788,
+    "network_workers": 1,
+    "chunk_workers": 2,
+    "simulation_workers": 0,
+    "save_workers_async": 1,
+    "view_distance": 10,
+    "simulation_distance": 10,
+    "snapshot_limit": 64,
+    "input_budget_bytes": 67108864,
+    "queue_slots_including_running_and_completed": 1,
+    "default_backend": "bin",
+    "default_save_mode": "immediate",
+    "s2_in_server": false,
+    "migration": false
+  },
+  "controls": {
+    "precommit_c_suites": 28,
+    "python_profile_tests": 9,
+    "asan_ubsan_c_suites": 15,
+    "tsan_c_suites": 7,
+    "tsan_live_server_complex_restarts": 2,
+    "gameplay_scenarios_including_asan": 22,
+    "gameplay_restarts_per_scenario": 3,
+    "stairs_observations_per_scenario": 192,
+    "vanilla_scenarios": 14,
+    "vanilla_opens_per_scenario": 2,
+    "fresh_full_chunk_comparisons": 310,
+    "official_complex_full_chunk_comparisons": 3,
+    "micro_full_chunk_comparisons": 3,
+    "refusal_operations": 18,
+    "activation_refusals": 4,
+    "bin_byte_identical_chunks": 483,
+    "async_sigkill_checkpoints": 6,
+    "chunks_per_async_sigkill": 3,
+    "s2_timed_passes": 18,
+    "s2_traced_passes": 6,
+    "s2_recoveries": 9,
+    "main_benchmark_passes": 48,
+    "confirmed_places": 103200,
+    "confirmed_breaks": 103200,
+    "missing": 0,
+    "microbenchmark_passes": 81,
+    "soak": {
+      "bots": 10,
+      "cycles": 1000,
+      "confirmed_places": 10000,
+      "confirmed_breaks": 10000
+    },
+    "complex_entities": [
+      7,
+      160
+    ],
+    "main_services_queried": false,
+    "main_services_modified": false
+  },
+  "durability": {
+    "file_fsync": true,
+    "atomic_rename": true,
+    "parent_fsync": true,
+    "network_ack_is_durable": false,
+    "cross_file_inventory_entity_transaction": false,
+    "process_kill_tests": true,
+    "power_cut_test": false,
+    "uncertain_publication_updates_visible_source_but_not_durable_generation": true
+  },
+  "raw_manifest": {
+    "path": "tests/stress/results/storage-s4/final-raw-manifest.json",
+    "sha256": "20d5f4232dae91b78493e404a763b7fe396119c4c42966cfe569cc81067a2fb0",
+    "files": 2198
+  },
+  "reports": {
+    "tests/stress/results/storage-s4/final-gate.log": "cccbc0b2a0065937188c77df4b13fddfba62caf0108e512a2be02c295bb5f34f",
+    "tests/stress/results/storage-s4/final-derived.json": "4d5604d2134560586815e8ac28ad21a598c924617216c2346e47b098bb8ac4cb",
+    "tests/stress/results/storage-s4/final-micro-derived.json": "988bd6332e99808dfc2ba34945fcdee222f9616850c6f461a8a5fe9a20bf7b60",
+    "tests/stress/results/storage-s4/final-s2/comparison.json": "758b48d04601cb386bae01713225d2ddf604c28ced9e79adf9b2d7504aa10fb2",
+    "tests/stress/results/storage-s4/final-s2/recovery.json": "fb8f261882137ee4338998057df1ecf2bb98a1897e8a07fa89acd9b45e356171",
+    "tests/stress/results/storage-s4/final-micro-vanilla-proof.json": "ffb2277b7256be29fc46da552da8167e19f52fe4f3b86ad7047a5b7308bbfc38",
+    "tests/stress/results/storage-s4/final-storage-analysis.log": "5dd0e6eae34f0cffeaa7a4758411339aa36d0b05e3e7a33a34a5ac8c0e41e4e7",
+    "tests/stress/results/storage-s4/final-current-asan.log": "1543616274ab0f6996dc38c30c0d26404f8dca80cd9a869ebc50d0e3d36ac09f",
+    "tests/stress/results/storage-s4/final-current-tsan.log": "696a2b259beab968b60c6ce97c5a689868a4d018f871b7bad4fff0ae565ad05c",
+    "tests/stress/results/storage-s4/release-comparisons.log": "1997488978b6a0121800a51603230a2c63db9390e83a41e6f39947a3a1554de1",
+    "tests/stress/results/storage-s4/release-bin-equivalence.json": "c1e539e5d225354ee9a3d27575f93a716e3e9ae23d7e502aff1cdd697b8e4bae"
+  },
+  "commands": {
+    "gameplay": "tests/stress/run_block_checks.py --kind goatcore --chunk-storage anvil-atomic-experimental --anvil-save-mode immediate|batched|async --suite placement|stairs|pickup|complex --verify-restarts 3 --port TEMP --result-dir FRESH",
+    "benchmark": "tests/stress/profile_tick.py --binary bin=S4 --binary s3b=S3B --binary batched=S4 --binary async=S4 --storage-backend s3b=anvil-atomic-experimental --storage-backend batched=anvil-atomic-experimental --storage-backend async=anvil-atomic-experimental --save-mode batched=batched --save-mode async=async --bots 1 10 25 50 --repetitions 3 --cycles 100 --warmup 3 --idle 3 --save-trace --fsync-probe LIB --result-dir FRESH",
+    "micro": "tests/stress/profile_save_batches.py --probe S4 --baseline-probe S3B --fixture-world OFFICIAL7 --dense-world OFFICIAL160 --opaque-world SYNTHETICOPAQUE --fsync-probe LIB --repetitions 3 --result-dir FRESH"
+  },
+  "observations": [
+    "S4 singleton 256-spread median worsened; retained with full dispersion, no singleton speedup claim.",
+    "Python client active CPU near one core at 50 bots; fanout and item costs not causally isolated.",
+    "Local process interruptions are not physical power failure validation.",
+    "Async can lose unconfirmed in-memory changes; cross-file inventory/item consistency is not transactional.",
+    "No remote access/deployment; Xeon/HDD RAID replay required.",
+    "First full benchmark attempt hit a proc zombie collector error; excluded.",
+    "54 valid synthetic micro runs plus 27 corrected-scope complex runs; failed backend-marker measurement excluded."
+  ],
+  "benchmark_summary": [
+    {
+      "bots": 1,
+      "mode": "bin",
+      "repetitions": 3,
+      "tps": [
+        20.100744178392414,
+        20.111966188911698,
+        19.925185081100693
+      ],
+      "p99_ms": [
+        3.36,
+        10.313,
+        3.108
+      ],
+      "max_tick_ms": 18.637,
+      "over_50ms": 0,
+      "active_s": [
+        5.323186,
+        4.872721,
+        4.818023
+      ],
+      "total_including_shutdown_s": [
+        20.00874916499015,
+        19.537349304999225,
+        19.444523598998785
+      ],
+      "region_written_bytes": [
+        0,
+        0,
+        0
+      ],
+      "kernel_write_bytes": [
+        884736,
+        864256,
+        831488
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.20921938298852183
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.20939214798272587
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.13480872800573707
+        }
+      ]
+    },
+    {
+      "bots": 1,
+      "mode": "s3b",
+      "repetitions": 3,
+      "tps": [
+        20.05199275579596,
+        19.9551157710823,
+        19.97617756180934
+      ],
+      "p99_ms": [
+        11.013,
+        10.269,
+        35.305
+      ],
+      "max_tick_ms": 35.484,
+      "over_50ms": 0,
+      "active_s": [
+        5.336128,
+        5.412146,
+        5.907036
+      ],
+      "total_including_shutdown_s": [
+        20.033929968980374,
+        20.06506154400995,
+        20.60535335401073
+      ],
+      "region_written_bytes": [
+        69713920,
+        68300800,
+        68771840
+      ],
+      "kernel_write_bytes": [
+        68190208,
+        66809856,
+        67272704
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.22562726901378483
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.1844368160236627
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.1776353090244811
+        }
+      ]
+    },
+    {
+      "bots": 1,
+      "mode": "batched",
+      "repetitions": 3,
+      "tps": [
+        20.077754967217274,
+        19.80323850411124,
+        20.00436182063176
+      ],
+      "p99_ms": [
+        5.313,
+        40.665,
+        13.434
+      ],
+      "max_tick_ms": 40.665,
+      "over_50ms": 0,
+      "active_s": [
+        5.179862,
+        4.595208,
+        4.598997
+      ],
+      "total_including_shutdown_s": [
+        19.83518871999695,
+        19.29207278499962,
+        19.256946095993044
+      ],
+      "region_written_bytes": [
+        47575040,
+        43335680,
+        43335680
+      ],
+      "kernel_write_bytes": [
+        46608384,
+        42463232,
+        42463232
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.12518848798936233
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.19143282598815858
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.13423630202305503
+        }
+      ]
+    },
+    {
+      "bots": 1,
+      "mode": "async",
+      "repetitions": 3,
+      "tps": [
+        20.072469980157525,
+        20.110629632060157,
+        19.988814592500947
+      ],
+      "p99_ms": [
+        0.327,
+        0.517,
+        0.377
+      ],
+      "max_tick_ms": 0.517,
+      "over_50ms": 0,
+      "active_s": [
+        4.78267,
+        4.72387,
+        4.802686
+      ],
+      "total_including_shutdown_s": [
+        19.443492377991788,
+        19.382080042007146,
+        19.467234481999185
+      ],
+      "region_written_bytes": [
+        45219840,
+        44748800,
+        46161920
+      ],
+      "kernel_write_bytes": [
+        44310528,
+        43847680,
+        45228032
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.12669323102454655
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.1856069730129093
+        },
+        {
+          "status": "passed",
+          "targets": 1,
+          "seconds": 0.12532426198595203
+        }
+      ]
+    },
+    {
+      "bots": 10,
+      "mode": "bin",
+      "repetitions": 3,
+      "tps": [
+        19.911274941868978,
+        20.006128192951735,
+        20.033305632830626
+      ],
+      "p99_ms": [
+        6.18,
+        6.179,
+        11.247
+      ],
+      "max_tick_ms": 11.533,
+      "over_50ms": 0,
+      "active_s": [
+        9.592555,
+        9.49709,
+        9.534123
+      ],
+      "total_including_shutdown_s": [
+        24.48773608802003,
+        24.39036235801177,
+        24.389445043023443
+      ],
+      "region_written_bytes": [
+        0,
+        0,
+        0
+      ],
+      "kernel_write_bytes": [
+        6914048,
+        7004160,
+        6995968
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.17909236100967973
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.17922482200083323
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.44411946000764146
+        }
+      ]
+    },
+    {
+      "bots": 10,
+      "mode": "s3b",
+      "repetitions": 3,
+      "tps": [
+        19.958371489943858,
+        20.020877385508953,
+        19.93629046248871
+      ],
+      "p99_ms": [
+        23.612,
+        22.413,
+        8.293
+      ],
+      "max_tick_ms": 25.079,
+      "over_50ms": 0,
+      "active_s": [
+        8.166999,
+        9.34025,
+        9.931637
+      ],
+      "total_including_shutdown_s": [
+        23.017345439991914,
+        24.23083287899499,
+        24.79616696498124
+      ],
+      "region_written_bytes": [
+        554856448,
+        564387840,
+        571383808
+      ],
+      "kernel_write_bytes": [
+        542867456,
+        552275968,
+        559075328
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.1932904800050892
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.15428141999291256
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.19440580901573412
+        }
+      ]
+    },
+    {
+      "bots": 10,
+      "mode": "batched",
+      "repetitions": 3,
+      "tps": [
+        19.935156827621952,
+        19.91196359276154,
+        20.021178246339797
+      ],
+      "p99_ms": [
+        21.839,
+        21.489,
+        19.722
+      ],
+      "max_tick_ms": 33.374,
+      "over_50ms": 0,
+      "active_s": [
+        7.975859,
+        7.834486,
+        7.691855
+      ],
+      "total_including_shutdown_s": [
+        22.81946128202253,
+        22.732897075009532,
+        22.639039170986507
+      ],
+      "region_written_bytes": [
+        295211008,
+        289497088,
+        291303424
+      ],
+      "kernel_write_bytes": [
+        289415168,
+        283832320,
+        285609984
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.19359324901597574
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.20312324998667464
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.2102183579991106
+        }
+      ]
+    },
+    {
+      "bots": 10,
+      "mode": "async",
+      "repetitions": 3,
+      "tps": [
+        19.997288246518085,
+        19.894114713413888,
+        20.12275811190947
+      ],
+      "p99_ms": [
+        4.944,
+        4.758,
+        4.595
+      ],
+      "max_tick_ms": 5.026,
+      "over_50ms": 0,
+      "active_s": [
+        6.600895,
+        6.584862,
+        6.460347
+      ],
+      "total_including_shutdown_s": [
+        21.48975895199692,
+        21.43681001799996,
+        21.385570200014627
+      ],
+      "region_written_bytes": [
+        243666944,
+        248344576,
+        242806784
+      ],
+      "kernel_write_bytes": [
+        239017984,
+        243585024,
+        238182400
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.15291231800802052
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.1950047709979117
+        },
+        {
+          "status": "passed",
+          "targets": 10,
+          "seconds": 0.15401437401305884
+        }
+      ]
+    },
+    {
+      "bots": 25,
+      "mode": "bin",
+      "repetitions": 3,
+      "tps": [
+        19.970495498482624,
+        19.9616411909602,
+        19.92770722150759
+      ],
+      "p99_ms": [
+        24.484,
+        27.374,
+        29.819
+      ],
+      "max_tick_ms": 34.454,
+      "over_50ms": 0,
+      "active_s": [
+        6.559677,
+        6.161818,
+        6.473399
+      ],
+      "total_including_shutdown_s": [
+        21.791835259995423,
+        21.34577575197909,
+        21.659552771016024
+      ],
+      "region_written_bytes": [
+        0,
+        0,
+        0
+      ],
+      "kernel_write_bytes": [
+        14749696,
+        14684160,
+        14729216
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.14374892500927672
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.15548296499764547
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.1890514460101258
+        }
+      ]
+    },
+    {
+      "bots": 25,
+      "mode": "s3b",
+      "repetitions": 3,
+      "tps": [
+        19.982138578842186,
+        19.975452845575337,
+        19.951807412064785
+      ],
+      "p99_ms": [
+        55.808,
+        47.641,
+        49.888
+      ],
+      "max_tick_ms": 60.923,
+      "over_50ms": 5,
+      "active_s": [
+        9.958894,
+        9.71192,
+        9.472826
+      ],
+      "total_including_shutdown_s": [
+        25.15255618302035,
+        24.953158890013583,
+        24.754418924974743
+      ],
+      "region_written_bytes": [
+        1275670528,
+        1273499648,
+        1272823808
+      ],
+      "kernel_write_bytes": [
+        1247522816,
+        1245298688,
+        1244745728
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.17861128502408974
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.19361105799907818
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.19570651001413353
+        }
+      ]
+    },
+    {
+      "bots": 25,
+      "mode": "batched",
+      "repetitions": 3,
+      "tps": [
+        19.945503030161078,
+        19.95151398418881,
+        19.955114048139194
+      ],
+      "p99_ms": [
+        25.329,
+        24.91,
+        27.587
+      ],
+      "max_tick_ms": 33.483,
+      "over_50ms": 0,
+      "active_s": [
+        5.464891,
+        5.212637,
+        5.362034
+      ],
+      "total_including_shutdown_s": [
+        20.64842413100996,
+        20.389772069000173,
+        20.510838719987078
+      ],
+      "region_written_bytes": [
+        204103680,
+        195051520,
+        202600448
+      ],
+      "kernel_write_bytes": [
+        201007104,
+        192155648,
+        199536640
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.18100369098829105
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.3067107889801264
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.35437434999039397
+        }
+      ]
+    },
+    {
+      "bots": 25,
+      "mode": "async",
+      "repetitions": 3,
+      "tps": [
+        20.01976369695199,
+        20.00417296352286,
+        19.945471427642875
+      ],
+      "p99_ms": [
+        19.684,
+        18.517,
+        15.493
+      ],
+      "max_tick_ms": 19.684,
+      "over_50ms": 0,
+      "active_s": [
+        4.295755,
+        4.299103,
+        4.261619
+      ],
+      "total_including_shutdown_s": [
+        19.494415552006103,
+        19.509309512999607,
+        19.464364524988923
+      ],
+      "region_written_bytes": [
+        162906112,
+        162861056,
+        162861056
+      ],
+      "kernel_write_bytes": [
+        160677888,
+        160628736,
+        160624640
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.1556608020036947
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.1938901719986461
+        },
+        {
+          "status": "passed",
+          "targets": 25,
+          "seconds": 0.4371351999870967
+        }
+      ]
+    },
+    {
+      "bots": 50,
+      "mode": "bin",
+      "repetitions": 3,
+      "tps": [
+        16.39588190251785,
+        15.796530252522215,
+        15.543895810648062
+      ],
+      "p99_ms": [
+        89.433,
+        100.774,
+        94.396
+      ],
+      "max_tick_ms": 123.338,
+      "over_50ms": 442,
+      "active_s": [
+        21.895742,
+        21.460409,
+        23.160217
+      ],
+      "total_including_shutdown_s": [
+        37.808225638000295,
+        37.36146829702193,
+        39.10253962498973
+      ],
+      "region_written_bytes": [
+        0,
+        0,
+        0
+      ],
+      "kernel_write_bytes": [
+        29376512,
+        29495296,
+        29347840
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.19373695901595056
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.19429958300315775
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.15563093600212596
+        }
+      ]
+    },
+    {
+      "bots": 50,
+      "mode": "s3b",
+      "repetitions": 3,
+      "tps": [
+        4.506849097282273,
+        5.171716925366381,
+        5.529561325877686
+      ],
+      "p99_ms": [
+        293.819,
+        216.84,
+        260.874
+      ],
+      "max_tick_ms": 307.116,
+      "over_50ms": 460,
+      "active_s": [
+        36.167175,
+        36.738283,
+        37.79685
+      ],
+      "total_including_shutdown_s": [
+        52.27823357199668,
+        52.87555268401047,
+        53.878673794999486
+      ],
+      "region_written_bytes": [
+        2443587584,
+        2450186240,
+        2456915968
+      ],
+      "kernel_write_bytes": [
+        2389295104,
+        2395742208,
+        2402287616
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.21226033999118954
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.4545982080162503
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.19542620901484042
+        }
+      ]
+    },
+    {
+      "bots": 50,
+      "mode": "batched",
+      "repetitions": 3,
+      "tps": [
+        18.643969859179848,
+        19.15799077206185,
+        19.58565174785348
+      ],
+      "p99_ms": [
+        105.363,
+        93.276,
+        77.194
+      ],
+      "max_tick_ms": 122.169,
+      "over_50ms": 176,
+      "active_s": [
+        22.688301,
+        21.244399,
+        21.393212
+      ],
+      "total_including_shutdown_s": [
+        38.66239962200052,
+        37.20192860599491,
+        37.38168174799648
+      ],
+      "region_written_bytes": [
+        665477120,
+        661102592,
+        650375168
+      ],
+      "kernel_write_bytes": [
+        653090816,
+        648744960,
+        638275584
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.18084066599840298
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.15676702902419493
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.1962528490112163
+        }
+      ]
+    },
+    {
+      "bots": 50,
+      "mode": "async",
+      "repetitions": 3,
+      "tps": [
+        19.86780121799302,
+        19.989788514030177,
+        19.977622202375983
+      ],
+      "p99_ms": [
+        48.632,
+        56.577,
+        52.741
+      ],
+      "max_tick_ms": 81.272,
+      "over_50ms": 19,
+      "active_s": [
+        21.693392,
+        23.361928,
+        20.973467
+      ],
+      "total_including_shutdown_s": [
+        37.620070158009185,
+        39.36742690202664,
+        36.88588095200248
+      ],
+      "region_written_bytes": [
+        619851776,
+        669503488,
+        584413184
+      ],
+      "kernel_write_bytes": [
+        608505856,
+        657018880,
+        573816832
+      ],
+      "restart_checks": [
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.5430340010207146
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.1953969930182211
+        },
+        {
+          "status": "passed",
+          "targets": 50,
+          "seconds": 0.2551779889909085
+        }
+      ]
+    }
+  ]
+}

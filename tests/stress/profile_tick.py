@@ -24,8 +24,10 @@ import time
 
 from protocol import position, varint, read_varint
 from stress import Bot, block_target_offset, options
-from native_storage_oracle import world_blocks
+from native_storage_oracle import world_blocks, chunks, sections, section_blocks
 from test_player_visibility import close
+from test_block_persistence import query_block
+from test_block_placement import report_states
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,8 +36,16 @@ class ProfileBot(Bot):
     def __init__(self, *args):
         super().__init__(*args)
         self.pickups=[]
+        self.ack_sequence=-1
+        self.ack_event=asyncio.Event()
+        self.acknowledged=[]
 
     async def play_packet(self, packet_id, payload):
+        if packet_id==4:  # BlockChangedAck, protocol 775; not a disk acknowledgement
+            sequence,end=read_varint(payload)
+            assert end==len(payload), "malformed block ACK"
+            self.ack_sequence=max(self.ack_sequence,sequence)
+            self.ack_event.set()
         if packet_id==124:  # TakeItemEntity, protocol 775
             _,offset=read_varint(payload)
             _,offset=read_varint(payload,offset)
@@ -43,6 +53,23 @@ class ProfileBot(Bot):
             assert end==len(payload)
             self.pickups.append((time.monotonic_ns()//1000,count))
         await super().play_packet(packet_id,payload)
+
+    async def expect_block(self, block, predicate):
+        # A state packet alone may be an earlier broadcast. Also wait until the
+        # server has processed THIS sequence before sending the next action.
+        # Combined with a private target and alternating known states this
+        # prevents a delayed display update from counting as completed work.
+        sequence=self.sequence;started=time.monotonic()
+        state=await super().expect_block(block,predicate)
+        if state is None:return None
+        try:
+            while self.ack_sequence<sequence:
+                self.ack_event.clear()
+                await asyncio.wait_for(self.ack_event.wait(),self.args.timeout)
+        except TimeoutError:return None
+        self.latencies[-1]=(time.monotonic()-started)*1000
+        self.acknowledged.append(dict(sequence=sequence,state=state,time_us=time.monotonic_ns()//1000))
+        return state
 
 
 def quantile(values, p):
@@ -57,7 +84,20 @@ def summarize(rows, start, end):
     selected = [r for r in rows if r['start_us'] < end and r['end_us'] > start]
     started = [r for r in rows if start <= r['start_us'] < end]
     costs = [(r['end_us'] - r['start_us']) / 1000 for r in selected]
-    busy = [(r['end_us'] - r['start_us'] + r['fast_us']) / 1000 for r in selected]
+    # Fast passes occur BETWEEN scheduled ticks. A slow final pass can end in
+    # the next row AFTER phase end. Keep its whole aggregate instead of silently
+    # dropping that tail. First/last fast intervals may include adjacent work;
+    # expose these boundary intervals rather than claim exact time slicing.
+    busy=[];fast_covered=0;busy_boundaries=0
+    for index,row in enumerate(rows):
+        previous_end=rows[index-1]['end_us'] if index else row['start_us']-row['fast_us']
+        fixed=row['start_us']<end and row['end_us']>start
+        fast=row['fast_us']>0 and previous_end<end and row['start_us']>start
+        if not fixed and not fast:continue
+        busy.append(((row['end_us']-row['start_us']) if fixed else 0)/1000+(row['fast_us']/1000 if fast else 0))
+        if fast:
+            fast_covered+=row['fast_us']
+            busy_boundaries+=previous_end<start or row['start_us']>end
     intervals = [(b['start_us']-a['start_us'])/1000 for a,b in zip(started,started[1:])]
     duration = (end - start) / 1e6
     phases = ('tasks_us', 'fast_us', 'world_us', 'proto_us', 'items_us', 'remote_us',
@@ -67,6 +107,8 @@ def summarize(rows, start, end):
                 tps=len(started)/duration, p50_ms=quantile(costs,.5), p95_ms=quantile(costs,.95),
                 p99_ms=quantile(costs,.99), max_ms=max(costs,default=None),
                 over_50ms=sum(v>50 for v in costs),
+                busy_max_ms=max(busy,default=None),busy_over_50ms=sum(v>50 for v in busy),
+                busy_samples=len(busy),busy_boundary_intervals=busy_boundaries,covered_fast_s=fast_covered/1e6,
                 boundary_ticks=sum(r['start_us']<start or r['end_us']>end for r in selected),
                 tick_and_fast_ms={str(p):quantile(busy,p) for p in (.5,.95,.99)},
                 interarrival_ms={str(p):quantile(intervals,p) for p in (.5,.95,.99)},
@@ -127,14 +169,19 @@ def proc_sample(pid):
     base=Path(f'/proc/{pid}')
     fields=(base/'stat').read_text().rsplit(')',1)[1].split()
     status=dict(line.split(':',1) for line in (base/'status').read_text().splitlines() if ':' in line)
+    if fields[0] in ('Z','X') or 'VmRSS' not in status or 'VmHWM' not in status:
+        raise ProcessLookupError('process exited before memory sampling')
+    thread_rows={}
+    for task in (base/'task').iterdir():
+        try:thread_rows[task.name]=dict(schedstat=(task/'schedstat').read_text().strip(),wchan=(task/'wchan').read_text().strip())
+        except OSError:continue  # A single exiting thread does not end process sampling.
     return dict(time_us=time.monotonic_ns()//1000,
                 cpu_s=(int(fields[11])+int(fields[12]))/os.sysconf('SC_CLK_TCK'),
                 rss_kb=int(status['VmRSS'].split()[0]), hwm_kb=int(status['VmHWM'].split()[0]),
                 process_io=(base/'io').read_text(), host_stat=Path('/proc/stat').read_text().splitlines()[0],
                 loadavg=Path('/proc/loadavg').read_text().strip(),
                 pressure={k:Path(f'/proc/pressure/{k}').read_text() for k in ('cpu','io','memory')},
-                threads={p.name:dict(schedstat=(p/'schedstat').read_text().strip(),wchan=(p/'wchan').read_text().strip())
-                         for p in (base/'task').iterdir()})
+                threads=thread_rows)
 
 
 async def monitor(pid, samples, stop):
@@ -186,7 +233,7 @@ async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only)
         start=now();await asyncio.sleep(warmup);phases['warmup']=[start,now()]
         start=now();await asyncio.sleep(idle);phases['idle_before']=[start,now()]
         for bot in actors:
-            bot.latencies.clear();bot.failures=0
+            bot.latencies.clear();bot.failures=0;bot.acknowledged.clear()
         async def work(bot):
             for _ in range(cycles):
                 if not await bot.block_cycle(bot.profile_target):break
@@ -199,32 +246,91 @@ async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only)
         start=now();await asyncio.sleep(idle);phases['idle_after']=[start,now()]
         assert all(b.state=='play' and not b.error for b in actors), 'connection failure'
         latencies=[v for b in actors for v in b.latencies]
-        report=dict(phases=phases,bots=[b.report() for b in actors],
-                    action_times=[dict(place_sent=b.place_send_times,break_sent=b.break_send_times,
-                                       place_confirmed=b.place_verified_times,break_confirmed=b.break_verified_times,
-                                       latencies_ms=b.latencies) for b in actors],
+        report=dict(phases=phases,targets=[list(b.profile_target) for b in actors],bots=[b.report() for b in actors],
+                    action_times=[dict(place_sent=list(b.place_send_times),break_sent=list(b.break_send_times),
+                                       place_confirmed=list(b.place_verified_times),break_confirmed=list(b.break_verified_times),
+                                       latencies_ms=list(b.latencies)) for b in actors],
                     pickup_observations=[dict(events=len(b.pickups),items=sum(n for _,n in b.pickups)) for b in actors],
-                    pickup_events_first_observer=actors[0].pickups,
+                    pickup_events_first_observer=list(actors[0].pickups),
+                    acknowledged_actions=[list(b.acknowledged) for b in actors],
+                    acknowledged_place=sum(r["state"]!=0 for b in actors for r in b.acknowledged),
+                    acknowledged_break=sum(r["state"]==0 for b in actors for r in b.acknowledged),
                     placed=sum(b.placed for b in actors),broken=sum(b.broken for b in actors),
                     missing=sum(cycles-b.cycles_completed for b in actors) if not prepare_only else 0,
                     failures=sum(b.failures for b in actors),
                     latencies_ms=dict(mean=statistics.mean(latencies) if latencies else None,
                                       p50=quantile(latencies,.5),p95=quantile(latencies,.95),p99=quantile(latencies,.99),
                                       maximum=max(latencies,default=None)))
+        report['expected_final']=[dict(point=list(b.profile_target),state=0) for b in actors]
+        report['final_validation_placements']=0
+        if not prepare_only and item==1:
+            # Outside the fixed-work timing: leave a NEW positive state, so a
+            # restart cannot pass just by finding the original all-air target.
+            async def sentinel(bot):
+                x,y,z=bot.profile_target;bot.clear_block_events(bot.profile_target);bot.sequence+=1
+                payload=varint(0)+position(x,y-1,z)+varint(1)+struct.pack('>fff??',.5,1.,.5,False,False)+varint(bot.sequence)
+                await bot.conn.send(66,payload)
+                state=await bot.expect_block(bot.profile_target,lambda value:value!=0)
+                assert state is not None,'final durable sentinel not acknowledged'
+                return dict(point=[x,y,z],state=state)
+            started=now();report['expected_final']=await asyncio.gather(*(sentinel(b) for b in actors))
+            report['phases']['durability_tail']=[started,now()]
+            report['final_validation_placements']=len(actors)
         (result/'actions.json').write_text(json.dumps(report,indent=2))
         assert report['missing']==report['failures']==0, 'unconfirmed actions'
+        assert report['acknowledged_place']==report['placed'] and report['acknowledged_break']==report['broken'], 'state/sequence ACK counts differ'
         return report
     finally:
         await asyncio.gather(*(close(b) for b in actors if b.conn),return_exceptions=True)
         bot_log.close()
 
 
-async def one(args,binary,label,bots,result,template=None,prepare_only=False,backend="bin"):
+async def verify_restart(binary, backend, save_mode, world, expected, result):
+    folder=result/'verification';folder.mkdir()
+    runtime=folder/'runtime';runtime.mkdir();copy=runtime/'world';shutil.copytree(world,copy)
+    (runtime/'assets').symlink_to(ROOT/'assets')
+    (runtime/'server.config').write_text(f'online-mode=false\noffline-skins=false\nview-distance=2\nsimulation-distance=2\nchunk-storage={backend}\n'+(f'anvil-save-mode={save_mode}\n' if save_mode!='immediate' else ''))
+    with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+    assert port not in (25565,25587)
+    env=os.environ.copy()
+    for name in ('LD_PRELOAD','MC_SAVE_TRACE_PATH','MC_PERF_TRACE_PATH','MC_FSYNC_TRACE_PATH','MC_PROC_FINAL_PATH'):
+        env.pop(name,None)
+    env.update(MC_WORLD_PATH=str(copy),MC_BIND_PORT=str(port),MC_QA_MODE='1',MC_ADMIN_USERNAME='StressPROF00000',MC_PERF='0',MC_SETUP_FILE=str(ROOT/'tests/stress/network/one.conf'))
+    opts=options(['--host','127.0.0.1','--port',str(port),'--mode','connect','--bots','1','--timeout','30']);opts.run_id='PROF'
+    actor=ProfileBot(0,opts,lambda _:None);started=time.monotonic()
+    with (folder/'server.log').open('w') as log:
+        process=subprocess.Popen([str(binary)],cwd=runtime,env=env,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            deadline=time.monotonic()+30
+            while True:
+                if process.poll() is not None:raise RuntimeError('restart startup failed')
+                try:
+                    with socket.create_connection(('127.0.0.1',port),timeout=.2):break
+                except ConnectionRefusedError:
+                    if time.monotonic()>deadline:raise TimeoutError('restart readiness')
+                    await asyncio.sleep(.05)
+            await actor.connect();await actor.conn.send(44)
+            for point in expected:
+                assert await query_block(actor,tuple(point['point']))==point['state'],point
+        finally:
+            if actor.conn:await close(actor)
+            if process.poll() is None:process.send_signal(signal.SIGTERM)
+            try:await asyncio.to_thread(process.wait,60)
+            except subprocess.TimeoutExpired:
+                process.kill();await asyncio.to_thread(process.wait);raise RuntimeError('restart shutdown timeout')
+    assert process.returncode==0,'restart persistence failed'
+    proof=dict(status='passed',targets=len(expected),seconds=time.monotonic()-started)
+    (folder/'proof.json').write_text(json.dumps(proof,indent=2));return proof
+
+
+async def one(args,binary,label,bots,result,template=None,prepare_only=False,backend="bin",save_mode="immediate"):
     result.mkdir(parents=True,exist_ok=False)
     runtime=result/'runtime';runtime.mkdir();world=runtime/'world'
     if template:shutil.copytree(template,world)
     (runtime/'assets').symlink_to(ROOT/'assets')
     (runtime/'server.config').write_text(f'online-mode=false\noffline-skins=false\nview-distance=10\nsimulation-distance=10\nlevel-seed=0\nchunk-storage={backend}\n')
+    if save_mode!='immediate':
+        with (runtime/'server.config').open('a') as config:config.write(f'anvil-save-mode={save_mode}\n')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     assert port not in (25565,25587)
@@ -232,7 +338,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
              MC_SETUP_FILE=str(ROOT/'tests/stress/network/one.conf'),MC_PERF='1',MC_PERF_SLOW_MS='50',
              MC_PERF_SUMMARY_TICKS='100',MC_PERF_TRACE_PATH=str(result/'ticks.csv'))
     if args.fsync_probe:
-        env.update(LD_PRELOAD=str(args.fsync_probe.resolve()),MC_FSYNC_TRACE_PATH=str(result/'fsync.csv'))
+        env.update(LD_PRELOAD=str(args.fsync_probe.resolve()),MC_FSYNC_TRACE_PATH=str(result/'fsync.csv'),MC_PROC_FINAL_PATH=str(result/'process-final.json'))
     if args.save_trace:env['MC_SAVE_TRACE_PATH']=str(result/'saves.csv')
     samples=[];stop=asyncio.Event()
     (result/'processes-before.txt').write_text(subprocess.check_output(['ps','-eo','pid,comm,pcpu,pmem,args','--sort=-pcpu'],text=True))
@@ -251,13 +357,37 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
                     await asyncio.sleep(.05)
             report=await exercise(port,bots,args.cycles,args.item,result,args.warmup,args.idle,prepare_only)
         finally:
-            stop.set();await sampling
-            (result/'resources.json').write_text(json.dumps(samples,indent=2))
+            shutdown_start=time.monotonic_ns()//1000
             if proc.poll() is None:proc.send_signal(signal.SIGTERM)
             try:await asyncio.to_thread(proc.wait,60)
             except subprocess.TimeoutExpired:
                 proc.kill();await asyncio.to_thread(proc.wait);raise RuntimeError('unclean shutdown')
+            finally:
+                shutdown_end=time.monotonic_ns()//1000
+                stop.set()
+                try:await sampling
+                finally:(result/'resources.json').write_text(json.dumps(samples,indent=2))
         assert proc.returncode==0, f'server exit {proc.returncode}'
+    report['phases']['shutdown']=[shutdown_start,shutdown_end]
+    (result/'actions.json').write_text(json.dumps(report,indent=2))
+    server_log=(result/'server.log').read_text()
+    assert 'world shutdown persistence FAILED' not in server_log and 'chunk store save failed' not in server_log and 'durability uncertain' not in server_log,'unconfirmed persistence'
+    wanted={tuple(p['point']):p['state'] for p in report['expected_final']};restored=[]
+    reverse={v:k for k,v in report_states(ROOT/'data/26.1.1/reports/blocks.json').items()}
+    for (cx,cz),root,_ in chunks(world,backend):
+        selected=[p for p in wanted if (p[0]//16,p[2]//16)==(cx,cz)]
+        if not selected:continue
+        sec=sections(root)
+        for x,y,z in selected:
+            states=section_blocks(sec[y//16],backend=='bin') if y//16 in sec else ['minecraft:air']*4096
+            assert states[((y%16)*16+z%16)*16+x%16]==reverse[wanted[(x,y,z)]],(x,y,z,'not saved')
+            restored.append([x,y,z]);wanted.pop((x,y,z))
+    assert not wanted,('missing saved chunks',wanted)
+    final_usage=json.loads((result/'process-final.json').read_text()) if args.fsync_probe else None
+    if final_usage:
+        assert final_usage['pid']==proc.pid
+        assert final_usage['vmhwm_kb']>0
+    (result/'durable-targets.json').write_text(json.dumps(dict(status='passed',targets=restored,boundary='clean shutdown with no persistence error; independent NBT block-state check'),indent=2))
     rows=read_trace(result/'ticks.csv')
     if args.fsync_probe:assert (result/'fsync.csv').is_file(), 'fsync probe did not produce a trace'
     assert rows[0]['start_us'] <= report['phases']['active'][0] and rows[-1]['end_us'] >= report['phases']['active'][1], 'active phase not fully traced'
@@ -275,11 +405,20 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
             stats['client_cpu_percent']=100*(selected[-1]['client_cpu_s']-selected[0]['client_cpu_s'])/((selected[-1]['time_us']-selected[0]['time_us'])/1e6)
             stats['rss_min_kb']=min(s['rss_kb'] for s in selected);stats['rss_max_kb']=max(s['rss_kb'] for s in selected)
         summaries[phase]=stats
-    result_row=dict(backend=backend,label=label,binary=str(binary),sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),bots=bots,
+    verification=await verify_restart(binary,backend,save_mode,world,report['expected_final'],result) if not prepare_only else None
+    result_row=dict(backend=backend,save_mode=save_mode,label=label,binary=str(binary),sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),bots=bots,
                     cycles_per_bot=args.cycles,item_id=args.item,port=port,phases=summaries,
                     placed=report['placed'],broken=report['broken'],missing=report['missing'],failures=report['failures'],
+                    acknowledged_place=report['acknowledged_place'],acknowledged_break=report['acknowledged_break'],
+                    final_validation_placements=report['final_validation_placements'],restart_verification=verification,
+                    proposed_place=sum(len(r['place_sent']) for r in report['action_times']),
+                    proposed_break=sum(len(r['break_sent']) for r in report['action_times']),
                     pickup_observations=report['pickup_observations'],
-                    latencies_ms=report['latencies_ms'],total_including_shutdown_s=time.monotonic()-started)
+                    latencies_ms=report['latencies_ms'],total_including_shutdown_s=shutdown_end/1e6-started,
+                    after_active_until_shutdown_s=(shutdown_end-report['phases']['active'][1])/1e6,
+                    total_storage=storage_summary(result/'saves.csv',0,shutdown_end+1),
+                    durable_targets=len(restored),final_process_usage=final_usage,
+                    rss_peak_observed_kb=max([s['hwm_kb'] for s in samples]+[final_usage['vmhwm_kb'] if final_usage else 0]))
     (result/'summary.json').write_text(json.dumps(result_row,indent=2))
     print(json.dumps(dict(label=label,bots=bots,result=str(result),placed=report['placed'],broken=report['broken'],active=summaries['active'])),flush=True)
     return result_row
@@ -295,6 +434,10 @@ async def main(args):
     modes=dict(v.split('=',1) for v in args.storage_backend)
     assert set(modes)<=set(label for label,_ in binaries), 'unknown backend label'
     assert all(v in ('bin','anvil-atomic-experimental') for v in modes.values())
+    policies=dict(v.split('=',1) for v in args.save_mode)
+    assert set(policies)<=set(label for label,_ in binaries), 'unknown save-mode label'
+    assert all(v in ('immediate','batched','async') for v in policies.values())
+    assert all(v=='immediate' or modes.get(k,'bin')=='anvil-atomic-experimental' for k,v in policies.items())
     templates={};semantics={}
     for label,binary in binaries:
         backend=modes.get(label,'bin')
@@ -318,7 +461,7 @@ async def main(args):
             for label,binary in order:
                 name=f'{label}-{bots}-r{repetition+1}'
                 backend=modes.get(label,"bin")
-                row=await one(args,binary,label,bots,args.result_dir/name,templates[backend],backend=backend)
+                row=await one(args,binary,label,bots,args.result_dir/name,templates[backend],backend=backend,save_mode=policies.get(label,'immediate'))
                 row['repetition']=repetition+1;rows.append(row)
                 (args.result_dir/'comparison.json').write_text(json.dumps(rows,indent=2))
 
@@ -327,6 +470,7 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',action='append',required=True,help='label=/absolute/path/to/binary')
     p.add_argument('--storage-backend',action='append',default=[],help='label=bin or label=anvil-atomic-experimental; independent equivalent templates')
+    p.add_argument('--save-mode',action='append',default=[],help='label=immediate|batched|async; opt-in Anvil policy')
     p.add_argument('--bots',nargs='+',type=int,default=[1,10,25,50])
     p.add_argument('--repetitions',type=int,default=3)
     p.add_argument('--cycles',type=int,default=100)

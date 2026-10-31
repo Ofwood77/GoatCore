@@ -716,15 +716,16 @@ int net_server_init(mc_server_t **out, const mc_server_config_t *cfg) {
     }
 
     s->world = mc_world_create_with_storage(cfg->world_path, cfg->level_seed, cfg->chunk_workers, cfg->chunk_storage);
-    if (!s->world) {
+    if (!s->world || mc_world_configure_saves(s->world,cfg->anvil_save_mode)!=0) {
+        if(s->world)mc_world_destroy(s->world);
         mc_task_queue_destroy(&s->task_queue);
         pthread_mutex_destroy(&s->conns_lock);
         free(s);
         return -1;
     }
-    log_info("runtime threads: acceptor=1 network_owners=%d tick_threads=1 chunk_workers=%d save_workers=0 simulation_workers=0",
+    log_info("runtime threads: acceptor=1 network_owners=%d tick_threads=1 chunk_workers=%d save_workers=%d simulation_workers=0",
              s->cfg.network_workers,
-             mc_world_worker_count(s->world));
+             mc_world_worker_count(s->world),cfg->anvil_save_mode==MC_SAVE_ASYNC?1:0);
 
     s->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->listen_fd < 0) {
@@ -2548,8 +2549,8 @@ void net_server_stop(mc_server_t *s) {
     for (int i = 0; i < s->network_worker_count; i++) wake_eventfd(s->workers[i].wake_fd);
 }
 
-void net_server_destroy(mc_server_t *s) {
-    if (!s) return;
+int net_server_destroy_checked(mc_server_t *s) {
+    if (!s) return 0;
     mc_profile_service_destroy(s->profiles);
     mc_auth_service_destroy(s->auth);
     pthread_mutex_lock(&s->conns_lock);
@@ -2581,11 +2582,14 @@ void net_server_destroy(mc_server_t *s) {
         mc_slot_clear(&s->item_entities[i].slot);
     }
     free(s->item_entities);
-    mc_world_destroy(s->world);
+    int storage_rc=mc_world_destroy_checked(s->world);
     mc_task_queue_destroy(&s->task_queue);
     pthread_mutex_destroy(&s->conns_lock);
     free(s);
+    return storage_rc;
 }
+
+void net_server_destroy(mc_server_t *s) { (void)net_server_destroy_checked(s); }
 
 mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     if (!server || !name || !*name) return NULL;

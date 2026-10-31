@@ -189,7 +189,7 @@ static mc_block_entity_type_t block_entity_type_from_id(const char *id) {
 }
 
 static int inflate_buffer(const uint8_t *src, size_t src_len, uint8_t **out, size_t *out_len) {
-    if (!src || !out || !out_len) return -1;
+    if (!src || !out || !out_len) { errno=EINVAL;return -1; }
 
     z_stream strm;
     memset(&strm, 0, sizeof(strm));
@@ -579,11 +579,11 @@ int mc_anvil_load_chunk(const char *region_path,
 static int deflate_buffer_zlib(const uint8_t *src, size_t src_len, uint8_t **out, size_t *out_len) {
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
-    if (!src || !out || !out_len) return -1;
+    if (!src || !out || !out_len) {errno=EINVAL;return -1;}
 
-    if (src_len > (size_t)UINT_MAX) return -1;
+    if (src_len > (size_t)UINT_MAX) {errno=EFBIG;return -1;}
     uLong bound = compressBound((uLong)src_len);
-    if (bound == 0) return -1;
+    if (bound == 0) {errno=EFBIG;return -1;}
     if ((size_t)bound > MC_ANVIL_MAX_CHUNK_NBT) {
         /* bound is pessimistic; still cap to a reasonable size */
         bound = (uLong)MC_ANVIL_MAX_CHUNK_NBT;
@@ -599,8 +599,10 @@ static int deflate_buffer_zlib(const uint8_t *src, size_t src_len, uint8_t **out
     strm.next_out = buf;
     strm.avail_out = (uInt)bound;
 
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+    int init=deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
+    if (init != Z_OK) {
         free(buf);
+        errno=init==Z_MEM_ERROR?ENOMEM:EIO;
         return -1;
     }
 
@@ -608,11 +610,13 @@ static int deflate_buffer_zlib(const uint8_t *src, size_t src_len, uint8_t **out
     if (ret != Z_STREAM_END) {
         deflateEnd(&strm);
         free(buf);
+        errno=ret==Z_MEM_ERROR?ENOMEM:EIO;
         return -1;
     }
 
     if (deflateEnd(&strm) != Z_OK) {
         free(buf);
+        errno=EIO;
         return -1;
     }
 
@@ -1229,128 +1233,225 @@ static int validate_region(int fd, uint8_t *header, uint64_t size) {
     return rc;
 }
 
-static int write_chunk_nbt(const char *region_path, int local_x, int local_z, const uint8_t *nbt, size_t nbt_len,
-                           bool compare_source, const uint8_t *expected, size_t expected_len) {
-    if (!region_path || !nbt || local_x < 0 || local_x > 31 || local_z < 0 || local_z > 31) {
-        errno = EINVAL; return -1;
+/* The region lock covers every source comparison and the one rename. Inputs
+ * remain immutable; the temporary inode is the only file ever overwritten. */
+static int write_batch(const char *region_path, const mc_anvil_chunk_write_t *writes, size_t count,
+                       bool compare_source) {
+    if (!region_path || !writes || !count || count > MC_REGION_SLOTS) {
+        errno = EINVAL;
+        return -1;
     }
+    bool seen[MC_REGION_SLOTS] = {0};
+    size_t input_bytes = 0;
+    for (size_t i = 0; i < count; i++) {
+        const mc_anvil_chunk_write_t *w = &writes[i];
+        if (w->slot >= MC_REGION_SLOTS || seen[w->slot] || !w->nbt || !w->length ||
+            (w->expected && !w->expected_length) || w->length > MC_ANVIL_MAX_CHUNK_NBT - input_bytes) {
+            errno = EINVAL;
+            return -1;
+        }
+        seen[w->slot] = true;
+        input_bytes += w->length;
+    }
+    int local_x = writes[0].slot % 32, local_z = writes[0].slot / 32;
     mc_save_clock_t total_span = mc_save_profile_begin(), span = total_span;
     int result = -1, source = -1;
     int lock = mc_atomic_file_lock(region_path);
-    if (lock < 0) return -1;
+    if (lock < 0)
+        return -1;
+    mc_save_profile_end("region_lock_wait", local_x, local_z, span, 0, 0);
     mc_atomic_file_t file = {.dir_fd = -1, .temp_fd = -1, .path = region_path};
-    uint8_t *comp = NULL;
-    size_t comp_len = 0;
+    uint8_t **comp = calloc(count, sizeof(*comp));
+    size_t *lengths = calloc(count, sizeof(*lengths));
+    mc_region_file_t *reader = NULL;
     uint8_t header[MC_ANVIL_HEADER_BYTES] = {0};
     uint64_t size = MC_ANVIL_HEADER_BYTES;
     size_t written = 0;
-    do { source = open(region_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); } while (source < 0 && errno == EINTR);
+    if (!comp || !lengths)
+        goto done;
+    do {
+        source = open(region_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    } while (source < 0 && errno == EINTR);
     if (source >= 0) {
         struct stat st;
         int stat_rc;
-        do { stat_rc = fstat(source, &st); } while (stat_rc < 0 && errno == EINTR);
-        if (stat_rc != 0) goto done;
-        if (!S_ISREG(st.st_mode) || st.st_size < MC_ANVIL_HEADER_BYTES) { errno = EINVAL; goto done; }
+        do {
+            stat_rc = fstat(source, &st);
+        } while (stat_rc < 0 && errno == EINTR);
+        if (stat_rc != 0)
+            goto done;
+        if (!S_ISREG(st.st_mode) || st.st_size < MC_ANVIL_HEADER_BYTES) {
+            errno = EINVAL;
+            goto done;
+        }
         size = (uint64_t)st.st_size;
-        if (validate_region(source, header, size) != 0) goto done;
-    } else if (errno != ENOENT) goto done;
+        if (validate_region(source, header, size) != 0)
+            goto done;
+    } else if (errno != ENOENT)
+        goto done;
     if (compare_source) {
         size_t n = strlen(region_path) + sizeof(".s2-journal");
         char *pending = malloc(n);
-        if (!pending) goto done;
-        snprintf(pending,n,"%s.s2-journal",region_path);
+        if (!pending)
+            goto done;
+        snprintf(pending, n, "%s.s2-journal", region_path);
         struct stat st;
-        int sr; do { sr=lstat(pending,&st); } while(sr<0 && errno==EINTR);
+        int sr;
+        do {
+            sr = lstat(pending, &st);
+        } while (sr < 0 && errno == EINTR);
         free(pending);
-        if(sr==0 || errno!=ENOENT) { if(sr==0) errno=EBUSY; goto done; }
-        uint8_t *current=NULL;size_t current_len=0;
-        int rr=mc_anvil_read_chunk_nbt(region_path,local_x,local_z,&current,&current_len);
-        bool same=expected ? rr==0 && current_len==expected_len && !memcmp(current,expected,expected_len) : rr==1;
-        free(current);
-        if(!same) { if(rr>=0) errno=ESTALE; goto done; }
+        if (sr == 0 || errno != ENOENT) {
+            if (sr == 0)
+                errno = EBUSY;
+            goto done;
+        }
+        if (source >= 0 && mc_region_open(region_path, &reader) != 0)
+            goto done;
+        for (size_t i = 0; i < count; i++) {
+            const mc_anvil_chunk_write_t *w = &writes[i];
+            uint8_t *current = NULL;
+            size_t current_len = 0;
+            int rr = reader ? mc_anvil_read_chunk_indexed(reader, w->slot, &current, &current_len) : 1;
+            bool same = w->expected ? rr == 0 && current_len == w->expected_length &&
+                                          !memcmp(current, w->expected, w->expected_length)
+                                    : rr == 1;
+            free(current);
+            if (!same) {
+                if (rr >= 0)
+                    errno = ESTALE;
+                goto done;
+            }
+        }
+        if (reader) {
+            mc_region_file_t *r = reader;
+            reader = NULL;
+            if (mc_region_close(r) != 0)
+                goto done;
+        }
     }
     mc_save_profile_end("region_read_validate", local_x, local_z, span, sizeof(header), 0);
-    span = mc_save_profile_begin();
-    if (deflate_buffer_zlib(nbt, nbt_len, &comp, &comp_len) != 0) goto done;
-    mc_save_profile_end("region_compress", local_x, local_z, span, comp_len, 0);
-    if (comp_len > MC_ANVIL_MAX_CHUNK_NBT - 5) { errno = EFBIG; goto done; }
-    size_t total = comp_len + 5;
-    size_t required = (total + MC_ANVIL_SECTOR_BYTES - 1) / MC_ANVIL_SECTOR_BYTES;
-    if (!required || required > 255) { errno = EFBIG; goto done; }
-    int idx = local_x + local_z * 32;
-    uint32_t entry = read_be32(header + idx * 4);
-    uint32_t old_off = entry >> 8;
-    uint8_t old_count = (uint8_t)entry;
-    uint32_t offset = old_off;
-    span = mc_save_profile_begin();
-    if (!old_off || old_count < required) {
-        offset = find_free_sector_run(header, idx, old_off, old_count, (uint8_t)required, size);
-        if (offset == UINT32_MAX) goto done;
-        if (offset < 2 || offset > 0xFFFFFFu) { errno = EFBIG; goto done; }
+    for (size_t i = 0; i < count; i++) {
+        span = mc_save_profile_begin();
+        if (deflate_buffer_zlib(writes[i].nbt, writes[i].length, &comp[i], &lengths[i]) != 0)
+            goto done;
+        mc_save_profile_end("region_compress", local_x, local_z, span, lengths[i], 0);
+        if (lengths[i] > 255u * MC_ANVIL_SECTOR_BYTES - 5) {
+            errno = EFBIG;
+            goto done;
+        }
     }
-    mc_save_profile_end("region_allocate", local_x, local_z, span, 0, 0);
-    if (mc_atomic_file_begin(&file, region_path) != 0) goto done;
+    if (mc_atomic_file_begin(&file, region_path) != 0)
+        goto done;
     span = mc_save_profile_begin();
     if (source >= 0) {
         uint8_t buffer[65536];
         for (uint64_t pos = 0; pos < size;) {
             size_t amount = size - pos > sizeof(buffer) ? sizeof(buffer) : (size_t)(size - pos);
             if (mc_file_pread_all(source, buffer, amount, (off_t)pos) != 0 ||
-                mc_file_write_all(file.temp_fd, buffer, amount) != 0) goto done;
+                mc_file_write_all(file.temp_fd, buffer, amount) != 0)
+                goto done;
             pos += amount;
         }
-        int fd = source; source = -1;
-        if (close(fd) != 0) goto done;
-    } else if (mc_file_write_all(file.temp_fd, header, sizeof(header)) != 0) goto done;
+        int fd = source;
+        source = -1;
+        if (close(fd) != 0)
+            goto done;
+    } else if (mc_file_write_all(file.temp_fd, header, sizeof(header)) != 0)
+        goto done;
     written += (size_t)size;
     mc_save_profile_end("region_copy", local_x, local_z, span, (size_t)size, 0);
     span = mc_save_profile_begin();
-    off_t pos = (off_t)offset * MC_ANVIL_SECTOR_BYTES;
-    uint8_t record[5];
-    write_be32(record, (uint32_t)(comp_len + 1)); record[4] = 2;
-    if (mc_file_pwrite_all(file.temp_fd, record, sizeof(record), pos) != 0 ||
-        mc_file_pwrite_all(file.temp_fd, comp, comp_len, pos + 5) != 0) goto done;
-    uint8_t zeros[MC_ANVIL_SECTOR_BYTES] = {0};
-    size_t pad = required * MC_ANVIL_SECTOR_BYTES - total;
-    if (mc_file_pwrite_all(file.temp_fd, zeros, pad, pos + (off_t)total) != 0) goto done;
-    write_be32(header + idx * 4, (offset << 8) | (uint32_t)required);
     time_t timestamp = time(NULL);
-    if (timestamp == (time_t)-1) goto done;
-    write_be32(header + MC_ANVIL_OFFSETS_BYTES + idx * 4, (uint32_t)timestamp);
-    if (mc_file_pwrite_all(file.temp_fd, header, sizeof(header), 0) != 0) goto done;
-    written += required * MC_ANVIL_SECTOR_BYTES + sizeof(header);
-    mc_save_profile_end("region_temporary_update", local_x, local_z, span, required * MC_ANVIL_SECTOR_BYTES + sizeof(header), 0);
+    if (timestamp == (time_t)-1)
+        goto done;
+    size_t update_bytes = sizeof(header);
+    for (size_t i = 0; i < count; i++) {
+        unsigned idx = writes[i].slot;
+        size_t total = lengths[i] + 5;
+        uint32_t required = (uint32_t)((total + MC_ANVIL_SECTOR_BYTES - 1) / MC_ANVIL_SECTOR_BYTES);
+        uint32_t entry = read_be32(header + idx * 4), old_off = entry >> 8;
+        uint8_t old_count = (uint8_t)entry;
+        uint32_t offset = old_off;
+        if (!old_off || old_count < required) {
+            offset = find_free_sector_run(header, (int)idx, old_off, old_count, (uint8_t)required, size);
+            if (offset == UINT32_MAX)
+                goto done;
+            if (offset < 2 || offset > 0xFFFFFFu) {
+                errno = EFBIG;
+                goto done;
+            }
+        }
+        off_t pos = (off_t)offset * MC_ANVIL_SECTOR_BYTES;
+        uint8_t record[5];
+        write_be32(record, (uint32_t)(lengths[i] + 1));
+        record[4] = 2;
+        if (mc_file_pwrite_all(file.temp_fd, record, sizeof(record), pos) != 0 ||
+            mc_file_pwrite_all(file.temp_fd, comp[i], lengths[i], pos + 5) != 0)
+            goto done;
+        uint8_t zeros[MC_ANVIL_SECTOR_BYTES] = {0};
+        size_t pad = required * MC_ANVIL_SECTOR_BYTES - total;
+        if (mc_file_pwrite_all(file.temp_fd, zeros, pad, pos + (off_t)total) != 0)
+            goto done;
+        write_be32(header + idx * 4, (offset << 8) | required);
+        write_be32(header + MC_ANVIL_OFFSETS_BYTES + idx * 4, (uint32_t)timestamp);
+        uint64_t end = (uint64_t)(offset + required) * MC_ANVIL_SECTOR_BYTES;
+        if (end > size)
+            size = end;
+        written += required * MC_ANVIL_SECTOR_BYTES;
+        update_bytes += required * MC_ANVIL_SECTOR_BYTES;
+    }
+    if (mc_file_pwrite_all(file.temp_fd, header, sizeof(header), 0) != 0)
+        goto done;
+    written += sizeof(header);
+    mc_save_profile_end("region_temporary_update", local_x, local_z, span, update_bytes, 0);
     result = mc_atomic_file_commit(&file);
 done:;
     int saved = errno;
-    if (source >= 0 && close(source) != 0) log_error("region source cleanup close failed path=%s errno=%d", region_path, errno);
+    if (reader && mc_region_close(reader) != 0)
+        log_error("region reader cleanup failed path=%s", region_path);
+    if (source >= 0 && close(source) != 0)
+        log_error("region source cleanup close failed path=%s errno=%d", region_path, errno);
+    if (comp)
+        for (size_t i = 0; i < count; i++)
+            free(comp[i]);
     free(comp);
-    errno = saved;
+    free(lengths);
     mc_atomic_file_abort(&file);
-    if (close(lock) != 0) {
-        if (result == 0) {
-            result = MC_SAVE_DURABILITY_UNCERTAIN;
-            saved = errno;
-            log_error("region replacement committed, lock close failed path=%s errno=%d", region_path, saved);
-        }
+    if (close(lock) != 0 && result == 0) {
+        result = MC_SAVE_DURABILITY_UNCERTAIN;
+        saved = errno;
+        log_error("region replacement committed, lock close failed path=%s errno=%d", region_path, saved);
     }
     errno = saved;
+    mc_save_profile_end("region_batch_chunks", local_x, local_z, total_span, count, result);
     mc_save_profile_end("region_total", local_x, local_z, total_span, written, result);
     return result;
 }
-
-int mc_anvil_write_chunk_nbt(const char *path, int lx, int lz, const uint8_t *nbt, size_t length) {
-    return write_chunk_nbt(path,lx,lz,nbt,length,false,NULL,0);
+int mc_anvil_write_batch_expected(const char *path, const mc_anvil_chunk_write_t *writes, size_t count) {
+    return write_batch(path, writes, count, true);
 }
-int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
-                                      const uint8_t *expected, size_t expected_length) {
-    if (expected && !expected_length) {
+int mc_anvil_write_chunk_nbt(const char *path, int lx, int lz, const uint8_t *nbt, size_t length) {
+    if (lx < 0 || lx > 31 || lz < 0 || lz > 31) {
         errno = EINVAL;
         return -1;
     }
-    return write_chunk_nbt(path, lx, lz, nbt, length, true, expected, expected_length);
+    mc_anvil_chunk_write_t w = {.slot = (unsigned)(lx + lz * 32), .nbt = nbt, .length = length};
+    return write_batch(path, &w, 1, false);
 }
-
+int mc_anvil_write_chunk_nbt_expected(const char *path, int lx, int lz, const uint8_t *nbt, size_t length,
+                                      const uint8_t *expected, size_t expected_length) {
+    if (lx < 0 || lx > 31 || lz < 0 || lz > 31) {
+        errno = EINVAL;
+        return -1;
+    }
+    mc_anvil_chunk_write_t w = {.slot = (unsigned)(lx + lz * 32),
+                                .nbt = nbt,
+                                .length = length,
+                                .expected = expected,
+                                .expected_length = expected_length};
+    return write_batch(path, &w, 1, true);
+}
 /* Native 26.1.1 chunk editing. The historical compact .bin codec above remains
  * unchanged. Vanilla SimpleBitStorage stores floor(64/bits) values per long. */
 static void native_remove(mc_nbt_tag_t *compound, const char *name) {

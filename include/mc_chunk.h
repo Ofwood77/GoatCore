@@ -22,6 +22,12 @@ typedef struct {
     bool evict_after_save;
     size_t list_index;
     uint64_t revision;
+    /* Runtime-only persistence generations; never serialized into Vanilla NBT. */
+    uint64_t save_generation;
+    uint64_t durable_generation;
+    uint64_t inflight_generation;
+    bool save_pending;
+    bool save_requested;
     /* Native-only immutable last visible NBT, owned with this chunk. */
     uint8_t *storage_nbt;
     size_t storage_nbt_len;
@@ -39,5 +45,14 @@ int mc_chunk_init(mc_chunk_t *chunk, int32_t cx, int32_t cz, mc_global_state_id_
 void mc_chunk_destroy(mc_chunk_t *chunk);
 mc_global_state_id_t mc_chunk_get_block(const mc_chunk_t *chunk, int x, int y, int z);
 int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_id_t global_id);
+/* Tick/private owner only. Independent sections/source NBT, no network cache or
+ * live pointers. Fails before allocation if the explicit snapshot budget is too
+ * small. Caller destroys out exactly once, including on later write failure. */
+int mc_chunk_save_snapshot(const mc_chunk_t *source, mc_chunk_t *out, size_t budget, size_t *bytes);
+int mc_chunk_mark_dirty(mc_chunk_t *chunk);
+/* Tick-owned completion. A pending generation must match. Transfers the visible
+ * native source from snapshot only on 0/-2; only 0 advances durable_generation.
+ * Newer live mutations remain dirty. A stale completion changes nothing. */
+int mc_chunk_complete_save(mc_chunk_t *live, mc_chunk_t *snapshot, int result);
 
 #endif /* MC_CHUNK_H */

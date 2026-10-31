@@ -98,6 +98,10 @@ typedef struct mc_chunk_done {
 struct mc_world {
     char *world_path;
     mc_world_storage_t *storage;
+    mc_save_mode_t save_mode;
+    int save_error;
+    bool saves_configured;
+    mc_save_io_t *save_io;
     int64_t seed;
 
     float gen_base_freq;
@@ -934,8 +938,183 @@ int mc_world_worker_count(const mc_world_t *w) {
     return w ? w->worker_count : 0;
 }
 
-void mc_world_destroy(mc_world_t *w) {
-    if (!w) return;
+mc_save_mode_t mc_world_save_mode(const mc_world_t *w) {
+    return w ? w->save_mode : MC_SAVE_IMMEDIATE;
+}
+int mc_world_configure_saves(mc_world_t *w, mc_save_mode_t mode) {
+    if (!w || w->chunks.len || w->saves_configured ||
+        (mode != MC_SAVE_IMMEDIATE && mode != MC_SAVE_BATCHED && mode != MC_SAVE_ASYNC) ||
+        (mode != MC_SAVE_IMMEDIATE && !mc_storage_is_native(w->storage))) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (mode == MC_SAVE_ASYNC && mc_save_io_create(w->storage, &w->save_io) != 0)
+        return -1;
+    w->save_mode = mode;
+    w->saves_configured = true;
+    return 0;
+}
+
+/* Tick owner captures and acknowledges. Pending chunks stay pinned until their
+ * matching completion; the I/O owner sees only deep independent snapshots. */
+static int save_ack(mc_world_t *w, mc_save_batch_t *batch, mc_world_tick_stats_t *stats) {
+    if (!batch)
+        return 0;
+    mc_save_clock_t span = mc_save_profile_begin();
+    int rc = 0;
+    for (size_t i = 0; i < batch->count; i++) {
+        mc_chunk_t *snap = &batch->chunks[i];
+        mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(snap->cx, snap->cz));
+        int r = batch->results[i];
+        if (!e || !e->chunk || mc_chunk_complete_save(e->chunk, snap, r) != 0) {
+            w->save_error = ESTALE;
+            rc = -1;
+            r = -1;
+            log_error("save completion owner missing or stale chunk=(%d,%d)", snap->cx, snap->cz);
+        } else if (r) {
+            w->save_error = batch->errors[i];
+            rc = -1;
+            log_error("save batch %s chunk=(%d,%d) generation=%" PRIu64 " errno=%d; dirty retained",
+                      r == MC_SAVE_DURABILITY_UNCERTAIN ? "durability uncertain" : "failed", snap->cx,
+                      snap->cz, snap->save_generation, batch->errors[i]);
+        } else if (e->chunk->evict_after_save && !e->chunk->dirty) {
+            chunk_map_remove_key(w, e->key);
+            if (stats)
+                stats->evict_after_save_removed++;
+        }
+        if (stats) {
+            stats->saves_attempted++;
+            if (!r)
+                stats->saves_succeeded++;
+            else
+                stats->saves_failed++;
+        }
+    }
+    mc_save_profile_end("save_batch_done", 0, (int32_t)batch->count, span, batch->bytes, rc);
+    mc_save_batch_destroy(batch);
+    return rc;
+}
+static int save_group(mc_world_t *w, mc_world_tick_stats_t *stats) {
+    if (w->save_io && mc_save_io_busy(w->save_io)) {
+        mc_save_clock_t span = mc_save_profile_begin();
+        mc_save_profile_end("save_backpressure", 0, 0, span, 0, 0);
+        return 0;
+    }
+    bool dirty = false;
+    for (size_t i = 0; i < w->chunk_list_len; i++)
+        if (w->chunk_list[i]->dirty) {
+            dirty = true;
+            break;
+        }
+    if (!dirty)
+        return 0;
+    mc_save_batch_t *batch = calloc(1, sizeof(*batch));
+    if (!batch) {
+        w->save_error = errno;
+        log_error("save batch allocation failed; dirty retained");
+        return -1;
+    }
+    int64_t start = stats ? mc_now_us() : 0;
+    for (unsigned priority = 0; priority < 2 && batch->count < MC_SAVE_BATCH_CHUNKS; priority++) {
+        size_t scanned = 0;
+        while (scanned < w->chunk_list_len && batch->count < MC_SAVE_BATCH_CHUNKS) {
+            if (w->save_cursor >= w->chunk_list_len)
+                w->save_cursor = 0;
+            mc_chunk_t *c = w->chunk_list[w->save_cursor++];
+            scanned++;
+            if (stats)
+                stats->saves_scanned++;
+            if (!c || !c->dirty || c->save_pending || c->save_requested != (priority == 0))
+                continue;
+            if (mc_save_batch_add(batch, c) != 0) {
+                if (batch->count && errno == EFBIG)
+                    break;
+                w->save_error = errno;
+                log_error("save snapshot refused chunk=(%d,%d) errno=%d; dirty retained", c->cx, c->cz,
+                          errno);
+                break;
+            }
+            c->save_pending = true;
+            c->inflight_generation = c->save_generation;
+        }
+        if (w->save_error)
+            break;
+    }
+    if (!batch->count && !w->save_error) {
+        w->save_error = ESTALE;
+        log_error("save batch made no progress; unmatched pending generation retained");
+    }
+    int rc = w->save_error ? -1 : 0;
+    if (batch->count) {
+        mc_save_clock_t span = mc_save_profile_begin();
+        mc_save_profile_end("save_batch_submit", 0, (int32_t)batch->count, span, batch->bytes, 0);
+        if (w->save_io) {
+            if (mc_save_io_submit(w->save_io, batch) == 0)
+                batch = NULL;
+            else {
+                w->save_error = errno;
+                rc = -1;
+                for (size_t i = 0; i < batch->count; i++) {
+                    mc_chunk_entry_t *e =
+                        chunk_map_get(&w->chunks, chunk_key(batch->chunks[i].cx, batch->chunks[i].cz));
+                    if (e && e->chunk)
+                        e->chunk->save_pending = false;
+                }
+                log_error("save submit failed; ownership retained, dirty data not discarded");
+            }
+        } else {
+            mc_save_batch_execute(w->storage, batch);
+            if (save_ack(w, batch, stats) != 0)
+                rc = -1;
+            batch = NULL;
+        }
+    }
+    if (stats) {
+        int64_t elapsed = mc_now_us() - start;
+        stats->save_us += elapsed;
+        if (elapsed > stats->save_max_us)
+            stats->save_max_us = elapsed;
+    }
+    mc_save_batch_destroy(batch);
+    return rc;
+}
+int mc_world_flush_saves(mc_world_t *w) {
+    if (!w || !w->world_path || !*w->world_path)
+        return 0;
+    if (w->save_mode == MC_SAVE_IMMEDIATE) {
+        int rc = 0;
+        for (size_t i = 0; i < w->chunk_list_len; i++) {
+            mc_chunk_t *c = w->chunk_list[i];
+            if (c && c->dirty) {
+                if (save_chunk_to_store(w, c) == 0)
+                    c->dirty = false;
+                else
+                    rc = -1;
+            }
+        }
+        return rc;
+    }
+    if (w->save_io)
+        (void)save_ack(w, mc_save_io_take(w->save_io, true), NULL);
+    w->save_error = 0; /* One explicit retry; never a per-tick failure loop. */
+    for (;;) {
+        bool dirty = false;
+        for (size_t i = 0; i < w->chunk_list_len; i++)
+            if (w->chunk_list[i]->dirty) {
+                dirty = true;
+                break;
+            }
+        if (!dirty)
+            return 0;
+        if (save_group(w, NULL) != 0)
+            return -1;
+        if (w->save_io && save_ack(w, mc_save_io_take(w->save_io, true), NULL) != 0)
+            return -1;
+    }
+}
+int mc_world_destroy_checked(mc_world_t *w) {
+    if (!w) return 0;
+    mc_save_clock_t shutdown_span=mc_save_profile_begin();
 
     pthread_mutex_lock(&w->job_lock);
     w->jobs_stop = true;
@@ -980,12 +1159,16 @@ void mc_world_destroy(mc_world_t *w) {
         done = next;
     }
 
-    if (w->world_path && *w->world_path) {
-        for (size_t i = 0; i < w->chunk_list_len; i++) {
-            mc_chunk_t *c = w->chunk_list[i];
-            if (!c || !c->dirty) continue;
-            if (save_chunk_to_store(w, c) == 0) c->dirty = false;
+    int storage_rc=mc_world_flush_saves(w);
+    if(storage_rc!=0)log_error("world shutdown persistence FAILED; unsaved dirty data remain world=%s",w->world_path);
+    if(w->save_io) {
+        mc_save_batch_t *completion=NULL;
+        if(mc_save_io_close(w->save_io,&completion)!=0) {
+            log_error("save worker join failed; world resources retained to prevent use-after-free");
+            return -1;
         }
+        w->save_io=NULL;
+        (void)save_ack(w,completion,NULL);
     }
 
     chunk_map_free(&w->chunks);
@@ -1001,7 +1184,11 @@ void mc_world_destroy(mc_world_t *w) {
     pthread_mutex_destroy(&w->done_lock);
 
     free(w);
+    mc_save_profile_end("world_shutdown_save",0,0,shutdown_span,0,storage_rc);
+    return storage_rc;
 }
+
+void mc_world_destroy(mc_world_t *w) { (void)mc_world_destroy_checked(w); }
 
 const char *mc_world_path(const mc_world_t *w) {
     return w ? w->world_path : NULL;
@@ -1134,6 +1321,7 @@ bool mc_world_storage_action_allowed(mc_world_t *w, int32_t x, int32_t y, int32_
         return false;
     if (!mc_storage_is_native(w->storage))
         return true;
+    if (w->save_error) {errno=w->save_error;return false;}
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT)
         return false;
     for (int dz = -1; dz <= 1; dz++)
@@ -1223,6 +1411,7 @@ int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     if (!w) return -1;
     if (!w->world_path || !*w->world_path) return 0;
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) return -1;
+    if(w->save_mode!=MC_SAVE_IMMEDIATE)return mc_world_flush_saves(w);
 
     int32_t cx = 0, cz = 0;
     int lx = 0, lz = 0;
@@ -1252,6 +1441,19 @@ int mc_world_flush_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     return 0;
 }
 
+int mc_world_request_block_save(mc_world_t *w,int32_t x,int32_t y,int32_t z) {
+    if(!w)return -1;
+    if(w->save_mode==MC_SAVE_IMMEDIATE)return mc_world_flush_block(w,x,y,z);
+    if(w->save_error){errno=w->save_error;return -1;}
+    if(y<MC_WORLD_MIN_Y || y>=MC_WORLD_MIN_Y+MC_WORLD_HEIGHT){errno=EINVAL;return -1;}
+    int32_t cx,cz;int lx,lz;
+    if(coords_to_chunk(x,z,&cx,&cz,&lx,&lz)!=0)return -1;
+    mc_chunk_t *c=mc_world_get_chunk(w,cx,cz,UINT32_MAX);
+    if(!c){errno=EAGAIN;return -1;}
+    if(c->dirty)c->save_requested=true;
+    return 0;
+}
+
 int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z) {
     if (!w) return -1;
     int32_t cx = 0;
@@ -1263,8 +1465,7 @@ int mc_world_mark_chunk_dirty_at(mc_world_t *w, int32_t x, int32_t z) {
     (void)lz;
     mc_chunk_t *chunk = mc_world_get_chunk(w, cx, cz, UINT32_MAX);
     if (!chunk) return -1;
-    chunk->dirty = true;
-    return 0;
+    return mc_chunk_mark_dirty(chunk);
 }
 
 void mc_world_tick(mc_world_t *w, int64_t now_ms) {
@@ -1276,6 +1477,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
     if (stats) memset(stats, 0, sizeof(*stats));
     if (!w) return;
     w->tick_count++;
+    if(w->save_io)(void)save_ack(w,mc_save_io_take(w->save_io,false),stats);
     if (stats) {
         stats->flush_count = w->flush_count;
         stats->flush_us = w->flush_us;
@@ -1332,7 +1534,9 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
     if (stats) stats->integrate_us = mc_now_us() - integration_start_us;
 
     /* 2) Save at a bounded rate so large worlds do not monopolize the tick. */
-    if (w->world_path && *w->world_path && w->chunk_list_len > 0) {
+    if (w->save_mode!=MC_SAVE_IMMEDIATE && w->world_path && w->chunk_list_len && !w->save_error) {
+        (void)save_group(w,stats);
+    } else if (w->save_mode==MC_SAVE_IMMEDIATE && w->world_path && *w->world_path && w->chunk_list_len > 0) {
         size_t scanned = 0;
         size_t attempts = 0;
         while (scanned < w->chunk_list_len && attempts < ANVIL_SAVE_ATTEMPTS_PER_TICK) {
@@ -1560,7 +1764,7 @@ size_t mc_world_evict_outside(mc_world_t *w, const int64_t *keep_keys, size_t ke
             i++;
             continue;
         }
-        if (c->dirty) {
+        if (c->dirty || c->save_pending) {
             c->evict_after_save = true;
             i++;
             continue;
