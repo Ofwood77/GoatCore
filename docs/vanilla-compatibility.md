@@ -4621,3 +4621,600 @@ ou de promouvoir S2. La reprise des blocs de phase 2 pourra ensuite conserver
 ces interfaces sans ajouter la logique de stockage au handler réseau. Les
 services 25565/25587 n'ont été ni interrogés ni modifiés pendant la maintenance ;
 leur état effectif n'est donc pas réaffirmé par ce rapport.
+
+## S5 — Validation HDD RAID et politique de durabilité (31 octobre 2026)
+
+### A. État initial
+
+Départ vérifié : `1f05f9532cdbe1374761695790d4d1a68e014048`, arbre suivi
+propre. Les trois éléments personnels `.vscode/`, `src/main.py`, `start-aider.sh`
+restent non suivis et préservés. S1/S2/S3A/S3B/S4 ne sont pas réimplémentés.
+Le stockage historique et les politiques expérimentales S4 restent disponibles.
+S5 ne change ni protocole, ni gameplay, ni défaut de backend, ni nombre de
+workers ; aucune migration et aucune activation S2.
+
+### B. Environnement et accès distant
+
+Deux connexions SSH de diagnostic espacées de plus d'une heure, BatchMode,
+ConnectTimeout 6 secondes,
+ConnectionAttempts 1, vers l'utilisateur/hôte des scripts existants échouent avec
+`Connection timed out`, code 255. Les commandes distantes prévues étaient
+uniquement des lectures. Aucun démarrage, redémarrage, transfert ou déploiement
+n'a lieu. Les services 25565/25587 ne sont donc pas vérifiables dans ce lot.
+Leur ancien état n'est pas présenté comme actuel. **La validation Xeon/HDD RAID
+reste bloquée par l'accès distant** ; les exécutions utilisent l'autorisation
+locale explicite de S5, sur copies jetables et ports temporaires.
+
+Le PC de test reste Ryzen 7 7840HS, 16 CPU logiques, ext4/NVMe, Linux 7.0.
+Les valeurs S4 et ses limites restent historiques, dans la section précédente.
+La nouvelle instrumentation compte les `write`/`pwrite` du monde et leurs retours,
+en plus des fsync, traces de tick et compteurs `/proc`. Elle est préchargée
+uniquement dans les processus de test ; aucun hook de panne n'entre dans
+`mc_server`. Le binaire runtime S4 reste inchangé : aucune correction de production n'est
+justifiée par les défauts et mesures de cette intervention.
+
+### C. Performances locales et limites de mesure
+
+Les quatre politiques utilisent le **même binaire S4**, recompilé à l'identique,
+SHA-256 `51e05f50a2dc94edff99f472eeb2c960a42610a019966a751dc530cd8af46834`.
+Aucune correction de production n'est revendiquée. La comparaison est celle
+des politiques actives, pas un gain de S5 contre S4. Mondes neufs équivalents,
+view/simulation distance 10, workers identiques, 100 cycles par bot,
+1/10/25/50 bots × quatre modes × trois répétitions, ordre alterné. Préparation,
+échauffement de 3 s, repos de 3 s, charge intégrale, repos final, pose de témoins,
+barrière, arrêt puis redémarrage contrôlé sont séparés.
+
+Les **48 essais confirment 103 200 poses et 103 200 casses**, avec autant de
+propositions, d'entrées en file et de traitements des handlers ; état et ACK
+sont contrôlés, aucune action manquante. Les poses finales supplémentaires ne
+sont pas comptées comme cycles de charge. Le temps total inclut le dernier
+checkpoint et l'arrêt ; la vérification après redémarrage est mesurée à part.
+Les actions ne sont pas déclarées terminées durablement sur leur seul ACK.
+
+Un premier passage de 48 essais (`bench/`) a révélé un **effet de sonde** :
+classer chaque `write` par `/proc/self/fd` instrumentait aussi des millions
+de réveils eventfd réseau. Ces données sont conservées comme pilote intrusif,
+**exclues des résultats représentatifs**. La sonde de test mémorise désormais
+uniquement les eventfd connus et invalide ce classement lors de close,
+remplacement et réutilisation par open/openat. Un test réel vérifie aussi
+réutilisation après fermeture par syscall et dup2. Aucun cache de classement
+des fichiers du monde ni changement du réseau GoatCore. Les 48 essais ont
+été intégralement rejoués dans `bench-final/` avec la nouvelle sonde ; les
+compteurs CSV et atomiques de sortie coïncident, sans événement perdu.
+
+Un contrôle 50 bots ×100 cycles avec la sonde corrigée atteint 19,985 TPS,
+contre le ralentissement artificiel du pilote. Cela mesure une correction
+de l'observateur, **aucune optimisation du serveur**. Trois autres contrôles
+async sans comptage détaillé des write/pwrite conservent les traces fsync/tick ;
+ils servent à quantifier le coût résiduel, pas à choisir un meilleur essai.
+
+Les TPS sont le nombre de ticks commencés divisé par toute la fenêtre active.
+La table suivante décrit les ticks programmés ; les passes rapides entre ticks
+sont comptabilisées séparément dans la seconde mesure de budget. Des TPS
+légèrement supérieurs à 20 sur une fenêtre finie ne sont pas un nouveau rythme
+cible. Toutes les répétitions et leurs dispersions sont conservées.
+
+| Bots | Mode | TPS médiane [min–max] | MSPT P50/P95/P99 (médianes des essais) | Max ms | >50 ms (somme) |
+|---:|---|---:|---:|---:|---:|
+| 1 | bin | 19.978 [19.938–20.115] | 0.076/3.542/35.331 | 37.097 | 0 |
+| 1 | immediate | 19.997 [19.961–20.135] | 0.085/5.126/36.369 | 39.405 | 0 |
+| 1 | batched | 20.019 [19.954–20.036] | 3.677/5.311/12.080 | 12.766 | 0 |
+| 1 | async | 20.009 [19.887–20.020] | 0.062/0.121/0.234 | 0.291 | 0 |
+| 10 | bin | 19.982 [19.925–19.996] | 3.583/4.648/5.082 | 10.030 | 0 |
+| 10 | immediate | 19.996 [19.929–20.094] | 4.675/5.784/7.973 | 14.345 | 0 |
+| 10 | batched | 20.084 [19.981–20.085] | 12.708/14.085/20.017 | 23.843 | 0 |
+| 10 | async | 20.000 [19.980–20.089] | 3.128/3.719/3.974 | 7.848 | 0 |
+| 25 | bin | 19.948 [19.941–20.032] | 8.983/20.340/23.953 | 35.467 | 0 |
+| 25 | immediate | 20.035 [20.010–20.048] | 17.875/33.689/40.836 | 48.676 | 0 |
+| 25 | batched | 19.967 [19.898–20.030] | 17.524/20.736/30.054 | 32.935 | 0 |
+| 25 | async | 20.001 [19.966–20.105] | 8.495/12.291/13.097 | 14.802 | 0 |
+| 50 | bin | 10.966 [8.519–13.802] | 56.674/122.994/145.975 | 176.812 | 490 |
+| 50 | immediate | 5.267 [5.061–5.645] | 106.387/176.536/216.481 | 229.335 | 412 |
+| 50 | batched | 19.748 [10.887–19.980] | 31.930/56.795/78.375 | 208.616 | 234 |
+| 50 | async | 19.972 [19.859–20.020] | 19.380/38.629/52.269 | 71.612 | 15 |
+
+Les cycles incluant les passes rapides donnent à 50 bots des P99 médians de
+210,615 / 290,175 / 94,194 / 75,653 ms (bin/immediate/batched/async), avec des
+maxima respectifs 282,714 / 351,610 / 225,012 / 118,451 ms. **20 TPS constants
+ne sont donc pas démontrés**, même lorsque le débit médian async approche 20.
+À 25 bots aussi, les passes rapides peuvent excéder 50 ms alors que les ticks
+programmés seuls respectent le budget.
+
+| Bots | Mode | Durée active s [min–max] | Durée totale s [min–max] | Reconstructions (médiane) | fsync total (médiane) | Octets régions (médiane) | write_bytes processus (médiane) |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | bin | 4.915 [4.155–4.922] | 19.632 [18.896–19.659] | 0 | 418 | 0 | 856064 |
+| 1 | immediate | 5.066 [5.001–5.260] | 19.880 [19.684–20.005] | 145 | 404 | 68300800 | 67170304 |
+| 1 | batched | 3.658 [3.643–4.346] | 18.404 [18.388–19.036] | 74 | 262 | 34856960 | 34357248 |
+| 1 | async | 3.946 [3.922–3.998] | 18.682 [18.635–18.736] | 80 | 274 | 37683200 | 37130240 |
+| 10 | bin | 8.833 [8.602–9.058] | 23.713 [23.490–23.934] | 0 | 2752 | 0 | 7081984 |
+| 10 | immediate | 9.406 [9.202–9.433] | 24.310 [24.083–24.326] | 1177 | 2734 | 559579136 | 550502400 |
+| 10 | batched | 7.817 [7.817–8.158] | 22.703 [22.645–23.001] | 625 | 1632 | 295206912 | 290951168 |
+| 10 | async | 6.969 [6.950–7.558] | 21.899 [21.835–22.481] | 551 | 1476 | 260071424 | 256405504 |
+| 25 | bin | 5.617 [5.615–5.791] | 20.848 [20.746–20.982] | 0 | 5682 | 0 | 15060992 |
+| 25 | immediate | 8.046 [7.836–8.081] | 23.181 [23.026–23.277] | 2654 | 5806 | 1261142016 | 1240137728 |
+| 25 | batched | 4.558 [4.523–4.843] | 19.741 [19.688–19.983] | 368 | 1172 | 173719552 | 172195840 |
+| 25 | async | 3.830 [3.800–3.856] | 19.046 [18.993–19.083] | 309 | 1026 | 145911808 | 144814080 |
+| 50 | bin | 24.165 [21.156–26.882] | 40.218 [37.103–43.081] | 0 | 11078 | 0 | 29868032 |
+| 50 | immediate | 28.851 [26.013–29.053] | 45.021 [42.152–45.167] | 5123 | 10892 | 2439847936 | 2398920704 |
+| 50 | batched | 18.969 [18.838–27.464] | 34.839 [34.717–43.592] | 1309 | 3272 | 618504192 | 610373632 |
+| 50 | async | 19.034 [18.125–19.531] | 35.005 [33.982–35.439] | 1277 | 3218 | 602808320 | 594898944 |
+
+À 50 bots, les write/pwrite interceptés du monde acceptent respectivement
+2,103 / 2 439,992 / 618,652 / 602,958 Mo (médianes), soit 5 475 / 58 153 /
+15 009 / 14 640 appels. Les octets logiques de région, les retours des appels
+et `write_bytes` processus sont des métriques différentes : ce dernier inclut
+logs/traces et autres fichiers, le cache peut fusionner des écritures. Aucune
+mesure ici ne décrit les plateaux du RAID distant. Toutes les synchronisations
+observées de la campagne réussissent ; leurs nombres incluent aussi joueurs
+et fichiers hors régions, sans assimiler cela à deux fsync par mutation.
+
+Le regroupement et async réduisent ici le volume logique de régions d'environ
+75 % face à immediate à 50 bots. Cela confirme l'effet de S4 sur ces scénarios ;
+S5 ne l'attribue pas à une modification nouvelle. La durée active varie aussi
+avec le coût de simulation et le générateur ; comparer les mêmes 5 000 cycles,
+pas seulement le taux d'actions par seconde ou une fenêtre favorable.
+
+| Bots | Mode | CPU processus total s [min–max] | RSS observé max Kio | CPU client actif % (médiane) | Latence actions P50/P95/P99 ms (médianes) | Arrêt s [min–max] |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | bin | 2.065 [2.049–2.079] | 26184 | 1.88 | 2.370/41.687/47.281 | 0.064 [0.064–0.114] |
+| 1 | immediate | 2.352 [2.330–2.365] | 31372 | 1.79 | 3.584/42.047/74.845 | 0.065 [0.064–0.115] |
+| 1 | batched | 2.255 [2.218–2.263] | 31504 | 2.27 | 0.308/41.194/42.108 | 0.064 [0.064–0.064] |
+| 1 | async | 2.260 [2.245–2.263] | 31992 | 2.12 | 0.292/41.173/41.421 | 0.064 [0.032–0.114] |
+| 10 | bin | 2.842 [2.838–2.843] | 28856 | 6.79 | 38.308/42.246/43.589 | 0.064 [0.064–0.114] |
+| 10 | immediate | 4.132 [4.085–4.158] | 34336 | 6.41 | 38.406/43.226/44.881 | 0.064 [0.064–0.064] |
+| 10 | batched | 3.440 [3.419–3.473] | 34500 | 7.70 | 30.186/42.099/45.108 | 0.032 [0.032–0.064] |
+| 10 | async | 3.350 [3.345–3.364] | 35028 | 8.85 | 23.810/40.891/41.783 | 0.064 [0.032–0.114] |
+| 25 | bin | 4.936 [4.934–4.957] | 33828 | 45.30 | 13.825/27.219/36.419 | 0.064 [0.064–0.114] |
+| 25 | immediate | 7.560 [7.473–7.604] | 38804 | 35.97 | 26.040/44.291/53.070 | 0.064 [0.064–0.064] |
+| 25 | batched | 4.802 [4.522–4.868] | 38824 | 53.64 | 9.834/22.952/26.510 | 0.064 [0.064–0.064] |
+| 25 | async | 4.693 [4.674–4.769] | 37712 | 63.76 | 5.023/12.158/14.877 | 0.114 [0.064–0.114] |
+| 50 | bin | 30.633 [26.088–34.965] | 41624 | 94.75 | 60.408/141.586/175.538 | 0.114 [0.114–0.114] |
+| 50 | immediate | 35.143 [31.903–35.841] | 45884 | 80.10 | 89.586/214.734/270.428 | 0.114 [0.114–0.114] |
+| 50 | batched | 25.325 [25.078–37.636] | 45788 | 98.77 | 43.626/85.822/105.815 | 0.114 [0.114–0.115] |
+| 50 | async | 26.044 [24.400–26.363] | 47236 | 99.90 | 32.162/76.799/96.161 | 0.114 [0.064–0.114] |
+
+#### Profil restant et stabilité des mesures
+
+À 50 bots, le pilote Python consomme environ un cœur (médiane async 99,90 %).
+Les propositions, files, handlers, états et ACK sont comptés séparément ; aucun
+travail n'est abandonné pour relever les TPS. La cadence proposée peut pourtant
+limiter la charge. Le client et le fanout réseau ne sont pas totalement isolés ;
+aucune capacité maximale serveur ne se déduit de ces essais seuls.
+
+Le tick async-50-r3 passe 6,774 s dans la passe items et 4,604 s dans les passes
+rapides ; ses handlers totalisent 4,826 s. Ces périmètres se recouvrent : ne pas
+les additionner comme un profil exclusif. Le pic d'items est 4 416 pendant la
+charge, les tâches atteignent 54 en file et 29 ms d'attente maximale dans cet
+essai. Le processus effectue encore des millions de petits appels, dont les
+réveils réseau ; leur ventilation CPU exacte nécessite un prochain profil.
+Les coûts items/traitement restent significatifs lorsque le disque est retiré
+ du tick, sans justifier ici de refonte réseau ou gameplay.
+
+Dans le même essai, le worker totalise 3,365 s de sauvegarde native dont
+0,824 s de préparation NBT, 2,534 s de publication de régions, 1,200 s de fsync
+fichier et 0,704 s de fsync parent. Compression 55 ms, copie des régions 202 ms,
+attente du verrou 14 ms ; ces sous-périmètres se recouvrent également. Les
+captures coûtent 3,559 ms CPU au total : ce n'est pas le goulet dominant observé.
+Les 2,534 s de publication incluent seulement 0,753 s CPU : une grande part
+est une attente, sans l'assimiler à une mesure physique HDD.
+
+Le mode groupé garde ces publications sur le tick. Son essai 50-r2 ralentit
+à 10,887 TPS malgré moins de reconstructions : fsync fichier actif 1,979 s
+contre 1,261 s pour r1, CPU système total 26,419 s contre 16,188 s et 11,22
+contre 6,79 millions d'appels write processus. Cela ne démontre pas une cause
+unique. Les applications personnelles et la charge du PC sont enregistrées
+sans être arrêtées ; ni interférence externe précise ni défaut S4 ne sont
+attribués sans profil supplémentaire. La dispersion demeure dans la médiane
+et l'intervalle, sans sélection du meilleur résultat.
+
+| Bots | Mode | Tick + passes rapides P99 ms (médiane) | Max ms (tous essais) | Snapshots actifs (médiane) | CPU capture ms (médiane) | Queue max/budget observé octets | Backpressure total |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | bin | 36.947 | 37.228 | 0 | 0.000 | 0/0 | 0 |
+| 1 | immediate | 37.774 | 39.423 | 0 | 0.000 | 0/0 | 0 |
+| 1 | batched | 12.180 | 12.895 | 73 | 0.338 | 1/17480 | 0 |
+| 1 | async | 0.375 | 0.391 | 79 | 0.326 | 1/17480 | 0 |
+| 10 | bin | 21.369 | 28.036 | 0 | 0.000 | 0/0 | 0 |
+| 10 | immediate | 33.036 | 37.433 | 0 | 0.000 | 0/0 | 0 |
+| 10 | batched | 20.473 | 24.277 | 621 | 2.252 | 1/69920 | 0 |
+| 10 | async | 4.763 | 8.595 | 547 | 1.919 | 1/69920 | 0 |
+| 25 | bin | 60.190 | 68.427 | 0 | 0.000 | 0/0 | 0 |
+| 25 | immediate | 78.439 | 90.445 | 0 | 0.000 | 0/0 | 0 |
+| 25 | batched | 33.531 | 35.718 | 364 | 1.074 | 1/69920 | 0 |
+| 25 | async | 22.354 | 23.348 | 305 | 0.904 | 1/69920 | 0 |
+| 50 | bin | 210.615 | 282.714 | 0 | 0.000 | 0/0 | 0 |
+| 50 | immediate | 290.175 | 351.610 | 0 | 0.000 | 0/0 | 0 |
+| 50 | batched | 94.194 | 225.012 | 1304 | 3.913 | 1/69920 | 0 |
+| 50 | async | 75.653 | 118.451 | 1273 | 3.793 | 1/69920 | 6 |
+
+
+Le slot reste à un lot ; le maximum observé de copies acceptées est 69 920
+octets dans ces charges, bien inférieur à la borne de 64 Mio/64 snapshots.
+Six événements de backpressure async apparaissent à 50 bots, sans perte dirty.
+Le délai submit→complétion traitée atteint des P99 par essai de 79,305 à
+89,554 ms à 50 bots : c'est l'acquittement par le propriétaire, pas le temps
+CPU du writer. Les barrières finales de ces essais async durent 128 à 155 ms ;
+le shutdown mesuré est de 64 à 114 ms. Ces petites files NVMe ne valident pas
+une borne de retard sur HDD ni une panne de disque qui ne répond plus.
+
+
+Les trois contrôles async sans comptage détaillé confirment chacun les 5 000
+poses et 5 000 casses : TPS 20,025 / 19,417 / 20,007, MSPT P99 programmés
+42,874 / 79,347 / 49,047 ms, CPU total 24,836 / 26,387 / 23,658 s. Avec
+comptage corrigé : médiane 19,972 TPS et 26,044 s CPU, contre 20,007 TPS et
+24,836 s sans ce comptage. Le second contrôle fluctue aussi. Le surcoût résiduel
+n'est donc ni nul ni isolé précisément par seulement trois répétitions ; ces
+mesures n'établissent pas une régression serveur, dont les sources et le
+binaire sont identiques. Les traces fsync/tick restent actives dans les témoins.
+
+La charge principale utilise un worker réseau, deux loaders de chunks et
+aucun worker de simulation. À 50 bots, les captures totales médianes sont
+1 309 en batched et 1 277 en async, réparties en 348 et 339 lots (environ
+3,8 snapshots par lot). Les chunks ciblent plusieurs régions : ce nombre
+n'est pas celui des chunks fusionnés dans une seule publication. L'évitement
+observé vient aussi de la coalescence dirty entre captures. Les tests C et
+l'étude isolée multi-chunks complètent ce que cette charge couvre.
+
+| 50 bots, trois essais | fsync P50/P95/P99 ms (médianes) | Publication région P50/P95/P99 ms (médianes) | CPU / temps mural cumulé régions ms (médianes) |
+|---|---:|---:|---:|
+| bin | 0,584 / 0,782 / 1,299 | n/a | n/a |
+| immediate | 0,650 / 0,986 / 1,374 | 1,832 / 2,262 / 2,632 | 2 803 / 9 710 |
+| batched | 0,643 / 1,412 / 1,965 | 1,912 / 2,737 / 7,799 | 789 / 2 945 |
+| async | 0,637 / 1,358 / 1,552 | 1,930 / 2,703 / 3,181 | 803 / 2 809 |
+
+Les fsync de cette table incluent toutes les catégories du processus ; les
+publications sont celles des régions, toutes phases comprises. Les temps CPU
+et muraux ne décrivent ni bande passante physique ni attente exclusivement
+matérielle. Les CSV conservent les latences individuelles et les fichiers
+concernés. Les chargements de chunks à 50 bots ont un maximum par essai allant
+jusqu'à 2,743 ms dans ces mondes et caches locaux, sans conclusion cold-cache HDD.
+
+#### Charge prolongée bornée
+
+Après toutes les campagnes comparatives, un essai async isolé à 10 bots ×
+1 000 cycles confirme **10 000 poses et 10 000 casses**, sans manque ni erreur,
+en 74,963 s actives : 1 500 ticks, 20,010 TPS observés, MSPT programmés
+P50/P95/P99 3,353/4,095/4,768 ms, maximum 5,665 ms et aucun >50 ms. Les cycles
+incluant les passes rapides ont P99 5,490 ms et maximum 6,497 ms. Le checkpoint,
+l'arrêt puis les dix témoins relus après redémarrage passent ; durée totale
+89,891 s jusqu'à l'arrêt, vérification du redémarrage 0,189 s supplémentaire.
+
+Le RSS maximal observé vaut 33 352 Kio, CPU processus total 14,810 s,
+2 822 597 234 octets acceptés par les écritures monde interceptées contre
+2 778 918 912 `write_bytes` processus. Les métriques ne sont pas interchangeables.
+Aucun comportement de file non bornée n'est observé ; **ce test d'environ
+75 secondes n'est pas un test d'endurance de plusieurs heures** ni une preuve
+universelle d'absence de fuite. Il ne valide pas le matériel HDD distant.
+
+### D. Politique de durabilité et tests d’interruption
+
+| État | Signification | Preuve possible | Perte après SIGKILL |
+|---|---|---|---|
+| Appliqué | Mutation autoritaire en mémoire, génération courante avancée | État/ACK de séquence et query autoritaire | Possible tant qu'aucune barrière durable n'a réussi |
+| Planifié/en cours | Dirty, copie indépendante, slot accepté ou writer actif | Snapshot, submit, traces I/O, génération in-flight | Possible ; un snapshot n'est pas un journal durable |
+| Durable confirmé | Publication complète et toutes les barrières réussies | Retour 0 du backend puis acquittement de la génération/barrière explicite | Préservé dans les scénarios de processus testés, sous les garanties du FS/matériel |
+
+**Le nom `immediate` ne rend pas chaque ACK réseau durable.** L'audit de
+`play.c` montre qu'une pose ordinaire émet l'état et l'ACK puis laisse dirty au
+flush de fond. Certains chemins, notamment une casse réussie passant par
+`mc_world_request_block_save`, exécutent leur barrière synchrone avant leur
+notification dans ce mode. Un ACK acquitte aussi une action refusée : lui seul
+ne démontre ni mutation ni sauvegarde. Les tests utilisent état + séquence et
+contrôlent séparément la relecture disque.
+
+| Politique | Demande de persistance | Exécution | Confirmation exploitable |
+|---|---|---|---|
+| `.bin`/Anvil immediate | Les appels explicites conservés sont synchrones ; les autres mutations restent dirty | Thread propriétaire, plus normalisation privée historique des loaders | Succès de l'appel de sauvegarde concerné ; jamais une règle globale fondée sur l'ACK réseau |
+| Anvil batched | Demande acceptée en mémoire, coalescence avant capture | Capture et publication par région sur le tick, normalement à la passe monde suivante | Résultat 0 de la publication et acquittement ; `save-all` est une barrière sur les chunks chargés |
+| Anvil async | Capture sur tick, transfert de propriété au slot borné | Worker indépendant : NBT/compression/copie/temporaire/fsync/rename/fsync parent | Fin réussie du writer puis complétion traitée sur tick ; `save-all` attend et draine |
+
+Les actions ne changent pas d'ordre autoritaire. Les générations de sauvegarde
+sont runtime et ne sont pas sérialisées dans le NBT Vanilla. Si B arrive après
+capture A, le succès A ne nettoie pas B. Une ancienne source est refusée sous
+verrou de publication. Une confirmation durable de A n'est pas une confirmation
+de B ; un redémarrage recommence une époque de compteurs, pas une réécriture
+du contrat du processus précédent.
+
+Ces générations sont les indicateurs du pipeline natif. Le chemin historique
+`.bin` ne les exploite pas comme compteur universel de durabilité ; son contrat
+repose sur le retour de sa barrière atomique. Une valeur runtime isolée ne doit
+pas remplacer ce contrôle ni servir de preuve pour une future migration.
+
+#### Ordre des opérations et gestion des incidents
+
+Pour chaque région : nouvelle image sur temporaire unique du même répertoire,
+écritures vérifiées avec reprises des courts transferts/EINTR, fsync du fichier,
+fermeture vérifiée, rename atomique, fsync du répertoire et vérification des
+erreurs de fermeture. Le répertoire synchronisé est nécessaire à la persistance
+du changement de nom ; il ne rend pas durables des changements encore en RAM,
+une autre région ou un inventaire séparé. Avant rename, l'ancienne image demeure.
+Après rename, le fichier visible est cohérent ; avant confirmation du parent,
+le résultat durable reste incertain. Le matériel/FS doit honorer les barrières.
+
+EIO/ENOSPC avant publication laisse l'ancienne région intacte. Un échec après
+rename produit le résultat incertain -2 : le NBT visible avance pour un retry
+sûr, la génération durable reste inchangée et le chunk reste dirty. Le latch
+d'erreur des modes groupés empêche les retries à chaque tick et les nouvelles
+mutations natives dangereuses ; une barrière explicite tente une reprise
+contrôlée. Aucun rollback destructif ou fallback vers `.bin`.
+
+Quand le slot async est plein, aucune nouvelle copie n'est allouée : les états
+dirty coalescent dans les chunks vivants. La borne protège les copies en file,
+pas la mémoire totale du monde ou les allocations transitoires NBT/compression.
+Le disque lent peut augmenter la fenêtre de perte, sans borne murale garantie.
+
+SIGTERM propre arrête l'admission suivant le cycle de vie du serveur, rejoint
+les loaders, intègre leurs résultats, sauvegarde les derniers états appliqués,
+draine le writer puis joint le thread avant de libérer les données. Seul un
+arrêt réussi avec code 0 confirme ce contrat ; l'échec de sauvegarde remonte au
+code de sortie. Cela ne garantit pas le traitement de tout paquet simplement
+arrivé sur une socket avant le signal.
+
+Le worker n'a pas d'API d'arrêt isolé destinée au gameplay : la fermeture
+normale finit le travail accepté et rend sa complétion au propriétaire.
+Une sortie anormale d'un thread seul ou un FS définitivement bloqué ne sont
+pas couverts par un watchdog de récupération. Un flush/shutdown peut attendre ;
+aucune annulation arbitraire d'un writer actif n'est introduite pour masquer
+ce risque. SIGKILL du processus se traite par l'image atomique, sans reprise
+automatique d'un temporaire orphelin.
+
+Il n'existe toujours **aucune transaction globale** chunks/joueurs/inventaires/
+objets au sol/POI. Une interruption peut laisser des sous-systèmes décalés,
+avec perte ou duplication croisée possible. Conserver les inventaires des BE
+opaques ne démontre pas l'exactly-once de toutes les interactions Survival.
+Les tests sont des interruptions de processus et erreurs simulées ; aucune
+coupure physique, aucun arrêt de la machine ou test destructif du RAID.
+
+#### Interruptions et erreurs : résultats locaux
+
+Le nouveau runner S5 pilote un vrai `mc_server`, deux bots et des copies neuves
+du corpus opaque S3B : 1 328 chunks, sept BE de types distincts et champs NBT
+inconnus. Le preload exige un marqueur jetable, deux pipes hérités et un
+armement après checkpoint initial. Il ne vise que les temporaires de régions
+et leur répertoire ; aucun hook de test n'est lié au binaire serveur.
+
+| Cas | Modes / nombre | Résultat attendu et observé |
+|---|---|---|
+| Barrière explicite puis arrêt | 3 | Nouveau bloc, sortie 0, relecture puis redémarrage |
+| SIGTERM sans barrière de l'action | 3 | Drainage du dirty, nouveau bloc, sortie 0 |
+| Succès save-all puis SIGKILL | 3 | Nouveau bloc conservé ; le succès précède le signal |
+| SIGKILL avant première écriture ou après écriture partielle | 3 × 2 | Ancien état intact |
+| SIGKILL avant/après fsync fichier ou avant rename | 3 × 3 | Ancien état intact |
+| SIGKILL après rename, avant/après fsync parent | 3 × 3 | Nouvelle image cohérente visible ; la durabilité avant parent n'est pas revendiquée |
+| SIGTERM durant écriture partielle, avant rename ou avant parent | 3 × 3 | Le processus attend le writer bloqué, puis draine et sort 0 |
+| ENOSPC d'écriture, EIO fichier, EIO parent ponctuels | async × 3 | Erreur remontée, dirty conservé ; save-all explicite reprend la dernière génération |
+| EIO fichier/parent permanents | async × 2 | Pas de faux succès durable, arrêt code 2 ; ancienne image ou nouvelle image visible cohérente selon publication |
+
+Ces **47 scénarios passent**. En async, les SIGTERM contrôlés et les erreurs
+acceptent un état B (terre) pendant que le snapshot A (pierre) est bloqué.
+L'achèvement de A ne nettoie pas B. Les retries/arrêts réussis conservent B ;
+l'erreur permanente fichier laisse l'ancien air, l'erreur permanente parent
+laisse B visible sans confirmation de durabilité. Aucun rollback destructif.
+Le runner compare les 98 304 états du chunk cible avant/après redémarrage,
+avec une seule position autorisée à changer, les sept BE avec types et valeurs
+NBT exacts, et les autres chunks/fichiers globaux. Pas de fallback `.bin`.
+
+Le gate d'injection ne prétend pas interrompre le CPU au milieu de chaque
+instruction d'enqueue : la publication du slot est protégée et les tests C
+exercent saturation et transfert de propriété. SIGKILL exactement avant
+capture/milieu d'enqueue n'est pas une couverture processus distincte dans
+cette campagne. Les tests C réexécutés couvrent snapshots indépendants,
+générations, source obsolète refusant tout le lot, seconde génération après
+succès de la première, slot plein/EAGAIN, limites de copies, échec d'allocation,
+erreur parent, éviction différée pendant I/O et drainage des dernières mutations.
+
+Un SIGKILL conserve le cache du noyau : voir la nouvelle image après rename
+ne démontre pas sa survie à une panne électrique. Un temporaire orphelin n'est
+pas automatiquement adopté au redémarrage. Les durabilités multi-régions,
+joueurs et objets ne deviennent pas atomiques parce que chaque région l'est.
+Une sortie anormale isolée du worker et un disque éternellement bloqué restent
+sans mécanisme de watchdog validé.
+
+### E. Compatibilité Vanilla et non-régression
+
+Les **28 suites C** du gate passent, ainsi que smoke, multi-epoll, login,
+3 tests de génération, 12 tests du framework stress, 10 tests de profil et
+le nouveau test réel du preload. Celui-ci vérifie 87 appels/87 octets acceptés,
+une erreur EBADF, quatre threads, chemins exclus, errno et réutilisations de fd.
+Les transferts partiels et erreurs ne sont pas comptés comme octets écrits
+avec succès. Le dépôt reste exempt d'artefacts de compilation suivis.
+
+Les tests Anvil conservent les écritures DataVersion 4788 et la lecture
+historique GoatCore 4785. Le lecteur natif reste strict 4788 et refuse une
+ancienne source ambiguë ; aucune conversion automatique n'est ajoutée.
+
+Les builds instrumentés S4 sont rejoués après vérification des **101 fichiers
+de production identiques** : 15 suites C sous ASan+UBSan et sept sous TSan
+réussissent, avec arrêt sur diagnostic. Les trois scénarios gameplay ASan
+(async stairs/complex, bin placement) et le scénario TSan async complex passent
+chacun trois redémarrages. Les deux commandes nouvelles de l'outil batch,
+atomic et S2, sont également reconstruites/testées sous ASan+UBSan. Aucun
+diagnostic n'est observé ; ce n'est pas une preuve absolue d'absence de races.
+Les suites locales ne valent pas une exécution TSan sur l'hôte distant.
+
+| Domaine | Exécution S5 | Résultat / limite |
+|---|---|---|
+| Connexions, reconnexions, deux bots | 21 scénarios gameplay, trois redémarrages chacun | Tous passent ; authentification offline, pas de validation Mojang positive nouvelle |
+| Blocs simples, bûches, dalles/fusion, refus et consommation | Les quatre politiques | États et inventaires contrôlés, trois relectures ; gameplay inchangé |
+| Escaliers / voisins | Quatre politiques ×192 observations, référence Vanilla fraîche | Les tableaux des 192 observations sont identiques à Vanilla 26.1.1 |
+| Ramassage / inventaire | Quatre politiques ×100 items | 100 ramassages/inventaire acteur, observation et trois redémarrages ; pas de transaction globale démontrée |
+| Frontières / négatifs | Quatre positions autour de ±512, quatre politiques | États observés par deux bots puis retrouvés aux redémarrages |
+| BE et NBT opaques | 47 copies d'interruption, scénario complexe normal/instrumenté, corpus C | Sept BE couvertes et champs/types inconnus conservés ; interactions dangereuses refusées |
+| Corpus supplémentaire | Quatre cas acceptés, 18 refus réexécutés | Zéro/7/160 BE et données opaques ; corruptions, protochunks, ticks, codec, `.mcc` et structures non prises en charge protégés |
+| Réouverture Vanilla des sorties d'interruption | Témoin opaque + quatre résultats, deux ouvertures chacun | Tous les blocs du chunk cible et sept BE comparés, sans régénération masquant une divergence |
+| Régions neuves produites par async | Copie composée explicite, deux ouvertures Vanilla | Les **35 chunks**, chacun 98 304 blocs, ont les mêmes digests avant/après Vanilla |
+
+Les six scénarios de réouverture Vanilla comprennent le témoin, une interruption
+avant publication, une après rename, un arrêt avec génération plus récente,
+une erreur parent permanente et les régions neuves d'escaliers. Pour les champs
+synthétiques non enregistrés que Vanilla normalise lui-même, la comparaison BE
+se fait avec un témoin ouvert par le même JAR. Leur conservation exacte par
+GoatCore est vérifiée séparément ; aucune conservation par Vanilla d'un champ
+qu'il supprime lui-même n'est promise. Le JAR interne reste celui de 26.1.1,
+SHA-256 `3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+
+La fixture neuve composée réutilise uniquement des métadonnées officielles
+sur une copie jetable, avec régions/joueurs GoatCore et suppression des POI/
+entités de cette copie sans rapport avec les régions. Sa provenance est
+consignée : ce n'est ni une migration ni une preuve de monde complet. Les
+inventaires BE couverts sont coffres, fours froids, panneaux, bannières,
+shulker boxes, tonneaux et pots décorés ; leur simulation n'est pas implémentée.
+Aucune extension protochunks/`.mcc`/scheduled ticks, aucun nouvel algorithme
+de lumière/biomes/physique, aucune régression observée dans ces scénarios.
+
+#### Vérification des sources générées
+
+Le gate complet `make -B precommit-check` passe dans un export isolé : suites C,
+smoke, multi-epoll, login et tests Python. Cet export contient les fichiers
+générés, mais pas les sources brutes ignorées ; ce premier gate ne revendique
+pas leur régénération complète. Le contrôle d'hygiène du dépôt local passe aussi.
+
+Le contrôle strict supplémentaire révèle des entrées brutes locales préexistantes
+vides/invalides (`acacia_logs.json` dans les tags, `acacia_boat.json` dans les
+composants). Elles sont préservées, sans réécriture de fichiers locaux hors lot.
+Une extraction séparée des 1 515 recettes/207 tags du JAR officiel et une
+exécution officielle `net.minecraft.data.Main --reports` produisent des entrées
+valides dans les résultats jetables S5. Avec ces entrées et le JAR bundlé,
+`REQUIRE_RAW_DATA=1 tools/check_generated.sh` passe : registre de 1 168 blocs /
+29 873 états, identifiants et **tous les fichiers générés identiques**. Les
+échecs initiaux restent dans les logs ; aucune donnée n'est devinée pour les
+contourner. La régénération travaille dans un temporaire et ne modifie pas src.
+
+### F. Corrections et étude secondaire S2
+
+**Aucun changement de production** n'est retenu : les mesures ne justifient
+pas une optimisation supplémentaire sûre. S5 ajoute des tests déterministes,
+une observabilité des écritures, une sonde corrigée pour ne pas profiler les
+réveils réseau comme des fichiers, un délai de charge explicitement borné
+pour HDD et une étude S2 multi-updates isolée. Les défauts d'entrées brutes
+locales sont contournés par une génération officielle séparée, sans altérer
+les fichiers locaux. Le mode `.bin`/immediate reste le défaut ; Anvil,
+batched/async et S2 conservent leurs statuts expérimentaux distincts.
+
+#### S2 : conditions préalables à une combinaison avec S4
+
+L'étude S5 ne modifie pas le protocole transactionnel. Le nouvel outil groupe
+plusieurs updates dans **l'API S2 existante**, face à la publication multi-chunks
+atomique existante. Même NBT immuable, mêmes lectures des sources, mêmes 100
+changements distincts, toutes les données finales relues. Régions synthétiques
+de 256/1 024 chunks, lots de 1/16/64, trois répétitions alternant les backends.
+Les 36 passes chronométrées ont seulement traces de phases/fsync ; les volumes
+proviennent de 12 passes de comptage séparées, revérifiées par les mêmes hashes.
+Ces NBT contiennent des valeurs et champs opaques, **pas des chunks jouables**.
+
+Un adaptateur direct serait dangereux : `MC_REGION_TXN_RECOVERY_REQUIRED=-2`
+S2 signifie session empoisonnée et récupération obligatoire, avec en-tête
+potentiellement partiel. `MC_SAVE_DURABILITY_UNCERTAIN=-2` S4 signifie image
+atomique cohérente visible mais durabilité parent non confirmée. L'égalité
+numérique ne rend pas ces contrats interchangeables. Les loaders S1/Vanilla
+ordinaires ne doivent pas lire une transaction S2 en cours, alors que les
+lecteurs actuels peuvent ouvrir l'ancien/nouveau fichier atomique sans cela.
+
+Un futur lot doit donc prévoir : coordination de tous les lecteurs et writers
+par région, validation des sources attendues/générations avant publication,
+traitement distinct des erreurs nécessitant récupération et des erreurs
+parent, barrières d'acquittement après COMMIT durable et reprise idempotente.
+Il doit mesurer les transactions de plusieurs chunks avant de réduire les
+synchronisations ; aucune barrière n'est supprimée dans S5. Pas de nouveau
+format, protocole, migration, activation ou worker dans le serveur. La piste
+reste un outil isolé, pas un backend gameplay utilisable annoncé.
+
+| Chunks | Lot | Backend | Durée ms médiane [min–max] | CPU ms | Transactions/fsync | Latence transaction P50/P95/P99 ms (médianes) | Octets write/pwrite (passe séparée) |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 256 | 1 | atomic | 250.285 [249.659–260.400] | 86.254 | 100/200 | 2.481/2.763/2.923 | 107315200 |
+| 256 | 1 | s2 | 439.013 [432.649–484.674] | 97.452 | 100/700 | 4.397/4.732/4.844 | 3927200 |
+| 256 | 16 | atomic | 22.419 [22.324–23.149] | 11.225 | 7/14 | 3.278/3.405/3.405 | 7892992 |
+| 256 | 16 | s2 | 35.428 [34.832–35.851] | 11.133 | 7/49 | 4.987/5.562/5.562 | 659552 |
+| 256 | 64 | atomic | 9.448 [9.420–9.599] | 6.216 | 2/4 | 4.132/5.312/5.312 | 2547712 |
+| 256 | 64 | s2 | 13.959 [13.071–14.418] | 6.516 | 2/14 | 6.352/7.523/7.523 | 483872 |
+| 1024 | 1 | atomic | 569.537 [554.569–569.552] | 290.272 | 100/200 | 5.592/6.187/6.502 | 421888000 |
+| 1024 | 1 | s2 | 604.135 [602.977–624.291] | 242.351 | 100/700 | 6.002/6.502/6.689 | 6999200 |
+| 1024 | 16 | atomic | 44.542 [44.428–47.949] | 24.670 | 7/14 | 6.404/6.686/6.686 | 29913088 |
+| 1024 | 16 | s2 | 49.909 [46.837–53.605] | 21.695 | 7/49 | 7.289/7.470/7.470 | 874592 |
+| 1024 | 64 | atomic | 15.677 [15.443–15.715] | 10.281 | 2/4 | 7.218/8.375/8.375 | 8839168 |
+| 1024 | 64 | s2 | 16.233 [15.588–17.356] | 9.265 | 2/14 | 7.675/8.553/8.553 | 545312 |
+
+S2 reste plus lent en médiane dans ces six paires locales, tout en réduisant
+fortement les volumes. À 1 024 chunks/lot 64 : 16,233 contre 15,677 ms,
+545 312 contre 8 839 168 octets interceptés, mais 14 contre 4 fsync. Il s'agit
+d'un état final identique après 100 mutations, avec seulement deux checkpoints
+pour cette largeur, contre 100 en largeur 1. Les garanties intermédiaires ne
+sont pas équivalentes entre largeurs ; aucun gain TPS n'est annoncé.
+
+Les P95/P99 des transactions sont peu significatifs lorsque chaque passe ne
+contient que deux ou sept lots ; leurs échantillons et les trois répétitions
+sont conservés. Les taux de fragmentation viennent de l'index logique, pas
+d'une mesure d'extent physique. Le coût de récupération reste couvert par les
+tests S2 rejoués ; aucune nouvelle distribution de latence de récupération
+matérielle n'est revendiquée par ce benchmark sans interruption.
+
+Dans les passes de comptage, les journaux préparés font au maximum 29 344
+octets (256 chunks/lot 64) ou 60 064 octets (1 024/lot 64). Les deux journaux
+de la charge représentent respectivement 57 568 et 119 008 octets ; aucun
+journal temporaire/canonique ne reste après fermeture propre. Les métadonnées
+de session S2 distinctes ne sont pas un prérequis de lecture Vanilla du `.mca`
+propre. À largeur 64, l'index final S2 contient 64 secteurs libres en deux
+plages (322/1 090 secteurs totaux), contre un secteur libre en atomic
+(259/1 027). Cette amplification temporaire/résiduelle copy-on-write doit être
+comptée avec les journaux, sans la confondre avec une reconstruction complète.
+
+#### Fichiers et preuves du lot
+
+| Usage | Fichiers |
+|---|---|
+| Instrumentation et mesures | `tests/stress/profile_fsync.c`, `profile_tick.py`, `test_tick_profile.py`, nouveau `test_io_probe.py` |
+| Pannes contrôlées et relecture | Nouveaux `tests/stress/storage_fault.c`, `test_save_durability.py` |
+| Étude S2 isolée | `tools/mc_region_txn.c`, nouveau `tests/stress/profile_region_batches.py` |
+| Préparation distante | Nouveau `scripts/inspect-storage-host.sh` en lecture seule |
+| Gate | `Makefile` : ajout du test réel de la sonde |
+| Documentation | Présent rapport, `tests/stress/README.md`, nouveau `docs/storage-migration-s3c.md` |
+| Résultats légers | Nouveau `tests/fixtures/vanilla-26.1.1-s5-validation.json` |
+
+Les 47 résultats sont également comparés **après** redémarrage par l'oracle
+indépendant de conservation de tous les NBT/fichiers non concernés. Les deux
+replays ciblés (arrêt sans barrière d'action et kill avant fsync en async)
+exécutent le runner final qui intègre cette assertion supplémentaire. Tous
+passent ; aucune modification de production n'est nécessaire.
+
+Les données brutes restent dans `tests/stress/results/storage-s5/` ignoré :
+`bench-final`, `observer-control`, `durability-final`, contrôles post-redémarrage,
+`game-*`, `vanilla-*`, `corpus-refusals`, `s2-batches`, `soak`, logs des gates et
+sanitizers, traces et configurations. Le pilote intrusif `bench/` est exclu de
+l'analyse représentative. Le manifeste brut couvre 1 820 fichiers de preuve,
+SHA-256 `a3e6cf1f499ae7f0671fc9c8c048a5d51d5857a861908f3a94de489d527ff508`.
+La fixture versionnée conserve les agrégats, empreintes et limites sans mondes
+volumineux ni dumps de processus personnels. Les copies de tests sont conservées
+pour reproduction ; tous les processus temporaires sont arrêtés.
+
+### G. Risques restants
+
+**Risques restants :** accès Xeon/HDD bloqué, variabilité du PC partagé,
+coût résiduel des sondes, débit Python et fanout non isolés, simulation items,
+reconstructions encore complètes et amplification Anvil, absence de borne
+murale de la fenêtre dirty, absence de watchdog disque/worker, absence de
+transaction chunks/joueurs/items/POI, aucune panne électrique matérielle testée.
+Les interruptions de processus et erreurs injectées ne permettent pas une
+certification globale du FS, du contrôleur RAID ou du matériel.
+
+Le helper `scripts/inspect-storage-host.sh` reste en lecture seule. Le README
+stress décrit la reprise via les scripts de staging existants, même compilation,
+CPU/ressources bornés, priorité réduite, mondes et ports distincts, zéro
+modification des services principaux. Les compteurs physiques HDD/RAID doivent
+être relevés si visibles ; leur absence en LXC reste une limitation, pas une
+preuve de bonne santé. Les mesures NVMe ne sont jamais étiquetées HDD.
+
+### H. Prochaine phase et proposition S3C
+
+La proposition **S3C** est dans `docs/storage-migration-s3c.md` : adoption pour
+mondes neufs distincte d'une conversion ; inventaire `.bin` 4785/4788, packing
+compact contre natif aligné, backup intégral vérifié, conversion hors place,
+comparaisons indépendantes des blocs/BE/NBT/joueurs, ouvertures Vanilla,
+checkpoints et rollback conservant les sources. Aucun convertisseur, déplacement,
+bascule de défaut ni suppression des `.bin` n'est exécuté. L'activation d'une
+destination ne peut intervenir qu'après validation et autorisation distinctes.
+
+Priorité suivante : rejouer S5 sur Xeon/HDD dès son retour, avec la durée totale
+jusqu'au checkpoint durable et l'arrêt, puis décider l'adoption des nouveaux
+mondes et le périmètre S3C. Une combinaison S2/S4 nécessiterait un lot séparé
+de coordination des lecteurs/récupération, avant toute activation. La reprise
+des portes/trappes et autres blocs reste hors S5 ; ni phase 2 ni compatibilité
+Vanilla complète ne sont déclarées terminées.

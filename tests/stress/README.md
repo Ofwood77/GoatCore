@@ -779,3 +779,128 @@ JSON/CSV, configurations, empreintes, erreurs et essais incomplets. Les mesures
 locales autorisées pendant la maintenance ne représentent pas le Xeon/HDD RAID.
 Avant tout déploiement, rejouer cette procédure sur des instances distantes
 isolées, sans toucher aux services principaux ni aux mondes existants.
+
+## S5 — Durabilité du processus et préparation HDD RAID
+
+`scripts/inspect-storage-host.sh` effectue une seule tentative SSH bornée et des
+lectures de services, ressources et stockage visible dans le conteneur. Il ne
+démarre aucun service, ne déploie rien et n'utilise pas Git sur l'hôte distant.
+Une expiration laisse la validation distante bloquée ; utiliser l'exception
+locale uniquement lorsqu'elle est explicitement autorisée.
+
+Les tests S5 utilisent le binaire S4 figé et vérifient qu'une reconstruction
+propre des mêmes sources produit la même empreinte. Aucun nouveau backend ou
+format de récupération n'est requis. Les résultats locaux ne valent pas une
+validation du Xeon, du RAID ou de ses caches.
+
+### Interruption de mc_server avec NBT complexes
+
+```sh
+cc -std=c11 -shared -fPIC -O2 -Wall -Wextra -pthread \
+  -o /resultats/storage_fault.so tests/stress/storage_fault.c
+python3 tests/stress/test_save_durability.py \
+  --server-binary /binaires/mc_server --fault-probe /resultats/storage_fault.so \
+  --world-template /fixtures/opaque/world --result-dir /resultats/durabilite-neuf
+```
+
+Le runner crée des copies et marque chaque monde jetable ; le preload exige
+ce marqueur, deux pipes hérités et un armement après le `save-all` initial.
+Il ne bloque que les écritures de régions de cette copie. Il injecte SIGKILL,
+SIGTERM, EIO/ENOSPC ponctuels et EIO permanent selon les cas. Les blocs, BE et
+NBT opaques sont comparés, puis une instance réelle redémarre et requête le
+résultat. Les processus bloqués sont libérés ou terminés par le runner en cas
+d'assertion, sans agir sur un service existant. `--modes`, `--actions`, `--stages`
+permettent un replay ciblé dans un autre répertoire neuf.
+
+L'ACK de pose peut précéder un flush même en immediate. Le scénario
+`durable-kill` attend explicitement le succès de `save-all` avant SIGKILL.
+Les erreurs permanentes doivent produire le code de sortie 2 ; une région
+cohérente visible après une erreur parent n'est pas annoncée durable. Une
+interruption du processus ne simule pas une coupure électrique.
+
+### Comptage des écritures
+
+La sonde `profile_fsync.c` étend son mode S4 avec `MC_IO_TRACE_PATH` et
+`MC_IO_TRACE_ROOT`. `profile_tick.py --write-trace --fsync-probe LIB` configure
+ces variables sur le monde jetable. Chaque appel `write`/`pwrite` intercepté
+conserve taille demandée, retour réel, temps, thread et chemin. Le résumé
+compte séparément transferts partiels et erreurs ; ses sommes doivent égaler
+les compteurs atomiques collectés à la sortie. Une trace tronquée fait échouer
+la validation plutôt que publier un volume incomplet.
+
+Il s'agit d'octets acceptés par les appels interceptés, pas d'écritures physiques
+sur les plateaux. `/proc` inclut aussi traces et autres fichiers ; ne pas
+assimiler ces compteurs. Les retours et errno sont conservés. La sonde reste
+réservée aux tests ; son coût et les échantillons bruts sont inclus dans les
+conditions de la campagne. `test_io_probe.py` vérifie réellement le preload,
+quatre threads, l'exclusion des chemins voisins et la conservation d'errno.
+La sonde ignore les eventfd connus, avec invalidation à la fermeture,
+remplacement et réutilisation par open/openat. Le test vérifie ces réutilisations
+y compris après une fermeture par syscall non interceptée. Il ne s'agit pas
+d'un cache de fichiers du monde. Un premier pilote S5 classait chaque réveil
+réseau et perturbait fortement les résultats : utiliser la sonde corrigée,
+conserver des contrôles sans comptage write/pwrite et ne pas comparer des
+binaires ou sondes différents comme un gain serveur.
+
+### Reprise sur Xeon/HDD
+
+Après retour de l'accès, conserver le diagnostic de l'hôte avant/après. Utiliser
+`remote-build-stage.sh` depuis le dépôt local : son export est isolé sous
+`/opt/goatcore/phase2a-stage.*`, sans remplacement des binaires principaux.
+Compiler dans cet export, avec les mêmes options pour les quatre politiques.
+Les suites C, smoke et bots doivent toutes utiliser cet espace et des mondes
+distincts. Un port dynamique est préférable ; 25565 et 25587 sont exclus.
+
+Avant la charge : vérifier joueurs présents, charge, mémoire disponible et
+espace libre. Réserver les mêmes CPU autorisés pour tous les modes, laisser
+des ressources aux services principaux et enregistrer le cpuset effectif.
+Exécuter les tests avec priorité CPU/I/O réduite (`nice`, `ionice` si disponible),
+en conservant ces contraintes dans toutes les comparaisons. Une mesure sur
+stockage partagé ne prouve pas une absence d'interférence physique.
+
+Reprendre la commande S4 avec les labels `bin`, `immediate`, `batched`, `async`
+pointant sur le même binaire courant ; ajouter `--write-trace`. Conserver
+1/10/25/50 bots, 100 cycles, trois répétitions, distances/worker identiques,
+préparation/échauffement/repos séparés et tous les redémarrages. Le délai de
+charge vaut 300 s par défaut ; `--active-timeout 900` peut être choisi
+explicitement et identiquement pour les quatre modes sur HDD, sans réduire
+le nombre d'actions. Le temps maximal reste borné à 3 600 s par essai.
+
+Capturer `iostat`, `/proc/pressure/io`, `/proc/diskstats` et les informations RAID
+visibles si disponibles, sans demander de privilèges supplémentaires ni
+effectuer d'écritures destructives. En conteneur, l'absence de visibilité du
+RAID ne valide pas son état. Conserver les synchronisations fichier/parent,
+volumes logiques et interceptés, CPU/mémoire, files, drainage et coûts d'arrêt.
+En cas d'actions manquantes, déclarer l'essai échoué ; ne pas le normaliser en
+un gain de TPS. Ne pas changer les services principaux pour réussir la mesure.
+
+### Étude isolée S2 groupé
+
+```sh
+python3 tests/stress/profile_region_batches.py \
+  --tool /binaires/mc_region_txn --fsync-probe /resultats/profile_fsync.so \
+  --counts 256 1024 --widths 1 16 64 --repetitions 3 \
+  --result-dir /resultats/s2-groupes-neuf
+```
+
+La commande explicite `--experimental-disposable bench-batched` de l'outil
+réutilise l'API multi-updates S2. Les deux backends reçoivent les mêmes lots NBT
+immuables et effectuent les mêmes lectures de source. Les 100 chunks modifiés
+et tous les autres payloads sont relus ; le résultat final doit être identique
+entre tailles de lots et backends. Les NBT sont synthétiques et ne constituent
+pas des chunks jouables complets. Le journal, ses barrières et sa récupération
+ne sont pas modifiés. Cette étude n'active rien dans `mc_server`.
+
+Les 36 passes de latence utilisent les traces de phases/fsync, **sans comptage
+détaillé des écritures**. Après toutes ces mesures, 12 passes distinctes
+comptent les write/pwrite sur un travail équivalent et revérifient les mêmes
+NBT. Leurs latences perturbées ne figurent pas dans les distributions ;
+`counted_pass` indique la provenance des volumes. Le nombre de transactions
+varie avec la largeur du lot : 100/7/2 pour 100 changements et des largeurs
+1/16/64. La granularité des checkpoints intermédiaires varie donc aussi.
+Le résultat final identique ne démontre pas une même fenêtre de durabilité
+pendant la charge et ne constitue pas une activation de S2 dans S4.
+
+La proposition de migration séparée est dans
+`docs/storage-migration-s3c.md`. Aucun convertisseur ni changement de défaut
+n'est livré avec ces outils de validation.

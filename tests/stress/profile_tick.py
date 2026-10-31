@@ -147,6 +147,20 @@ def io_summary(path, start, end):
                 errors=sum(c[4]!=0 for c in calls))
 
 
+def write_summary(path, start, end):
+    calls=[]
+    with path.open() as file:
+        for row in csv.reader(file):
+            a,b,tid=int(row[0]),int(row[1]),int(row[2])
+            if a<end and b>start:
+                calls.append((row[3],int(row[4]),int(row[5]),row[6]))
+    return dict(calls=len(calls),requested_bytes=sum(r[1] for r in calls),
+                completed_bytes=sum(max(0,r[2]) for r in calls),
+                errors=sum(r[2]<0 for r in calls),
+                short_writes=sum(0<=r[2]<r[1] for r in calls),
+                write_calls=sum(r[0]=='write' for r in calls),pwrite_calls=sum(r[0]=='pwrite' for r in calls))
+
+
 def storage_summary(path, start, end):
     phases={}
     if not path.exists():return phases
@@ -196,7 +210,7 @@ async def monitor(pid, samples, stop):
         await asyncio.sleep(.25)
 
 
-async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only):
+async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only, active_timeout=300):
     opts=options(['--host','127.0.0.1','--port',str(port),'--mode','blocks','--bots',str(bots),
                   '--allow-block-changes','--interval','0.001','--block-cooldown','0.01',
                   '--timeout','60','--block-item-id',str(item)])
@@ -240,7 +254,7 @@ async def exercise(port, bots, cycles, item, result, warmup, idle, prepare_only)
                 bot.cycles_completed+=1
                 await asyncio.sleep(.001)
         start=now()
-        if not prepare_only:await asyncio.wait_for(asyncio.gather(*(work(b) for b in actors)),300)
+        if not prepare_only:await asyncio.wait_for(asyncio.gather(*(work(b) for b in actors)),active_timeout)
         else:await asyncio.sleep(.001)
         phases['active']=[start,now()]
         start=now();await asyncio.sleep(idle);phases['idle_after']=[start,now()]
@@ -293,7 +307,7 @@ async def verify_restart(binary, backend, save_mode, world, expected, result):
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     assert port not in (25565,25587)
     env=os.environ.copy()
-    for name in ('LD_PRELOAD','MC_SAVE_TRACE_PATH','MC_PERF_TRACE_PATH','MC_FSYNC_TRACE_PATH','MC_PROC_FINAL_PATH'):
+    for name in ('LD_PRELOAD','MC_SAVE_TRACE_PATH','MC_PERF_TRACE_PATH','MC_FSYNC_TRACE_PATH','MC_PROC_FINAL_PATH','MC_IO_TRACE_PATH','MC_IO_TRACE_ROOT'):
         env.pop(name,None)
     env.update(MC_WORLD_PATH=str(copy),MC_BIND_PORT=str(port),MC_QA_MODE='1',MC_ADMIN_USERNAME='StressPROF00000',MC_PERF='0',MC_SETUP_FILE=str(ROOT/'tests/stress/network/one.conf'))
     opts=options(['--host','127.0.0.1','--port',str(port),'--mode','connect','--bots','1','--timeout','30']);opts.run_id='PROF'
@@ -339,6 +353,9 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
              MC_PERF_SUMMARY_TICKS='100',MC_PERF_TRACE_PATH=str(result/'ticks.csv'))
     if args.fsync_probe:
         env.update(LD_PRELOAD=str(args.fsync_probe.resolve()),MC_FSYNC_TRACE_PATH=str(result/'fsync.csv'),MC_PROC_FINAL_PATH=str(result/'process-final.json'))
+    if args.write_trace:
+        assert args.fsync_probe, 'write tracing requires the explicitly preloaded test probe'
+        env.update(MC_IO_TRACE_PATH=str(result/'writes.csv'),MC_IO_TRACE_ROOT=str(world))
     if args.save_trace:env['MC_SAVE_TRACE_PATH']=str(result/'saves.csv')
     samples=[];stop=asyncio.Event()
     (result/'processes-before.txt').write_text(subprocess.check_output(['ps','-eo','pid,comm,pcpu,pmem,args','--sort=-pcpu'],text=True))
@@ -355,7 +372,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
                 except ConnectionRefusedError:
                     if time.monotonic()>deadline:raise TimeoutError('listen')
                     await asyncio.sleep(.05)
-            report=await exercise(port,bots,args.cycles,args.item,result,args.warmup,args.idle,prepare_only)
+            report=await exercise(port,bots,args.cycles,args.item,result,args.warmup,args.idle,prepare_only,args.active_timeout)
         finally:
             shutdown_start=time.monotonic_ns()//1000
             if proc.poll() is None:proc.send_signal(signal.SIGTERM)
@@ -387,6 +404,11 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
     if final_usage:
         assert final_usage['pid']==proc.pid
         assert final_usage['vmhwm_kb']>0
+    all_writes=write_summary(result/'writes.csv',0,shutdown_end+1) if args.write_trace else None
+    if all_writes:
+        assert final_usage['write_trace_dropped']==0
+        assert final_usage['world_write_calls']==all_writes['calls']
+        assert final_usage['world_write_bytes']==all_writes['completed_bytes']
     (result/'durable-targets.json').write_text(json.dumps(dict(status='passed',targets=restored,boundary='clean shutdown with no persistence error; independent NBT block-state check'),indent=2))
     rows=read_trace(result/'ticks.csv')
     if args.fsync_probe:assert (result/'fsync.csv').is_file(), 'fsync probe did not produce a trace'
@@ -395,6 +417,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
     for phase,(a,b) in report['phases'].items():
         if b<=a:continue
         stats=summarize(rows,a,b);stats['fsync']=io_summary(result/'fsync.csv',a,b) if args.fsync_probe else None
+        if args.write_trace:stats['writes']=write_summary(result/'writes.csv',a,b)
         stats['storage']=storage_summary(result/'saves.csv',a,b)
         selected=[s for s in samples if a<=s['time_us']<=b]
         if len(selected)>1:
@@ -417,7 +440,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
                     latencies_ms=report['latencies_ms'],total_including_shutdown_s=shutdown_end/1e6-started,
                     after_active_until_shutdown_s=(shutdown_end-report['phases']['active'][1])/1e6,
                     total_storage=storage_summary(result/'saves.csv',0,shutdown_end+1),
-                    durable_targets=len(restored),final_process_usage=final_usage,
+                    durable_targets=len(restored),final_process_usage=final_usage,world_write_trace=all_writes,
                     rss_peak_observed_kb=max([s['hwm_kb'] for s in samples]+[final_usage['vmhwm_kb'] if final_usage else 0]))
     (result/'summary.json').write_text(json.dumps(result_row,indent=2))
     print(json.dumps(dict(label=label,bots=bots,result=str(result),placed=report['placed'],broken=report['broken'],active=summaries['active'])),flush=True)
@@ -425,6 +448,7 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
 
 
 async def main(args):
+    assert 0<args.active_timeout<=3600, 'active timeout must be bounded (0,3600] seconds'
     args.result_dir=args.result_dir.resolve();args.result_dir.mkdir(parents=True,exist_ok=False)
     binaries=[]
     for value in args.binary:
@@ -474,10 +498,12 @@ if __name__=='__main__':
     p.add_argument('--bots',nargs='+',type=int,default=[1,10,25,50])
     p.add_argument('--repetitions',type=int,default=3)
     p.add_argument('--cycles',type=int,default=100)
+    p.add_argument('--active-timeout',type=float,default=300,help='bounded fixed-work deadline; raise explicitly and identically across modes for slow HDD tests')
     p.add_argument('--item',type=int,default=1)
     p.add_argument('--warmup',type=float,default=5)
     p.add_argument('--idle',type=float,default=5)
     p.add_argument('--fsync-probe',type=Path)
+    p.add_argument('--write-trace',action='store_true',help='test-probe write/pwrite calls under the disposable world; includes initialization and shutdown')
     p.add_argument('--save-trace',action='store_true',help='record storage stages and server action queue/handler times')
     p.add_argument('--world-template',type=Path)
     p.add_argument('--result-dir',type=Path,required=True)

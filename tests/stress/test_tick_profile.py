@@ -8,11 +8,23 @@ from protocol import varint
 import tempfile
 import unittest
 from pathlib import Path
-from profile_tick import summarize, quantile, read_trace, io_summary, ProfileBot, proc_sample
+from profile_tick import summarize, quantile, read_trace, io_summary, write_summary, ProfileBot, proc_sample
 from profile_save_batches import publication_window
 
 
 class ContinuousProfileTest(unittest.TestCase):
+    def test_write_counts_keep_partial_results_and_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'writes.csv'
+            path.write_text('0,10,42,write,100,100,/world/old\n20,50,43,pwrite,100,32,/world/temp\n55,60,43,write,68,-1,/world/temp\n')
+            result=write_summary(path,15,65)
+            self.assertEqual(result['calls'],2)
+            self.assertEqual(result['requested_bytes'],168)
+            self.assertEqual(result['completed_bytes'],32)
+            self.assertEqual(result['errors'],1)
+            self.assertEqual(result['short_writes'],1)
+            self.assertEqual(result['pwrite_calls'],1)
+
     def test_backend_marker_sync_is_not_a_region_publication(self):
         def span(name,start,end):return dict(phase=name,start_us=start,end_us=end,result=0)
         rows=[span('atomic_file_sync',1,2),span('atomic_directory_sync',3,4),

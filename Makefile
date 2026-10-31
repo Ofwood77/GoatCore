@@ -324,6 +324,7 @@ precommit-check: hygiene-check generated-check test smoke-start multi-epoll-chec
 	python3 tests/test_registry_generator.py
 	python3 tests/stress/test_stress.py
 	python3 tests/stress/test_tick_profile.py
+	python3 tests/stress/test_io_probe.py
 
 dev-run:
 	$(MAKE) clean

@@ -206,6 +206,77 @@ static int bench(const char *root, const char *backend, unsigned count, const ch
     }
     return 0;
 }
+/* Isolated S5 study. Both backends receive the SAME immutable NBT batch and
+ * read the same expected source before each transaction. This is not a new
+ * journal protocol or an integration into mc_server. */
+static int bench_batched(const char *root, const char *backend, unsigned count,
+                         unsigned width, unsigned ops) {
+    bool incremental = !strcmp(backend, "s2");
+    if ((!incremental && strcmp(backend, "atomic")) || width > count || ops > count)
+        return 2;
+    if (init(root) != 0)
+        failure("fresh disposable directory");
+    fixture(root, 0, count);
+    char path[4096];
+    location(path, root, 0);
+    unsigned *values = calloc(count, sizeof(*values));
+    assert(values);
+    for (unsigned i = 0; i < count; i++)
+        values[i] = i;
+    mc_region_txn_store_t *store = NULL;
+    if (incremental)
+        assert(mc_region_txn_open(root, MC_REGION_TXN_DISPOSABLE, &store) == 0);
+    size_t n;
+    uint8_t *raw = nbt(0, &n);
+    mc_region_update_t warm = {0, raw, n};
+    assert((incremental ? mc_region_txn_write(store, -1, -1, &warm, 1)
+                        : mc_anvil_write_chunk_nbt(path, 0, 0, raw, n)) == 0);
+    free(raw);
+    uint64_t begin = clock_ns(CLOCK_MONOTONIC), cpu = clock_ns(CLOCK_PROCESS_CPUTIME_ID);
+    printf("{\"phase\":\"begin\",\"us\":%" PRIu64 "}\n", begin / 1000);
+    unsigned transactions = 0;
+    for (unsigned first = 0; first < ops; first += width) {
+        uint64_t start = clock_ns(CLOCK_MONOTONIC), tcpu = clock_ns(CLOCK_PROCESS_CPUTIME_ID);
+        unsigned amount = ops - first < width ? ops - first : width;
+        mc_region_update_t updates[64];
+        mc_anvil_chunk_write_t writes[64];
+        uint8_t *before[64];
+        mc_region_file_t *reader = NULL;
+        assert(mc_region_open(path, &reader) == 0);
+        for (unsigned j = 0; j < amount; j++) {
+            size_t old_n;
+            unsigned slot = first + j;
+            assert(mc_anvil_read_chunk_indexed(reader, slot, &before[j], &old_n) == 0);
+            uint8_t *next = nbt(10000 + slot, &n);
+            updates[j] = (mc_region_update_t){slot, next, n};
+            writes[j] = (mc_anvil_chunk_write_t){slot, next, n, before[j], old_n};
+        }
+        assert(mc_region_close(reader) == 0);
+        int rc = incremental ? mc_region_txn_write(store, -1, -1, updates, amount)
+                             : mc_anvil_write_batch_expected(path, writes, amount);
+        if (rc)
+            failure("batch publication");
+        for (unsigned j = 0; j < amount; j++) {
+            values[first + j] = 10000 + first + j;
+            free(before[j]);
+            free((void *)updates[j].nbt);
+        }
+        printf("{\"transaction\":%u,\"changes\":%u,\"wall_ns\":%" PRIu64 ",\"cpu_ns\":%" PRIu64 "}\n",
+               transactions++, amount, clock_ns(CLOCK_MONOTONIC) - start,
+               clock_ns(CLOCK_PROCESS_CPUTIME_ID) - tcpu);
+    }
+    uint64_t finish = clock_ns(CLOCK_MONOTONIC);
+    printf("{\"phase\":\"end\",\"us\":%" PRIu64 ",\"duration_ns\":%" PRIu64
+           ",\"cpu_ns\":%" PRIu64 ",\"confirmed\":%u,\"transactions\":%u,\"width\":%u}\n",
+           finish / 1000, finish - begin, clock_ns(CLOCK_PROCESS_CPUTIME_ID) - cpu,
+           ops, transactions, width);
+    if (store)
+        assert(mc_region_txn_close(store) == 0);
+    verify(root, 1, count, values);
+    free(values);
+    puts("{\"readback\":true,\"all_chunks_and_opaque_fields_verified\":true}");
+    return 0;
+}
 static int rewrite(const char *path, const char *xs, const char *zs) {
     const char *slash = strrchr(path, '/');
     if (!slash || slash == path)
@@ -244,7 +315,8 @@ int main(int argc, char **argv) {
     if (argc < 4 || strcmp(argv[1], "--experimental-disposable")) {
         fprintf(stderr,
                 "usage: %s --experimental-disposable init|recover DIR\n       ... rewrite-region PATH LX "
-                "LZ\n       ... bench FRESH_DIR atomic|s2 CHUNKS single|spread|regions OPS\n",
+                "LZ\n       ... bench FRESH_DIR atomic|s2 CHUNKS single|spread|regions OPS\n"
+                "       ... bench-batched FRESH_DIR atomic|s2 CHUNKS WIDTH OPS\n",
                 argv[0]);
         return 2;
     }
@@ -269,5 +341,8 @@ int main(int argc, char **argv) {
     if (argc == 8 && !strcmp(argv[2], "bench"))
         return bench(argv[3], argv[4], (unsigned)number(argv[5], 1, 1024), argv[6],
                      (unsigned)number(argv[7], 1, 100000));
+    if (argc == 8 && !strcmp(argv[2], "bench-batched"))
+        return bench_batched(argv[3], argv[4], (unsigned)number(argv[5], 1, 1024),
+                             (unsigned)number(argv[6], 1, 64), (unsigned)number(argv[7], 1, 1024));
     return 2;
 }
