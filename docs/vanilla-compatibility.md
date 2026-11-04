@@ -5218,3 +5218,337 @@ mondes et le périmètre S3C. Une combinaison S2/S4 nécessiterait un lot sépar
 de coordination des lecteurs/récupération, avant toute activation. La reprise
 des portes/trappes et autres blocs reste hors S5 ; ni phase 2 ni compatibilité
 Vanilla complète ne sont déclarées terminées.
+
+# S3C — Migration hors ligne GoatCore vers Anvil 26.1.1
+
+Le lot part de `28b3c5e253dfec8da2d5303d7b861463afe8f638`. Les sources
+et modes actifs S1–S5 ne sont pas réimplémentés. Les 101 fichiers de production
+référencés par S4 restent identiques ; le module de traduction est lié uniquement
+au nouvel outil hors ligne. Aucun changement de gameplay, de tick, de worker,
+de configuration principale ou de défaut de stockage.
+
+## Architecture et périmètre
+
+`tools/mc_world_migrate.c` fournit analyse, conversion et vérification explicites.
+`src/world/chunk_migration.c` et son en-tête traduisent le packing historique sans
+reconstruire le NBT à partir d'un modèle incomplet. Le registre officiel, les
+codecs NBT/historique/natif, l'index S1 et l'écrivain atomique durable sont réutilisés.
+Le moteur S2 et le pipeline S4 restent inchangés.
+
+Le contrat complet, les commandes, limites et codes de retour sont dans
+[`storage-migration-s3c.md`](storage-migration-s3c.md). La destination doit être
+indépendante et absente. L'analyse inventorie toutes les entrées et refuse le lot
+entier si une donnée n'est pas convertible sans perte. Les sources sont ouvertes
+en lecture seule, verrouillées lorsque les protocoles coopératifs le permettent,
+empreintées et revérifiées à plusieurs barrières. Aucun `.bin` n'est supprimé.
+
+La conversion transforme uniquement DataVersion et longs des états de blocs.
+Les chunks doivent correspondre au schéma GoatCore connu 4785/4788, complets,
+Overworld, avec biomes uniformes plains démontrés. Les noms, propriétés, palettes,
+champs NBT opaques et fichiers annexes sont préservés. Les inventaires historiques
+`slot`/count Byte, fichiers sidecars de conteneurs, protochunks, `.mcc`, formats
+ambigus et cas S3B non modifiables sont refusés. Il n'existe pas de DataFixer
+général ni de création fictive de block entity, biome, métadonnée mondiale ou POI.
+
+Le manifeste contient les empreintes des sources et des cibles. Les régions sont
+relues et comparées exactement au NBT transformé ; les deux codecs comparent les
+98 304 états de chaque chunk. Un oracle Python indépendant compare aussi types,
+valeurs, sections et états. Toutes les copies ordinaires sont vérifiées par SHA-256.
+La conversion exige `accepted=converted=verified` avant publication.
+
+## Publication et interruptions
+
+Les lots de construction sont bornés à 64 chunks / 32 Mio de NBT par région.
+Le staging privé est créé dans le parent de destination. Les régions utilisent
+le remplacement atomique durable ; le manifeste est synchronisé, puis tous les
+fichiers/répertoires du staging le sont de bas en haut. Après une dernière
+vérification des sources, `renameat2(RENAME_NOREPLACE)` publie l'arbre, puis le
+parent est synchronisé. Aucun répertoire existant n'est remplacé.
+
+| Interruption contrôlée | Résultat exigé et observé dans la matrice CLI |
+|---|---|
+| Analyse, avant lecture, après lecture partielle | Source intacte ; destination absente ; relance sur destination neuve réussie |
+| Conversion/préparation, avant et pendant écriture de région | Source intacte ; seulement staging éventuel ; aucune publication partielle |
+| Avant/après fsync du fichier de région | Ancienne source intacte ; nouvelle destination finale encore absente |
+| Vérification et lecture partielle de vérification | Destination finale absente ; source intacte ; relance possible |
+| Avant/après synchronisation récursive, avant publication | Destination absente ; source intacte |
+| Après publication, avant fsync du parent | Destination cohérente et vérifiable ; durabilité du nom non acquittée |
+| Après fsync du parent | Destination cohérente et vérifiable ; source inchangée |
+| EIO/ENOSPC lecture/création/écriture/fsync/rename | Échec explicite, aucune destination partielle annoncée valide |
+| Erreur fsync du parent ou rename ayant déjà publié | Code 3, résultat visible cohérent mais durabilité incertaine ; aucun rollback destructeur |
+| Écriture courte ou EINTR lecture/écriture/fsync | Boucles de complétion/reprise, conversion vérifiée |
+
+La matrice contient **16 points SIGKILL**, huit erreurs système et quatre
+reprises d'écritures courtes/EINTR. Elle vérifie aussi les relances, le refus
+d'écraser une destination, une source modifiée et une course de création de
+destination. Les hooks n'existent que dans `mc_migrate_fault` ; ils ne sont liés
+ni à l'outil normal ni au serveur. Les stagings ne sont jamais effacés ou promus
+automatiquement. SIGKILL ne reproduit pas une coupure électrique, et les fsync
+ne démontrent pas la fiabilité physique des caches/contrôleurs de stockage.
+
+## Matrice locale d'intégration
+
+Tests sur copies privées, avant le retour du serveur distant. Toutes les
+conversions sont suivies d'une vérification C et Python, de redémarrages GoatCore
+natifs, de mutations observées par deux bots puis de deux ouvertures Vanilla.
+Les métadonnées globales absentes de certains mondes BIN sont ajoutées uniquement
+à une **composition de validation séparée**, depuis un modèle officiel déclaré.
+Le convertisseur ne fabrique ni `level.dat` ni monde Vanilla complet.
+
+| Corpus source | Chunks convertis et vérifiés | Chunks comparés après Vanilla | Particularité |
+|---|---:|---:|---|
+| Monde historique réel d'escaliers S5 | 483 | 483 | 192 observations identiques à la référence officielle S5 |
+| Copie du précédent, DataVersion 4785 | 483 | 483 | Variante synthétique par changement du tag, pas une capture ancienne de production |
+| Placement émis par le writer BIN actuel | 35 | 40 | Blocs, bûches, dalles et fusion ; nouveaux chunks créés pendant les essais |
+| Frontières émises par le writer BIN actuel | 85 | 94 | Coordonnées négatives et plusieurs régions |
+| Chunk officiel complexe reconditionné en BIN | 1 | 39 | Sept BE officielles, packing compact et champ racine opaque synthétique |
+| Même fixture sous ASan/UBSan serveur | 1 | 34 | Relecture, mutation à deux observateurs, redémarrages |
+| Même fixture sous TSan serveur | 1 | 34 | Même séquence et conservation des BE |
+
+Les cinq corpus normaux représentent **1 087 conversions vérifiées**, dont des
+copies/variantes d'un même monde, et non 1 087 chunks historiques uniques. Les
+deux variantes de sanitizer ajoutent deux conversions. Les comparaisons Vanilla
+portent sur chaque état des chunks provenant de GoatCore, y compris ceux créés
+pendant les essais. Une ouverture réussie seule n'est pas le critère.
+
+Les sept familles conservées sont coffre, four froid, panneau, bannière, shulker,
+tonneau et pot décoré : types/valeurs NBT, inventaires et composants sont identiques
+après sauvegarde GoatCore puis Vanilla dans ces scénarios. La fixture est composée
+d'un chunk officiel S3B dont les longs ont été recompactés ; elle ne prétend pas
+que l'ancien writer de conteneurs produisait déjà ces enveloppes natives. Ses
+champs opaques synthétiques sont comparés exactement avant réécriture officielle.
+Les anciennes enveloppes d'items non convertibles restent refusées.
+
+Pour chaque scénario normal, la suite commence aussi par démarrer une copie BIN
+et vérifier que le convertisseur refuse cette source réellement utilisée. La
+source originale et la destination pristine sont encore vérifiées après les essais
+sur copies. Les cycles du marqueur autoritaire comprennent une mutation et deux
+redémarrages, avec observation par deux bots et barrière `save-all` à chaque cycle.
+
+## Non-régression locale
+
+`make -B precommit-check` a réussi dans un export propre : **29 suites C**, smoke,
+multi-epoll, login réseau, tests Python existants et nouvelle suite CLI de
+14 méthodes. Le codec ajoute **590 636 vérifications**. Après extension aux
+16 points d'interruption, la suite CLI a été rejouée avec succès en normal,
+ASan/UBSan et TSan. Le codec a également réussi sous ces sanitizers. Les mêmes
+15 suites C ASan/UBSan et sept suites C TSan de S5 ont été rejouées avec succès,
+leurs sources de production étant inchangées ; deux intégrations serveur
+instrumentées complètent ces validations. Aucun diagnostic sanitizer observé
+sur les chemins exécutés ; ceci ne prouve pas l'absence de races universelle.
+
+Les tests de refus couvrent versions/états inconnus, coordonnées incohérentes,
+NBT invalide ou dupliqué, compression/trailing bytes, données perdues, verrou
+Vanilla POSIX, verrou BIN, liens, destination imbriquée/existante, rapport dirigé
+vers la source, `.mcc` nécessaire, corruption du manifeste/région et source
+modifiée. Le contrôle strict des données générées a réussi avec les rapports
+et inputs officiels frais de S5 ; les JSON locaux antérieurs non fiables sont
+préservés. Aucun comportement de placement n'est modifié.
+
+## Benchmarks NVMe locaux
+
+Ryzen 7 7840HS, stockage NVMe local. Trois répétitions par taille, travail fixé,
+passes chronométrées sans observateur, puis une passe distincte par taille
+comptant les opérations. Caches non purgés ; ces mesures ne décrivent pas un
+chargement froid. Temps en millisecondes, médianes ; la conversion inclut audit,
+construction, relecture, vérification, synchronisations et publication.
+
+| Chunks | Analyse | Conversion complète | Vérification séparée | CPU conversion | Pic RSS conversion |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 5,02 | 23,04 | 8,69 | 13,00 | 14 512 Kio |
+| 100 | 241,95 | 779,90 | 477,51 | 715,79 | 14 840 Kio |
+| 483 | 1 152,48 | 3 546,81 | 2 294,92 | 3 438,71 | 16 104 Kio |
+| 1 000 | 2 384,02 | 7 325,34 | 4 723,51 | 7 137,51 | 15 952 Kio |
+
+Débits médians de conversion : environ 43,4 / 128,2 / 136,2 / 136,5 chunks/s.
+Les 1/100/483 chunks sont des sous-ensembles/copies du monde BIN réel. Le corpus
+1 000 est une relocalisation **synthétique** d'un chunk sans BE dans une région
+négative presque pleine. Ces mesures NVMe précèdent le durcissement final des alias de montage (outil
+`b2c5aadc…`). Elles ne sont pas attribuées au binaire final ; la campagne finale
+a été rejouée sur Xeon après son retour. Les 12 conversions chronométrées et quatre passes
+comptées totalisent **6 336 chunks convertis et vérifiés** ; elles ne constituent
+pas 6 336 chunks source distincts.
+
+| Chunks | Appels write/pwrite ciblés | Octets écrits ciblés | fsync observés | Temps cumulé fsync, passe comptée |
+|---:|---:|---:|---:|---:|
+| 1 | 9 | 23 136 | 126 | 23,14 ms |
+| 100 | 312 | 505 564 | 138 | 74,80 ms |
+| 483 | 1 495 | 3 836 558 | 148 | 122,35 ms |
+| 1 000 | 3 516 | 36 102 710 | 156 | 195,39 ms |
+
+Les copies annexes et répertoires expliquent une partie des synchronisations
+même pour un seul chunk. Les lots bornés peuvent reconstruire plusieurs fois une
+région de grande taille ; S3C ne modifie pas le backend pour optimiser ce coût.
+Les durées des passes comptées sont exclues du classement. Les compteurs
+`source_read_bytes` et `copy_and_manifest_write_bytes` ont des périmètres limités ;
+les traces de processus et write/pwrite complètent ces mesures sans prétendre
+mesurer les écritures physiques du NVMe. Aucun gain de TPS n'est revendiqué.
+
+## Durcissement démontré pendant la revue S3C
+
+Un test dans un espace utilisateur/montage isolé a révélé un défaut de la première
+version du convertisseur : un montage bind exposant la source sous un autre
+chemin contournait la détection textuelle des destinations imbriquées. L'outil
+refusait finalement la publication car la source avait changé, mais avait déjà
+créé un staging dans cette source. Aucun `.bin` n'était tronqué ; la garantie
+« aucune écriture source » n'était toutefois pas respectée.
+
+La version finale compare l'identité dev/inode du parent de destination avec
+celle de la racine source et de tous ses répertoires inventoriés, avant toute
+création. Elle détecte aussi les fichiers de rapport stdout/stderr exposés par
+un montage bind : aucune sortie n'est ajoutée à ces fichiers. Le test indépendant
+`tests/test_migration_mounts.py` couvre sept refus : alias de source entière et
+de sous-arbre pour analyse/conversion, deux rapports dans la source et un rapport
+dans une destination existante. La source et la destination sont comparées avant/
+après. Les sept contrôles passent localement en normal, ASan/UBSan et TSan.
+La matrice CLI complète et les 590 636 contrôles C ont également été rejoués dans
+les trois configurations sur ce code corrigé. Ce durcissement n'ajoute aucun
+chemin de migration au serveur.
+
+Le test de montage utilise `unshare -Urnm` et des répertoires temporaires privés,
+puis démonte ses alias avant nettoyage. Il est explicitement ignoré lorsque les
+namespaces utilisateur/montage ne sont pas disponibles ; cette absence ne vaut
+pas validation. Les changements de montages concurrents par un administrateur
+restent hors contrat. Une redirection shell peut tronquer avant le lancement de
+l'outil : le contrat impose toujours des rapports extérieurs aux deux arbres.
+
+## Validation distante finale — 4 novembre 2026
+
+L'accès à `10.0.4.66` est revenu pendant S3C. Deux exports privés ont été créés
+avec le script existant `remote-build-stage.sh`, sans Git distant et sans
+remplacement d'un binaire principal. La campagne finale utilise
+`/opt/goatcore/phase2a-stage.5lzj8b` sur Xeon E5-2637 v2 : ext4 dans le volume LVM
+du conteneur, espace libre environ 49 Gio. Les disques visibles sont rotatifs ;
+l'état du contrôleur et la redondance physique du RAID ne sont pas observables
+à ce niveau. Les tâches utilisent `nice 10`, `ionice -c 2 -n 7`, CPU 8–11 ;
+le processus principal reste sur CPU 1–3. Aucun service n'a été redémarré.
+
+`make -B precommit-check` réussit dans l'export final propre, incluant les
+29 suites C, le codec 590 636 contrôles, la suite CLI 14 méthodes et les sept
+contrôles de montage bind réellement exécutés. Les 16 SIGKILL, huit erreurs et
+quatre reprises courtes/EINTR sont également rejoués sur ce stockage. Les cinq
+intégrations réussissent : 483 + 483 + 35 + 85 + 1 = **1 087 chunks convertis et
+vérifiés**, sans action ou chunk manquant dans les assertions des scénarios.
+Les nombres comparés après Vanilla sont respectivement 483/483/40/94/39 : tous
+les blocs des chunks issus de GoatCore, avec les nouveaux chunks des essais.
+Les sept BE conservent leurs types/valeurs, inventaires et composants après
+GoatCore puis Vanilla. Les quatre corpus communs avant/après durcissement
+(1 086 chunks) ont aussi des payloads NBT et manifestes **identiques octet par
+octet** ; les timestamps physiques des en-têtes Anvil ne sont pas comparés.
+
+### Conversion sur le Xeon et son volume HDD déclaré
+
+Trois répétitions de chaque taille, puis quatre passes séparées de comptage.
+Aucun compilateur ou autre campagne S3C n'est actif pendant les mesures finales.
+Même travail et fixtures que la campagne NVMe initiale, avec le durcissement
+final des chemins. Compilateur distant GCC 12.2 ; options C11/O2 du projet.
+Les différences CPU, bibliothèque, stockage, priorités et caches interdisent
+une attribution de l'écart NVMe/Xeon au seul disque.
+
+| Chunks | Analyse médiane | Conversion médiane | Vérification séparée médiane | CPU conversion | Pic RSS médian |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 32,27 ms | 458,96 ms | 57,83 ms | 85,64 ms | 12 772 Kio |
+| 100 | 792,43 ms | 3 893,54 ms | 1 477,80 ms | 2 447,34 ms | 13 004 Kio |
+| 483 | 3 390,08 ms | 11 420,99 ms | 6 526,50 ms | 10 483,43 ms | 14 084 Kio |
+| 1 000 | 6 884,79 ms | 27 321,55 ms | 13 519,70 ms | 21 685,15 ms | 14 080 Kio |
+
+Débits médians : **2,18 / 25,68 / 42,29 / 36,60 chunks/s**. Les répétitions
+100 chunks vont de 3,03 à 5,74 s ; 483 chunks de 11,42 à 15,45 s ; 1 000 chunks
+de 27,03 à 27,87 s. L'attente disque varie. Avant durcissement, le CPU médian
+pour 1 000 chunks était 21,58 s contre 21,69 s après ; le temps mural passe de
+23,00 à 27,32 s. Ces campagnes successives ne permettent pas d'attribuer tout
+cet écart au contrôle des alias. Aucune optimisation ni réduction de durabilité
+n'est appliquée pour masquer cette variabilité.
+
+Les 6 336 conversions chronométrées/comptées finales sont toutes vérifiées.
+Les volumes et nombres d'opérations ciblées sont les mêmes que dans le tableau
+NVMe : 23 136 / 505 564 / 3 836 558 / 36 102 710 octets, avec 126/138/148/156
+fsync. Les durées cumulées fsync des **passes comptées séparées** sont
+2 457,83 / 2 699,25 / 3 710,33 / 3 696,27 ms ; elles ne sont pas utilisées pour
+classer les latences des passes ordinaires. Les compteurs processus sont
+conservés avec les write/pwrite ; ils ne mesurent pas les plateaux physiques du
+RAID. Les reconstructions répétées dues aux lots bornés restent une limite de
+l'outil atomique et ne justifient pas d'activer S2 dans ce lot.
+
+Le premier manifeste du runner portait un libellé NVMe codé en dur, même sur le
+distant. Ce défaut de **métadonnée de test** est corrigé par `--hardware-label`.
+Les manifestes distants archivés conservent `manifest-original.json`, son SHA,
+la valeur initiale et une correction explicite fondée sur les contrôles SSH.
+Aucune durée, opération ou donnée de monde n'est modifiée par cette correction.
+
+### Chargement et redémarrage
+
+Trois cycles du marqueur par corpus, deux observateurs, barrière `save-all`,
+puis arrêt propre. Les mesures ci-dessous sont des sondes sur caches non purgés,
+pas des garanties de chargement froid. Les latences backend excluent les recherches
+aboutissant à une absence ; ces absences, suivies d'une création attendue, sont
+comptées séparément dans les résultats bruts.
+
+| Corpus | Premier paquet de chunk après lancement, médiane | Chargements existants | P50/P95/P99 backend |
+|---|---:|---:|---:|
+| Escaliers 483 | 103,26 ms | 90 | 4,42 / 16,49 / 19,57 ms |
+| Variante 4785 | 104,27 ms | 90 | 4,48 / 10,32 / 17,43 ms |
+| Placement | 110,23 ms | 85 | 12,47 / 16,77 / 19,89 ms |
+| Frontières | 209,77 ms | 100 | 11,12 / 16,71 / 17,75 ms |
+| Complexe | 112,40 ms | 75 | 6,14 / 16,89 / 17,82 ms |
+| Référence Anvil vierge, sans conversion | 213,20 ms | 50 | 11,24 / 15,60 / 16,52 ms |
+
+Le monde vierge démarre trois fois, crée ses régions sans `.bin`, conserve le
+marqueur et confirme les observations des deux bots. Les 44 arrêts GoatCore
+chronométrés ont une médiane de 114,43 ms et un maximum de 416,78 ms, après les
+barrières des scénarios. Ceci ne démontre pas un temps maximal d'arrêt à 50 bots
+avec une file pleine. Les CSV contiennent chargement, sérialisation, compression,
+écriture et synchronisations ; les phases à un seul échantillon ne constituent
+pas des distributions statistiques représentatives.
+
+### Échec préliminaire et reprise
+
+Une première relecture Vanilla du corpus frontières a passé le contrôle du bloc
+puis dépassé 60 secondes pendant l'arrêt et la sauvegarde ; le harnais a tué
+uniquement cette JVM temporaire et déclaré l'essai échoué. Cette première
+campagne n'est pas qualifiée complète. La compilation concurrente et la pression
+E/S ont pu contribuer, sans cause unique démontrée.
+
+Le harnais expose désormais `--shutdown-timeout` (défaut inchangé 60 s, borne
+1–600 s), mesure l'arrêt et garde son échec explicite à expiration. Le runner
+S3C choisit 180 s pour Vanilla. La campagne finale sans compilation concurrente
+réussit ses **dix ouvertures Vanilla** ; tous les arrêts terminent en 3,33 à
+41,69 s, dont 36,67 et 12,75 s pour frontières. Aucune région de cet essai tué
+n'est utilisée comme résultat final ; les reprises repartent des copies pristine.
+
+## Livrables, limites et passage suivant
+
+Fichiers : `.gitignore`, `Makefile`, `include/mc_chunk_migration.h`,
+`src/world/chunk_migration.c`, `tools/mc_world_migrate.c`,
+`tools/check_repo_hygiene.sh`, `tests/test_chunk_migration.c`,
+`tests/migration_fault.c`, `tests/test_world_migration.py`,
+`tests/test_migration_mounts.py`, `tests/stress/profile_world_migration.py`,
+`tests/stress/check_world_migration.py`, `tests/stress/run_block_checks.py`,
+`tests/stress/README.md`, les deux documents S3C et le manifeste léger
+`tests/fixtures/vanilla-26.1.1-s3c-validation.json`. Les mondes et exécutables
+restent hors Git ; les preuves brutes sont sous `tests/stress/results/storage-s3c/`.
+
+Empreintes des binaires finaux compilés et testés sur le distant :
+
+- Convertisseur : `17c770061b45a048e0ea7ac46b23b7b490e44e614f456a5f3276f4ee529b7a21`.
+- `mc_server` de test : `190d9d727f15d127ea5c13fb83759223e12ff9237bbb73e89ca592dbc4373878`.
+
+Le 4 novembre à 12:23:58 UTC : 25565 actif, PID 139, même date d'activation ;
+25587 inactif, non redémarré. Les SHA du binaire principal et des deux
+configurations sont inchangés avant/après. Aucun processus Minecraft temporaire
+ne subsiste ; aucun monde principal, service ou permission n'est modifié.
+Aucun déploiement principal, aucune migration réelle et aucun push.
+
+S3C est validé sur les scénarios couverts, localement puis sur le volume du
+serveur Xeon. La santé du RAID, la résistance à une coupure électrique, les mondes
+Vanilla complets et les anciennes enveloppes de conteneurs ne sont pas validés.
+Les 4785 testés sont des fixtures/variantes déclarées, pas une collecte exhaustive
+d'anciens mondes. Aucun retour implicite vers `.bin`, aucune activation automatique,
+aucune fusion S2/S4 et aucun changement de défaut.
+
+Avant toute utilisation principale : rejouer la charge S5 1/10/25/50 bots sur ce
+matériel, qualifier le corpus réel et traiter ou refuser chaque inventaire/sidecar
+historique incompatible. Suivre ensuite la procédure de sauvegarde, conversion
+hors place, vérification, essais, autorisation de bascule et rollback décrite dans
+`storage-migration-s3c.md`. Ne pas supprimer les anciens mondes. Aucun résultat
+S3C ne prouve 20 TPS constants et aucune nouvelle phase gameplay n'est commencée.

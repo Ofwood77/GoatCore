@@ -60,3 +60,5 @@ assets/*
 /mc_region_txn
 
 /mc_native_bench
+/mc_world_migrate
+/mc_migrate_fault

@@ -66,7 +66,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench mc_world_migrate mc_migrate_fault
 
 TEST_BINS = \
     test_varint \
@@ -94,6 +94,7 @@ TEST_BINS = \
     test_world_consistency \
     test_native_storage \
     test_save_pipeline \
+    test_chunk_migration \
     test_setup \
     test_task_queue \
     test_perf_config
@@ -320,7 +321,7 @@ multi-epoll-check: mc_server
 login-integration-check: mc_server
 	python3 tests/test_login_integration.py
 
-precommit-check: hygiene-check generated-check test smoke-start multi-epoll-check login-integration-check
+precommit-check: hygiene-check generated-check test smoke-start multi-epoll-check login-integration-check migration-check
 	python3 tests/test_registry_generator.py
 	python3 tests/stress/test_stress.py
 	python3 tests/stress/test_tick_profile.py
@@ -375,3 +376,19 @@ mc_native_bench: tools/mc_native_bench.c src/world/world.c src/world/world_stora
 
 test_save_pipeline: tests/test_save_pipeline.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync,--wrap=malloc,--wrap=calloc
+
+# Offline migration only. No migration code or fault hook is linked into SRC.
+MIGRATION_SRC = src/world/chunk_migration.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/chunk.c src/world/paletted_container.c src/world/block_registry.c src/world/world.c src/world/world_storage.c src/world/region_storage.c src/util/atomic_file.c src/util/arena.c src/util/mc_util.c src/world/block_entity_store.c src/protocol/inventory.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c
+mc_world_migrate: tools/mc_world_migrate.c $(MIGRATION_SRC) | generated_sources
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto
+
+test_chunk_migration: tests/test_chunk_migration.c $(MIGRATION_SRC) | generated_sources
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto
+
+mc_migrate_fault: tools/mc_world_migrate.c tests/migration_fault.c $(MIGRATION_SRC) | generated_sources
+	$(CC) $(CFLAGS) -DMC_MIGRATION_TESTING -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--wrap=pread,--wrap=write,--wrap=fsync,--wrap=mkdirat,--wrap=renameat2 -o $@ $^ $(LDFLAGS) -lcrypto
+
+.PHONY: migration-check
+migration-check: mc_world_migrate mc_migrate_fault
+	python3 tests/test_world_migration.py --tool ./mc_world_migrate --fault-tool ./mc_migrate_fault
+	python3 tests/test_migration_mounts.py --tool ./mc_world_migrate

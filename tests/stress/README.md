@@ -904,3 +904,58 @@ pendant la charge et ne constitue pas une activation de S2 dans S4.
 La proposition de migration séparée est dans
 `docs/storage-migration-s3c.md`. Aucun convertisseur ni changement de défaut
 n'est livré avec ces outils de validation.
+
+## S3C — migration hors ligne sur copies jetables
+
+S3C ajoute désormais `mc_world_migrate`, séparé de `mc_server`. Le contrat,
+les refus et la procédure de migration réelle figurent dans
+`docs/storage-migration-s3c.md`. Les rapports et destinations doivent être hors
+source. Le mode `bin` reste le défaut et aucune migration automatique n'existe.
+
+```sh
+make mc_world_migrate mc_migrate_fault test_chunk_migration
+./test_chunk_migration
+python3 tests/test_world_migration.py --tool ./mc_world_migrate \
+  --fault-tool ./mc_migrate_fault --evidence /resultats/cli.json
+python3 tests/test_migration_mounts.py --tool ./mc_world_migrate
+python3 tests/stress/profile_world_migration.py \
+  --source /copies/ancien-monde --tool /binaires/mc_world_migrate \
+  --probe /binaires/profile_fsync.so --counts 1 100 483 1000 \
+  --hardware-label "environnement vérifié séparément" \
+  --repetitions 3 --result-dir /resultats/migration-neuf
+python3 tests/stress/check_world_migration.py \
+  --source /copies/ancien-monde --snapshot /fixtures/snapshot.json \
+  --tool /binaires/mc_world_migrate --server /binaires/mc_server \
+  --vanilla-root /reference/vanilla-26.1.1 --java /reference/jdk/bin/java --suite stairs \
+  --metadata-template /copies/monde-officiel --result-dir /resultats/integration-neuf
+```
+
+Le profilage utilise 483 chunks réels lorsqu'ils sont fournis ; au-delà, il
+construit des coordonnées synthétiques explicitement étiquetées. Trois modes
+(analyse, conversion, vérification) sont exécutés pour chaque répétition. Les
+passes chronométrées sont séparées des passes comptant les écritures et fsync.
+Les compteurs de processus ne sont pas des mesures d'écritures physiques du RAID.
+
+L'intégration démarre uniquement des copies privées sur ports libres, refuse
+une conversion pendant l'utilisation réelle d'une copie BIN, vérifie les
+98 304 états/chunk, redémarre GoatCore, réalise des modifications observées par
+deux bots puis ouvre une autre copie deux fois dans Vanilla. Le modèle de
+métadonnées éventuel est une **composition de test explicitement consignée**,
+pas une fabrication de `level.dat` par le convertisseur. Les suites `placement`
+et `complex`, `--boundaries` et `--skip-full-edit` permettent les autres matrices.
+Le résultat `proof.json` n'est créé qu'après toutes les assertions.
+
+`mc_migrate_fault` contient exclusivement des hooks et wrappers de tests : aucun
+hook n'est lié au binaire normal. Seize points d'interruption couvrent notamment
+lecture/écriture partielles, synchronisations, vérification et publication. Les
+orphelins restent dans les répertoires temporaires possédés par le test ; aucune
+suppression de source ni reprise automatique n'est effectuée par le convertisseur.
+Les tests doivent rester distants en régime normal ; l'exécution locale S3C est
+l'exception temporaire autorisée pendant la maintenance du datacenter.
+
+Le délai d’arrêt du runner général reste 60 s ; `--shutdown-timeout` permet
+une attente bornée de 1 à 600 s et consigne les durées. Le runner S3C utilise
+180 s pour les sauvegardes/arrêts Vanilla sur HDD, configurable par
+`--vanilla-shutdown-timeout`. Un dépassement reste un échec, suivi de l’arrêt
+du processus temporaire. Les erreurs de mesure ou de métadonnées sont conservées
+avec leur correction ; aucune ouverture réussie ne remplace la comparaison NBT.

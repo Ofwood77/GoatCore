@@ -68,6 +68,8 @@ def rewrite_regions(runtime, probe, output, s2_experimental=False):
 
 
 def run(args):
+    if not 1 <= args.shutdown_timeout <= 600: raise ValueError("shutdown timeout must be 1..600 seconds")
+    shutdown_times={}
     if args.chunk_storage != "bin" and args.kind != "goatcore": raise ValueError("storage selection is GoatCore-only")
     if args.port in (25565,25587): raise ValueError("main service ports are forbidden")
     if args.fsync_probe and not args.fsync_probe.is_file():raise ValueError("fsync probe library not found")
@@ -129,16 +131,19 @@ def run(args):
                 report=json.loads(test.stdout.strip())
                 (result/f"report-{phase}.json").write_text(json.dumps(report,indent=2))
             finally:
+                shutdown_started=time.monotonic()
                 if proc.poll() is None:
                     if args.kind=="vanilla":proc.stdin.write("stop\n");proc.stdin.flush()
                     else:proc.send_signal(signal.SIGTERM)
-                try:proc.wait(timeout=60)
+                try:proc.wait(timeout=args.shutdown_timeout)
                 except subprocess.TimeoutExpired:
                     proc.kill();proc.wait();raise RuntimeError("temporary server killed after shutdown timeout")
+                shutdown_times[phase]=time.monotonic()-shutdown_started
             if proc.returncode:raise RuntimeError(f"server shutdown exit {proc.returncode}")
             if args.fsync_probe and args.kind=="goatcore" and not (result/f"fsync-{phase}.csv").is_file():
                 raise RuntimeError("fsync probe did not produce a trace")
     metadata={"chunk_storage":args.chunk_storage if args.kind=="goatcore" else None,"world_template":str(args.world_template) if args.world_template else None,"anvil_save_mode":args.anvil_save_mode,"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
+    metadata.update(shutdown_timeout_s=args.shutdown_timeout,shutdown_s=shutdown_times)
     if args.kind=="goatcore":metadata["binary_sha256"]=hashlib.sha256(args.server_binary.read_bytes()).hexdigest()
     (result/"metadata.json").write_text(json.dumps(metadata,indent=2))
     print(json.dumps({**metadata,"results":str(result)}))
@@ -155,6 +160,7 @@ if __name__=="__main__":
     parser.add_argument("--result-dir",type=Path)
     parser.add_argument("--pickup-count",type=int,default=2,choices=(2,100))
     parser.add_argument("--verify-restarts",type=int,default=1,choices=range(1,11),help="successive clean restarts of the same world")
+    parser.add_argument("--shutdown-timeout",type=int,default=60,help="bounded clean shutdown wait, 1..600 seconds")
     parser.add_argument("--s2-experimental",action="store_true",help="arm S2 only inside this fresh isolated Vanilla runtime")
     parser.add_argument("--anvil-rewriter",type=Path,help="rewrite native Vanilla regions with mc_save_bench before each verification restart")
     parser.add_argument("--level-type",default="minecraft:flat",choices=("minecraft:flat","minecraft:normal"))
