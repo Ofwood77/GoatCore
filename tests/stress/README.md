@@ -959,3 +959,33 @@ une attente bornée de 1 à 600 s et consigne les durées. Le runner S3C utilise
 `--vanilla-shutdown-timeout`. Un dépassement reste un échec, suivi de l’arrêt
 du processus temporaire. Les erreurs de mesure ou de métadonnées sont conservées
 avec leur correction ; aucune ouverture réussie ne remplace la comparaison NBT.
+
+## GoatWorld G1 — comparaison hors ligne des backends
+
+G1 ne lance pas `mc_server`. Les corpus et sorties doivent être jetables ; la
+commande impose `--experimental-disposable`. Aucun stockage actif n'est modifié.
+Voir [le format et son contrat](../../docs/goatworld-g1.md).
+
+```sh
+make mc_goatworld mc_goatworld_fault test_goatworld
+make goatworld-check
+cc -shared -fPIC -O2 -o /copies/profile_fsync.so tests/stress/profile_fsync.c -ldl -pthread
+python3 tests/stress/profile_goatworld.py --tool ./mc_goatworld \
+  --corpora /copies/corpora --result-dir /rapports/g1-absent \
+  --hardware-label nom-explicite-du-stockage --profiles --codec \
+  --probe /copies/profile_fsync.so
+```
+
+Le runner limite chaque processus à 1 Gio, chaque fichier à 1 Gio et chaque essai
+à 600 s par défaut ; il nettoie uniquement ses propres sorties jetables après
+vérification. Trois répétitions, corpus identiques, zlib6 commun aux trois
+backends. Les passes comptées sont distinctes des passes chronométrées. Aucun
+résultat n'est publié complet si les empreintes finales ou le nombre d'actions
+diffèrent. `prepare_goatworld_corpus.py` consigne les sources et distingue les
+chunks officiels/historiques des cas synthétiques. Il refuse un résultat existant.
+
+`check_goatworld_roundtrip.py` nécessite le distant et le serveur officiel :
+archive native/SQLite → export MCA exact → deux ouvertures GoatCore et deux
+ouvertures Vanilla, avec vérification de tous les blocs sources et des BE.
+Les données globales sont copiées indépendamment et explicitement déclarées,
+pas converties par G1. Ne pas l'exécuter sur un monde personnel.

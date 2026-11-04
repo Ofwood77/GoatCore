@@ -158,7 +158,7 @@ def write_summary(path, start, end):
                 completed_bytes=sum(max(0,r[2]) for r in calls),
                 errors=sum(r[2]<0 for r in calls),
                 short_writes=sum(0<=r[2]<r[1] for r in calls),
-                write_calls=sum(r[0]=='write' for r in calls),pwrite_calls=sum(r[0]=='pwrite' for r in calls))
+                write_calls=sum(r[0]=='write' for r in calls),pwrite_calls=sum(r[0] in ('pwrite','pwrite64') for r in calls))
 
 
 def storage_summary(path, start, end):

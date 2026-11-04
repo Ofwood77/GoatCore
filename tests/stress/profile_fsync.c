@@ -60,8 +60,11 @@ int dup3(int oldfd, int newfd, int flags) {
 }
 static int output = -1;
 static int (*real_fsync)(int);
+static int (*real_fdatasync)(int);
+static _Atomic unsigned long long sync_fsync_calls, sync_fdatasync_calls;
 static ssize_t (*real_write)(int, const void *, size_t);
 static ssize_t (*real_pwrite)(int, const void *, size_t, off_t);
+static ssize_t (*real_pwrite64)(int, const void *, size_t, off64_t);
 static int io_output = -1;
 static const char *io_root;
 static size_t io_root_length;
@@ -94,6 +97,7 @@ static void final_usage(void) {
     if (io_output >= 0)
         fprintf(out, ",\"world_write_calls\":%llu,\"world_write_bytes\":%llu,\"world_write_errors\":%llu,\"write_trace_dropped\":%llu",
                 atomic_load(&io_calls), atomic_load(&io_bytes), atomic_load(&io_errors), atomic_load(&io_dropped));
+    fprintf(out, ",\"fsync_calls\":%llu,\"fdatasync_calls\":%llu", atomic_load(&sync_fsync_calls), atomic_load(&sync_fdatasync_calls));
     FILE *io = fopen("/proc/self/io", "r");
     if (io) {
         char key[64]; unsigned long long n;
@@ -112,6 +116,8 @@ static long long stamp(clockid_t clock) {
 }
 static void init(void) {
     real_fsync = dlsym(RTLD_NEXT, "fsync");
+    real_fdatasync = dlsym(RTLD_NEXT, "fdatasync");
+    real_pwrite64 = dlsym(RTLD_NEXT, "pwrite64");
     real_write = dlsym(RTLD_NEXT, "write");
     real_pwrite = dlsym(RTLD_NEXT, "pwrite");
     const char *path = getenv("MC_FSYNC_TRACE_PATH");
@@ -167,12 +173,23 @@ ssize_t pwrite(int fd, const void *data, size_t size, off_t offset) {
     record_write("pwrite", fd, size, rc, begin);
     return rc;
 }
-int fsync(int fd) {
+ssize_t pwrite64(int fd, const void *data, size_t size, off64_t offset) {
+    int saved = errno;
     pthread_once(&once, init);
-    if (!real_fsync) { errno = ENOSYS; return -1; }
-    if (output < 0) return real_fsync(fd);
+    if (!real_pwrite64) { errno = ENOSYS; return -1; }
+    long long begin = io_output >= 0 ? stamp(CLOCK_MONOTONIC) : 0;
+    errno = saved;
+    ssize_t rc = real_pwrite64(fd, data, size, offset);
+    record_write("pwrite64", fd, size, rc, begin);
+    return rc;
+}
+static int trace_sync(int fd, bool data_only) {
+    pthread_once(&once, init);
+    if (!(data_only ? real_fdatasync : real_fsync)) { errno = ENOSYS; return -1; }
+    if (data_only) atomic_fetch_add(&sync_fdatasync_calls, 1); else atomic_fetch_add(&sync_fsync_calls, 1);
+    if (output < 0) return data_only ? real_fdatasync(fd) : real_fsync(fd);
     long long start = stamp(CLOCK_MONOTONIC), cpu = stamp(CLOCK_THREAD_CPUTIME_ID);
-    int rc = real_fsync(fd), saved_errno = errno;
+    int rc = data_only ? real_fdatasync(fd) : real_fsync(fd), saved_errno = errno;
     long long end = stamp(CLOCK_MONOTONIC), used = stamp(CLOCK_THREAD_CPUTIME_ID) - cpu;
     char link[64], path[256], row[512];
     snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
@@ -187,3 +204,6 @@ int fsync(int fd) {
     errno = saved_errno;
     return rc;
 }
+
+int fsync(int fd) { return trace_sync(fd, false); }
+int fdatasync(int fd) { return trace_sync(fd, true); }

@@ -5552,3 +5552,375 @@ historique incompatible. Suivre ensuite la procédure de sauvegarde, conversion
 hors place, vérification, essais, autorisation de bascule et rollback décrite dans
 `storage-migration-s3c.md`. Ne pas supprimer les anciens mondes. Aucun résultat
 S3C ne prouve 20 TPS constants et aucune nouvelle phase gameplay n'est commencée.
+
+
+# G1 — Prototype GoatWorld et comparaison native / Anvil S4 / SQLite
+
+## Périmètre et état initial
+
+Départ `9aed5c10cad48017906174e12042ea043ecfb893`. Ce lot répond au changement
+explicite de stratégie : étude d'un stockage propriétaire, sans présumer son gain.
+S1 à S5 et S3C sont réutilisés, pas réimplémentés. Le moteur normal de `mc_server`
+n'est pas modifié. Le binaire serveur distant obtenu est identique à celui de S3C
+(`190d9d…`), les modes par défaut, S2, S4, les règles gameplay et les mondes actifs
+restent inchangés. Les nouvelles dépendances sont facultatives et limitées aux
+outils. Le format détaillé, les commandes et limites sont dans
+[goatworld-g1.md](goatworld-g1.md).
+
+Livrables C11 : `mc_goatworld`, API `mc_goatworld.h`, modules expérimentaux natif,
+codecs, packing réversible et SQLite. `mc_goatworld_fault` ajoute uniquement les
+barrières de test. Aucun de ces modules n'entre dans SRC/`mc_server`. Les lecteurs
+S1, l'écrivain atomique groupé S4, NBT et SimpleBitStorage existants sont réutilisés.
+L'adaptateur Anvil appelle le même `mc_anvil_write_batch_expected` que S4, sur les
+mêmes snapshots et batches. La comparaison ci-dessous **isole le stockage**, pas
+l'exécution des workers S4, le réseau ou le gameplay. Aucun gain TPS n'est annoncé.
+
+## Environnements et méthode
+
+Local : Ryzen 7 7840HS, Linux, NVMe, outils hors ligne seulement. Distant : Xeon
+E5-2637 v2, conteneur LXC, ext4 sur `/dev/mapper/LVM4-vm--125--disk--0`, support
+rotatif observé ; le contrôleur et la santé physique du RAID ne sont pas visibles.
+Les tests utilisent `/opt/goatcore/phase2a-stage.9XgBx2`, nice 10, ionice 2/7 et
+CPU 8–11, distincts des CPU principaux. Pas de limite CPU cgroup ni de throttling
+observé au contrôle ; les autres charges de l'hôte ne sont pas entièrement visibles.
+Aucune purge globale des caches ni opération destructive sur les disques.
+
+Versions locales : zlib 1.3.1, LZ4 1.10.0, Zstd 1.5.7, SQLite 3.46.1.
+Versions distantes : zlib 1.2.13, LZ4 1.9.4, Zstd 1.5.4, SQLite 3.40.1.
+Les différences de bibliothèques empêchent d'attribuer toute différence entre
+hôtes au seul support physique. Les comparaisons d'architectures sont effectuées
+**sur chaque hôte**, avec zlib6 commun, mêmes NBT, générations, préimages et actions.
+Les en-têtes SDK ont été extraits dans des répertoires de test, sans installation
+système ni modification des bibliothèques des services.
+
+Chaque scénario : seed, fermeture durable/checkpoint, conseil d'éviction par
+fichier, réouverture avec index applicatif vide, lectures séquentielles puis
+aléatoires/voisines, prélecture, cache applicatif borné, 100 mises à jour isolées du
+même chunk, 100 réparties par batches régionaux de 64 au maximum, fermeture,
+relecture exhaustive, compactage, fermeture, relecture finale. Les mutations
+portent sur le tag réservé `G1BenchRevision` ; elles ne prétendent pas mesurer la
+simulation de blocs. Les empreintes finales sont identiques entre backends,
+profils, répétitions et hôtes. Aucun travail différé n'est exclu du total complet.
+La préparation du corpus avant l'ouverture est exclue et identique. Le total
+diagnostique inclut aussi les inventaires d'allocation, le conseil d'éviction et
+l'émission des échantillons déjà chronométrés ; il ne remplace pas les latences
+de phases isolées ni une mesure du serveur en fonctionnement.
+
+Trois répétitions, ordre des backends tournant, 200 modifications confirmées par
+essai. Le runner limite à 1 Gio par processus/fichier et 600 s par essai ; le plus
+gros corpus fait 58,8 Mo de NBT. Les sorties de benchmark jetables sont supprimées
+seulement après vérification ; les preuves et corpus sources restent conservés.
+Les mesures ordinaires n'ont aucun preload. Les passes comptées sont séparées et
+ne classent pas les temps ordinaires. La sonde inclut désormais **fdatasync et
+pwrite64**, nécessaires à SQLite ; les CSV sont rapprochés des compteurs sans perte.
+Elle mesure les appels d'écriture observés, pas un inventaire de tous les syscalls.
+`strace` n'est pas disponible sur le distant.
+
+Le conseil fadvise(DONTNEED) est contrôlé par mincore : zéro page résidente
+observée dans les passes qualifiées. Ceci qualifie le cache de pages du processus/
+système, **pas** les caches du contrôleur, des HDD ou du RAID. Les P50/P95/P99
+bruts et les temps CPU sont conservés. Les tableaux rapportent les médianes de
+ces quantiles par essai ; une distribution de deux transactions groupées n'a pas
+une queue P99 statistiquement robuste. Les ouvertures sont paresseuses : le
+coût de chargement du premier index fait partie de la première lecture, pas du
+seul appel d'ouverture de la racine.
+
+La première campagne distante contient aussi des profils de codecs, dont quelques
+passes ont chevauché un test de correction de trois secondes. **Ces passes ne
+servent pas à choisir les profils** : une campagne propre `xeon-profiles-final`
+rejoue les 60 passes de profils, seule et après la référence principale. Les
+45 passes chronométrées zlib6 de référence ont précédé ce chevauchement.
+
+## Corpus et conservation
+
+| Corpus | Nature | Contenu |
+|---|---|---|
+| 1 / 100 / 483 | Sous-ensembles historiques réels, déjà convertis par S3C | Plusieurs régions, coordonnées négatives, dalles et escaliers ; pas de déplacement des chunks |
+| 206 officiels complets | NBT brut du serveur officiel 26.1.1 | Quatre régions, sept BE couvertes ; import/export byte-for-byte natif et SQLite |
+| 1 122 protochunks du même monde | Détectés et inventoriés | Originaux conservés, exclus explicitement, jamais promus en full |
+| 1 000 | Synthétique déclaré | Région dense négative, 500 uniformes, 250 palettes de 256 blocs, 250 avec données opaques |
+| 128 répartis | Synthétique déclaré | Une entrée par région ; expose le coût des index et fichiers supplémentaires |
+| 32 mixtes et cas uniform/diverse/opaque | Synthétiques déclarés | Étude des douze profils, types NBT imbriqués, données compressibles et incompressibles |
+
+Les empreintes des régions originales, du rapport officiel des blocs et des
+corpus sont consignées. Aucun monde synthétique n'est présenté comme de la
+génération officielle. Le corpus officiel est surtout plat et construit par
+scénarios ; ce n'est pas un échantillon représentatif de tous les mondes Survival.
+Les NBT complets sont conservés exactement : BE, inventaires/composants, biomes,
+éclairage, structures, ticks et champs inconnus restent opaques à l'archive.
+**Archiver n'autorise pas leur simulation ou leur modification par GoatCore.**
+Aucune normalisation de ces champs, aucun état remplacé par l'air. Le prototype
+ne remplace pas les validations gameplay S3B. Les DataVersion autres que 4788,
+protochunks et références MCA externes/codecs inconnus sont refusés à l'import.
+S3C reste le chemin explicite de conversion 4785 → 4788 pour ses données couvertes.
+
+## Mesures NVMe locales
+
+| Corpus | Backend | Total complet ms | 100 écritures isolées ms | 100 modifications groupées ms | Lecture aléatoire P50/P99 µs | Compactage ms |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | anvil | 364.11 | 157.13 | 143.19 | 14.73 / 19.46 | 0.00 |
+| 1 | native | 513.52 | 236.11 | 204.33 | 18.93 / 24.82 | 2.88 |
+| 1 | sqlite | 298.37 | 97.17 | 81.27 | 23.84 / 36.16 | 2.39 |
+| 100 | anvil | 261.41 | 157.73 | 21.81 | 11.32 / 17.13 | 0.00 |
+| 100 | native | 346.93 | 210.72 | 22.18 | 14.30 / 18.86 | 16.99 |
+| 100 | sqlite | 248.55 | 108.04 | 18.01 | 19.35 / 25.02 | 3.04 |
+| 1000 | anvil | 3697.52 | 1793.44 | 138.89 | 19.22 / 155.92 | 0.00 |
+| 1000 | native | 2402.39 | 226.30 | 99.72 | 17.47 / 188.01 | 327.17 |
+| 1000 | sqlite | 2727.26 | 94.00 | 114.56 | 150.60 / 321.00 | 107.76 |
+| 483 | anvil | 391.35 | 200.69 | 21.09 | 11.45 / 16.47 | 0.00 |
+| 483 | native | 452.52 | 199.50 | 18.61 | 14.42 / 19.92 | 39.06 |
+| 483 | sqlite | 325.78 | 78.93 | 17.06 | 19.64 / 26.81 | 4.23 |
+| spread128 | anvil | 1069.04 | 161.21 | 249.74 | 117.63 / 175.54 | 0.00 |
+| spread128 | native | 2185.69 | 224.53 | 287.38 | 151.78 / 244.60 | 406.90 |
+| spread128 | sqlite | 1000.00 | 88.44 | 184.75 | 153.80 / 247.50 | 15.24 |
+
+## Mesures sur le volume Xeon / support rotatif
+
+| Corpus | Backend | Total complet ms | 100 écritures isolées ms | 100 modifications groupées ms | Lecture aléatoire P50/P99 µs | Compactage ms |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | anvil | 483.17 | 99.96 | 230.38 | 23.09 / 80.25 | 0.01 |
+| 1 | native | 801.57 | 182.96 | 348.55 | 140.07 / 202.81 | 2.54 |
+| 1 | sqlite | 722.94 | 134.90 | 217.01 | 240.57 / 317.09 | 2.76 |
+| 100 | anvil | 490.33 | 154.88 | 72.97 | 54.44 / 83.72 | 0.00 |
+| 100 | native | 703.99 | 220.91 | 109.59 | 107.35 / 160.01 | 44.17 |
+| 100 | sqlite | 511.16 | 69.53 | 40.23 | 72.53 / 249.97 | 1.49 |
+| 1000 | anvil | 7065.67 | 3425.26 | 267.31 | 31.86 / 241.63 | 0.00 |
+| 1000 | native | 5700.39 | 147.92 | 365.42 | 39.44 / 608.76 | 835.34 |
+| 1000 | sqlite | 6021.92 | 61.11 | 258.62 | 167.62 / 792.86 | 139.57 |
+| 483 | anvil | 759.82 | 330.42 | 86.15 | 18.91 / 29.93 | 0.00 |
+| 483 | native | 1138.24 | 260.40 | 103.66 | 75.51 / 125.98 | 71.14 |
+| 483 | sqlite | 766.42 | 68.86 | 38.25 | 72.12 / 92.13 | 2.47 |
+| spread128 | anvil | 1519.78 | 122.53 | 418.76 | 206.74 / 376.76 | 0.00 |
+| spread128 | native | 3942.61 | 164.80 | 490.57 | 541.65 / 731.66 | 359.57 |
+| spread128 | sqlite | 1903.95 | 54.26 | 268.42 | 464.45 / 663.13 | 12.30 |
+
+Les totaux comprennent lectures, contrôles d'intégrité, écritures durables et
+compactage, avec quantité de travail identique. Anvil n'a pas de compactage
+supplémentaire à faire : chaque reconstruction le compacte déjà. Les lectures
+chaudes Anvil ne font pas les mêmes contrôles SHA-256 de conteneur que native/
+SQLite ; les coûts d'intégrité supplémentaires font partie des architectures.
+Les caches internes diffèrent et sont bornés : huit index pour native/Anvil,
+4 Mio de pages SQLite ; cache de NBT optionnel commun de 8 Mio/64 entrées.
+Le modèle de référence des tests entre dans la mémoire RSS des trois backends.
+Sur 1 000 chunks, RSS Xeon médian : Anvil 83 292 Kio, native 79 196 Kio,
+SQLite 80 372 Kio ; CPU total médian : 6 458 / 5 608 / 5 966 ms respectivement.
+
+## Taille, amplification et synchronisations
+
+| Corpus Xeon | Backend | Allocation initiale / après modifications / après compactage Kio | Octets demandés aux écritures Mio | fsync + fdatasync | Temps sync cumulé ms (passe comptée) |
+|---|---|---:|---:|---:|---:|
+| 483 | anvil | 1988 / 1988 / 1988 | 53.715 | 231 + 0 | 80.51 |
+| 483 | native | 392 / 848 / 388 | 4.233 | 381 + 0 | 66.59 |
+| 483 | sqlite | 240 / 252 / 224 | 2.092 | 121 + 136 | 40.62 |
+| 1000 | anvil | 24032 / 24032 / 24032 | 2598.641 | 245 + 0 | 813.34 |
+| 1000 | native | 21424 / 23964 / 21388 | 47.566 | 369 + 0 | 106.18 |
+| 1000 | sqlite | 22512 / 22580 / 22448 | 96.622 | 128 + 143 | 84.42 |
+| spread128 | anvil | 4128 / 4128 / 4128 | 13.438 | 665 + 0 | 163.65 |
+| spread128 | native | 8216 / 10940 / 8216 | 25.731 | 2396 + 0 | 551.99 |
+| spread128 | sqlite | 2896 / 2964 / 2896 | 19.836 | 338 + 353 | 125.63 |
+
+Allocation = st_blocks des fichiers **et répertoires**, WAL/SHM distingués ouverts
+et fermés. Les compteurs d'écriture comprennent seed, mutations, checkpoints et
+compactage. Ce ne sont ni les seuls payloads utiles ni des octets physiques
+certifiés sur les plateaux du RAID. `/proc/self/io/write_bytes` est aussi conservé,
+mais demeure un indicateur processus/système de fichiers.
+
+Dans la région dense de 1 000 chunks, native demande environ **54,6 fois moins
+d'octets d'écriture** qu'Anvil (2 598,64 → 47,57 Mio), SQLite environ 26,9 fois
+moins. Cela ne donne pas une accélération équivalente : le total complet Xeon
+passe de 7 065,67 à 5 700,39 ms pour native, soit environ 19,3 % de moins ; le
+compactage natif prend 835,34 ms. Les 100 mises à jour isolées passent de
+3 425,26 à 147,92 ms, mais SQLite est encore plus rapide pour cette phase
+(61,11 ms). Les données opaques incompressibles limitent naturellement la taille.
+
+Sur 483 chunks réels, SQLite termine en 766,42 ms contre 759,82 pour Anvil et
+1 138,24 pour native. Après compactage, allocation 224 / 1 988 / 388 Kio
+respectivement. Native ne gagne donc pas systématiquement, même avec moins
+d'octets écrits. Les lectures aléatoires chaudes et le coût des métadonnées/
+contrôles restent importants sur ce Xeon ; dans une passe 483, les médianes CPU
+et murales sont proches (Anvil environ 18,9 µs, native 85,9 µs, SQLite 71,8 µs),
+ce qui exclut d'attribuer ces lectures chaudes au seul temps disque.
+
+Le cas sparse est défavorable à native : 386 fichiers, 8 216 Kio après compactage
+contre 258 / 4 128 pour Anvil et 3 / 2 896 pour SQLite. Son index de 32 Kio par
+région et les barrières de première création sont coûteux. Les anciennes versions
+ne disparaissent pas sans compactage : un seul chunk passe de 52 à 856 Kio après
+200 changements puis revient à 52 Kio. **Aucune politique automatique de compactage
+n'est livrée**, le prototype ne doit pas être adopté pour une session longue sans
+borne et ordonnanceur de maintenance supplémentaires.
+
+Les durées de sync parfois plus basses sur le distant que sur NVMe ne prouvent
+pas que les HDD physiques sont plus rapides : contrôleur/cache/virtualisation et
+bibliothèques diffèrent, les garanties matérielles n'ont pas été certifiées.
+
+## Compression, granularité et palettes
+
+Médianes CPU Xeon, compression puis décompression de chaque corpus entier,
+passages réversibles et byte-for-byte contrôlés :
+
+| Profil | 483 historiques : taille/raw, compression/décompression CPU ms | 1 000 synthétiques : taille/raw, compression/décompression CPU ms |
+|---|---:|---:|
+| none | 1.0000, 0.65 / 0.51 | 1.0000, 9.31 / 24.45 |
+| zlib1 | 0.0565, 47.04 / 6.98 | 0.3850, 626.55 / 82.70 |
+| zlib6 | 0.0510, 49.48 / 8.13 | 0.3699, 790.75 / 73.39 |
+| lz4 | 0.0678, 1.24 / 0.60 | 0.3742, 17.39 / 25.03 |
+| zstd1 | 0.0527, 6.71 / 3.21 | 0.3678, 47.85 / 10.35 |
+| zstd3 | 0.0520, 7.35 / 3.34 | 0.6300, 56.31 / 10.61 |
+| zstd9 | 0.0494, 22.31 / 3.61 | 0.3626, 310.76 / 12.01 |
+| lz4-16k | 0.0701, 1.27 / 0.59 | 0.4167, 25.23 / 7.47 |
+| zstd3-16k | 0.0543, 7.37 / 3.38 | 0.3989, 122.64 / 22.56 |
+| none-pack | 0.5502, 52.22 / 51.14 | 1.0001, 314.65 / 308.79 |
+| lz4-pack | 0.0678, 52.63 / 50.85 | 0.3744, 325.61 / 311.91 |
+| zstd3-pack | 0.0535, 59.36 / 54.57 | 0.6301, 366.53 / 319.17 |
+
+LZ4 et Zstd1 constituent les pistes `fast` et `balanced` pour G2. Zstd9 peut être
+`compact` sur certains corpus, mais aucune monotonie taille/niveau n'est supposée :
+le cas opaque synthétique compresse moins bien avec Zstd3 qu'avec Zstd1. Zstd9
+diffère également entre bibliothèques 1.5.4 et 1.5.7. Les manifeste/version sont
+nécessaires à la reproduction ; pas de règle « niveau supérieur = toujours mieux ».
+Le packing réversible réduit le NBT brut historique à 55 %, mais n'améliore pas
+la taille compressée LZ4 et ajoute environ 51 ms de décodage CPU sur Xeon ; il
+n'est pas recommandé comme défaut. Le framing 16 Kio n'apporte pas ici de gain
+constant. Aucun dictionnaire, codec opaque séparé ou lecture de section ciblée
+n'est annoncé comme livré. **Aucun profil de production n'est choisi ni activé.**
+
+## Durabilité, pannes et intégrité
+
+Native : append sur un bloc 4 Kio neuf, fsync données, index temporaire complet,
+fsync index, rename, fsync répertoire, puis succès. L'ancien contenu n'est jamais
+écrasé par une transaction ordinaire. Le backend natif conserve trois barrières
+établies ; Anvil deux, SQLite WAL FULL plus sync répertoire et checkpoints
+contrôlés. Les coûts supplémentaires de création/compactage sont inclus dans les
+compteurs. Aucune synchronisation n'a été retirée pour favoriser un résultat.
+Générations natives/SQLite croissantes, hash de préimage, propriétaire pthread
+unique et verrou interprocessus protègent les snapshots et écrivains coopératifs.
+L'adaptateur Anvil ne persiste pas de génération G1 (lecture zéro) : il vérifie
+la préimage ; les générations du pipeline S4 restent dans son amont inchangé.
+Ce prototype ne prétend pas ajouter à Anvil une détection ABA par génération.
+
+| Couverture | Résultat |
+|---|---|
+| Native, 14 points SIGKILL, avant append jusqu'au reçu durable | Ancien ou nouveau batch entier selon la publication ; double relecture identique |
+| SQLite, 7 points SIGKILL, transaction/COMMIT/checkpoint | Annulation ou rejeu WAL automatique ; même état aux deux récupérations |
+| Compactage native 9 points et SQLite 4 points | Données actives conservées, compactage répété idempotent |
+| EIO/ENOSPC pwrite et fsync, huit cas comptabilisés | Échec signalé, ancien ou nouveau batch cohérent ; aucun faux succès |
+| Écritures courtes, EINTR pwrite/fsync | Retry ou échec sûr selon backend, jamais succès d'un état perdu |
+| fsync répertoire après rename échoué | Code CLI 3, nouvelle région cohérente visible, durabilité explicitement incertaine |
+| Index altéré, mauvaise identité/version, longueur/offset/troncature/payload | Refus explicite ; pas de régénération ni fallback |
+| SQLite métadonnées/générations altérées et identité d'une autre racine | Hash/identité refusés malgré une base SQL structurellement lisible |
+| Source obsolète, doublon, batch multi-régions, autre pthread, autre écrivain | Mutation refusée avant publication dangereuse |
+| LZ4 MCA/codec inconnu/.mcc, ancien DV, destination présente/nestée/liée | Refus non destructif, aucune sortie publiée comme succès |
+
+Les 42 événements détaillés réunissent crashs/compactages et huit erreurs ; les
+autres cas de refus/retry sont couverts dans les 12 méthodes CLI. Une création
+initiale interrompue peut laisser `.owner` sans index : refus fermé, inspection
+requise. Les temporaires d'index restent conservés et ignorés ; aucun n'est promu
+pour « réparer » une ambiguïté. Le compactage ne supprime les anciens fichiers
+qu'après publication durable du nouvel index. Les checksums détectent une
+corruption ; ils ne sont ni redondance réparatrice ni transaction monde globale.
+SIGKILL ne simule pas une coupure électrique. La cohérence globale entre joueurs,
+chunks, inventaires et objets au sol reste une limite connue.
+
+## Aller-retour Vanilla et non-régression
+
+Quatre essais distants : historique 483 chunks via native, complexe un chunk via
+native et SQLite, puis complexe native après SIGKILL au point `durable` (tag de
+test ajouté, génération conservée). Pour chacun : import, relecture, export exact,
+deux redémarrages GoatCore Anvil async, deux ouvertures Vanilla 26.1.1, assertions
+sur **tous les 98 304 états de chaque chunk source**, pas seulement démarrage/NBT
+lisible. Les trois scénarios complexes conservent exactement les sept BE : coffre,
+four froid, panneau, bannière, shulker, tonneau et pot décoré, dont inventaires et
+composants. Les champs opaques sont exacts avant la normalisation propre à Vanilla.
+
+Les 206 chunks full officiels ont en plus été archivés/exportés byte-for-byte par
+native et SQLite. Ils ne constituent pas un export complet du monde d'origine :
+les 1 122 protochunks restent dans ses régions sources protégées. Les fichiers
+globaux, entités, POI et joueurs ne sont pas encodés par GoatWorld. Dans les essais,
+ils sont copiés indépendamment et les ajouts de métadonnées manquantes sont
+déclarés. Aucun monde personnel, aucune transaction multi-fichiers .mcc.
+
+La matrice complète d'escaliers est rejouée sur les copies exportées :
+**192 observations identiques entre GoatCore et Vanilla**, deux observateurs et
+vérification des huit états persistés après redémarrage. Ce contrôle est distinct
+des simples relectures de huit points des premiers aller-retours.
+
+`make -B precommit-check GOATWORLD_G1_CHECK=1` réussit sur le staging distant :
+29 suites C existantes, suite G1 (107 389 vérifications), tests migration,
+smoke-start, réseau multi-epoll, login et suites Python pertinentes. Les 12 tests
+CLI finaux sont aussi rejoués séparément sur le distant. ASan+UBSan et TSan locaux
+réussissent la suite C G1 et les 12 tests CLI avec injections ; aucun diagnostic
+dans les chemins exécutés, sans prétendre prouver l'absence de toute race. Les
+bibliothèques système externes ne sont pas toutes instrumentées. Sonde I/O et dix
+tests du profileur passent. Le contrôle des générés vérifie les rapports présents
+et signale explicitement les sources brutes optionnelles absentes du staging.
+
+Un premier precommit distant a échoué au contrôle d'hygiène : le drapeau existant
+`GOATCORE_SOURCE_EXPORT=1` manquait dans la commande, qui a tenté une lecture Git
+hors dépôt. Aucun clone/pull/checkout/push n'a été effectué. La commande a été
+corrigée puis le contrôle complet a réussi ; cet échec de harnais n'est pas masqué.
+Lors des pilotes, les noms réels des temporaires atomiques sans point initial et
+la création de répertoires sous descripteur épinglé ont aussi révélé des défauts
+corrigés avant les campagnes qualifiées.
+
+## Décision pour G2 et risques restants
+
+| Architecture | Point fort démontré | Limite principale | Coût / compatibilité |
+|---|---|---|---|
+| Anvil S4 | Lecture historique chaude rapide, format natif Vanilla, peu de fichiers sparse | Réécriture de toute la région, 2,60 Gio demandés sur le dense | Deux sync établies ; aucun export requis, S4 reste opérationnel |
+| Native v1 | Append dense : très faible amplification, accès direct, bonne mémoire | Index sparse et compactage, plus de sync, lecture pas systématiquement meilleure | Trois sync ; import/export exact couvert mais format à maintenir et recovery à qualifier davantage |
+| SQLite WAL FULL | Petites écritures rapides, peu de fichiers, compacité historique/sparse | Lecture dense au-delà du cache et WAL/checkpoint, dépendance externe | Transactions éprouvées, FULL vérifié ; export MCA requis, version corrigée à vérifier avant concurrence G2 |
+
+**Recommandation G2 : prendre SQLite WAL FULL comme architecture principale de
+référence expérimentale**, avec profils de compression explicitement choisis,
+sans l'intégrer au serveur par défaut. Il gagne plusieurs scénarios réels et sparse
+sans le coût d'une maintenance d'index/compactage propriétaire. Conserver le natif
+segmenté comme candidat pour les régions denses, où son amplification et ses
+lectures battent SQLite ; aucune supériorité générale n'est démontrée. Un futur
+choix natif doit résoudre et mesurer l'index compact/sparse, les allocations/
+contrôles dans la lecture et un compactage borné avant adoption. Ne pas choisir
+GoatWorld v1 uniquement parce qu'il est propriétaire.
+
+G2 doit élargir le corpus à des terrains officiels variés, fixer un budget cache
+comparable, comparer LZ4/Zstd1 sur ces données, qualifier une version SQLite corrigée,
+et définir une intégration S4 sans changer les reçus de durabilité. Le format
+propriétaire reste un prototype d'étude, pas une promesse de stockage définitif.
+Une bascule réelle exige sauvegarde, vérification complète, autorisation explicite,
+rollback et nouvelles validations de charge/durabilité sur le matériel cible.
+Aucune migration ni intégration automatique, aucune nouvelle phase gameplay.
+
+Les preuves brutes sont dans `tests/stress/results/goatworld-g1/` (non versionnées),
+avec commandes, versions, JSONL, CSV et empreintes. Le manifeste léger versionné
+est `tests/fixtures/goatworld-g1-validation.json`. Les scripts corpus, benchmarks,
+aller-retour et tests de panne permettent de rejouer les cas ; aucun monde complet,
+SDK, secret ou gros log n'entre dans Git. Les SHA binaires testés sont consignés
+dans le manifeste ; le binaire serveur de test reste identique à S3C.
+
+### Empreintes et état final G1
+
+| Binaire | SHA-256 |
+|---|---|
+| Outil normal NVMe | `dfe01e59d2d697e203e2b6e3485b5016e6152459e7dfc814227332e317e0fff4` |
+| Outil normal Xeon | `a1f0cea96e5047f43f0e44ed3c37fd1a0aad68175ba830658cc55930b93c6c07` |
+| Outil d'injection Xeon | `5a573e0dc184f2027a14c407fc134f751beeb15fd3f068a812381d38537b3093` |
+| Serveur de test Xeon, inchangé depuis S3C | `190d9d727f15d127ea5c13fb83759223e12ff9237bbb73e89ca592dbc4373878` |
+
+Le manifeste fournit aussi les SHA des exécutables C unitaires et des trois
+exécutables ASan/UBSan et TSan. JAR interne officiel 26.1.1 :
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Les systèmes de fichiers testés exposent des blocs de 4 096 octets ; les garanties
+de non-recouvrement du prototype ne sont pas qualifiées sur des blocs plus grands.
+
+210 passes chronométrées qualifiées (105 par hôte), 18 passes comptées séparées,
+plus 60 passes de profils distants préliminaires conservées mais exclues du choix.
+Les 228 passes qualifiées confirment chacune 200 mutations (45 600 au total).
+Les douze profils sont aussi comparés trois fois sur sept corpus et deux hôtes.
+Ces chiffres décrivent les outils, pas des poses/casses Minecraft sous charge.
+
+Contrôle final du 4 novembre 2026 vers 17:13 UTC : 25565 actif, PID 147, activation
+inchangée à 15:21:30 UTC ; 25587 inactif et non redémarré. Le binaire principal
+conserve `f840ed3f…`, la configuration online `59a6b486…`, offline `5d95cf99…`
+(empreintes intégrales dans le manifeste). Aucun processus Minecraft temporaire
+ne subsiste. Aucun service, monde, binaire principal, permission ou configuration
+principale n'a été modifié. Aucun déploiement, aucune migration automatique et
+aucun push. La validation positive d'authentification Mojang n'a pas été rejouée
+et n'est pas revendiquée par ce lot de stockage.

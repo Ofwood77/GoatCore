@@ -66,7 +66,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench mc_world_migrate mc_migrate_fault
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench mc_world_migrate mc_migrate_fault mc_goatworld mc_goatworld_fault test_goatworld
 
 TEST_BINS = \
     test_varint \
@@ -392,3 +392,21 @@ mc_migrate_fault: tools/mc_world_migrate.c tests/migration_fault.c $(MIGRATION_S
 migration-check: mc_world_migrate mc_migrate_fault
 	python3 tests/test_world_migration.py --tool ./mc_world_migrate --fault-tool ./mc_migrate_fault
 	python3 tests/test_migration_mounts.py --tool ./mc_world_migrate
+
+# G1 experimental tools only; these dependencies are never linked into mc_server.
+G1_CPPFLAGS ?=
+G1_LIBS = -l:libsqlite3.so.0 -l:liblz4.so.1 -l:libzstd.so.1
+G1_SRC = src/experimental/goatworld_pack.c src/experimental/goatworld.c src/experimental/goatworld_codec.c src/experimental/goatworld_sqlite.c src/util/atomic_file.c src/world/region_storage.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/chunk.c src/world/paletted_container.c src/world/block_registry.c src/world/block_entity_store.c src/protocol/inventory.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c
+mc_goatworld: tools/mc_goatworld.c $(G1_SRC) | generated_sources
+	$(CC) $(CFLAGS) $(G1_CPPFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto $(G1_LIBS)
+mc_goatworld_fault: tools/mc_goatworld.c tests/goatworld_fault.c $(G1_SRC) | generated_sources
+	$(CC) $(CFLAGS) $(G1_CPPFLAGS) -DMC_GOATWORLD_TESTING -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto $(G1_LIBS)
+test_goatworld: tests/test_goatworld.c $(G1_SRC) | generated_sources
+	$(CC) $(CFLAGS) $(G1_CPPFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto $(G1_LIBS)
+.PHONY: goatworld-check
+goatworld-check: mc_goatworld mc_goatworld_fault test_goatworld
+	./test_goatworld
+	python3 tests/test_goatworld.py --tool ./mc_goatworld --fault-tool ./mc_goatworld_fault
+ifeq ($(GOATWORLD_G1_CHECK),1)
+precommit-check: goatworld-check
+endif

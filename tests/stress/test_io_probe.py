@@ -43,7 +43,8 @@ int main(int argc,char **argv) {
     pthread_t ids[4];
     for(int i=0;i<4;i++)assert(pthread_create(&ids[i],0,thread,&fd)==0);
     for(int i=0;i<4;i++)assert(pthread_join(ids[i],0)==0);
-    assert(fsync(fd)==0);assert(close(fd)==0);
+    assert(fsync(fd)==0);errno=EDOM;assert(fdatasync(fd)==0);assert(errno==EDOM);
+    assert(pwrite64(fd,"q",1,2)==1);assert(close(fd)==0);
     fd=open(argv[1],O_RDONLY);assert(fd>=0);
     assert(write(fd,"!",1)==-1 && errno==EBADF);assert(close(fd)==0);
     fd=open(argv[2],O_CREAT|O_WRONLY,0600);assert(fd>=0);
@@ -73,14 +74,18 @@ int main(int argc,char **argv) {
             with (folder/'writes.csv').open() as trace:
                 rows=list(csv.reader(trace))
             final=json.loads((folder/'final.json').read_text())
-            self.assertEqual(len(rows),87)
-            self.assertEqual(sum(max(0,int(r[5])) for r in rows),87)
+            self.assertEqual(len(rows),88)
+            self.assertEqual(sum(max(0,int(r[5])) for r in rows),88)
             self.assertEqual(sum(int(r[5])<0 for r in rows),1)
             self.assertTrue(all(r[6]==str(world/'file') for r in rows))
-            self.assertEqual(final['world_write_calls'],87)
-            self.assertEqual(final['world_write_bytes'],87)
+            self.assertEqual(final['world_write_calls'],88)
+            self.assertEqual(final['world_write_bytes'],88)
             self.assertEqual(final['world_write_errors'],1)
             self.assertEqual(final['write_trace_dropped'],0)
+            self.assertEqual(final['fsync_calls'],1)
+            self.assertEqual(final['fdatasync_calls'],1)
+            self.assertEqual(sum(r[3]=='pwrite64' for r in rows),1)
+            with (folder/'fsync.csv').open() as file:self.assertEqual(len(list(csv.reader(file))),2)
 
 
 if __name__=='__main__':unittest.main()

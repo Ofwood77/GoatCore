@@ -36,6 +36,7 @@ PLAN*.md
 REPORT*.md
 docs/*
 !docs/testing-minecraft-bot.md
+!docs/goatworld-g1.md
 llm/
 reports/
 test-results/
@@ -62,3 +63,7 @@ assets/*
 /mc_native_bench
 /mc_world_migrate
 /mc_migrate_fault
+
+/mc_goatworld
+/mc_goatworld_fault
+/test_goatworld
