@@ -457,11 +457,11 @@ async def main(args):
         binaries.append((label,binary))
     modes=dict(v.split('=',1) for v in args.storage_backend)
     assert set(modes)<=set(label for label,_ in binaries), 'unknown backend label'
-    assert all(v in ('bin','anvil-atomic-experimental') for v in modes.values())
+    assert all(v in ('bin','anvil-atomic-experimental','goatworld-sqlite-experimental') for v in modes.values())
     policies=dict(v.split('=',1) for v in args.save_mode)
     assert set(policies)<=set(label for label,_ in binaries), 'unknown save-mode label'
     assert all(v in ('immediate','batched','async') for v in policies.values())
-    assert all(v=='immediate' or modes.get(k,'bin')=='anvil-atomic-experimental' for k,v in policies.items())
+    assert all(v=='immediate' or modes.get(k,'bin')!='bin' for k,v in policies.items())
     templates={};semantics={}
     for label,binary in binaries:
         backend=modes.get(label,'bin')
@@ -470,7 +470,7 @@ async def main(args):
             assert len(set(modes.values())|{'bin'})==1, 'mixed backends require independent templates'
             template=args.world_template.resolve()
         else:
-            await one(args,binary,'template',1,args.result_dir/f'template-{backend}',prepare_only=True,backend=backend)
+            await one(args,binary,'template',1,args.result_dir/f'template-{backend}',prepare_only=True,backend=backend,save_mode=policies.get(label,'immediate'))
             template=args.result_dir/f'template-{backend}/runtime/world'
         templates[backend]=template
         manifest={str(p.relative_to(template)):hashlib.sha256(p.read_bytes()).hexdigest() for p in template.rglob('*') if p.is_file()}

@@ -113,6 +113,17 @@ ssize_t write(int fd, const void *data, size_t n) {
     return syscall(SYS_write, fd, data, n);
 }
 ssize_t pwrite(int fd, const void *data, size_t n, off_t offset) {
+    /* G2: stop after a genuine short write inside SQLite's commit/checkpoint.
+     * These gates are never linked or preloaded into the normal server. */
+    if (inside(fd) &&
+        ((name_has(fd, "chunks.sqlite-wal") && offset >= 32 && wants("sqlite-wal-partial")) ||
+         (name_has(fd, "chunks.sqlite") && !name_has(fd, "-wal") && !name_has(fd, "-shm") &&
+          wants("sqlite-checkpoint-partial")))) {
+        ssize_t written = syscall(SYS_pwrite64, fd, data, n > 1 ? n / 2 : n, offset);
+        if (written > 0)
+            gate(wants("sqlite-wal-partial") ? "sqlite-wal-partial" : "sqlite-checkpoint-partial");
+        return written;
+    }
     if (inside(fd) && name_has(fd, ".data.") && offset >= 4096 &&
         (wants("data-partial") || wants("compact-data-partial"))) {
         ssize_t written = syscall(SYS_pwrite64, fd, data, n > 1 ? n / 2 : n, offset);
@@ -140,6 +151,8 @@ ssize_t pwrite64(int fd, const void *data, size_t n, off64_t offset) {
     return pwrite(fd, data, n, (off_t)offset);
 }
 int fsync(int fd) {
+    if (inside(fd) && name_has(fd, "chunks.sqlite-wal"))
+        gate("sqlite-wal-sync-before");
     int saved = errno;
     if (inject("fsync", fd))
         return -1;
@@ -150,6 +163,8 @@ int fsync(int fd) {
     return rc;
 }
 int fdatasync(int fd) {
+    if (inside(fd) && name_has(fd, "chunks.sqlite-wal"))
+        gate("sqlite-wal-sync-before");
     int saved = errno;
     if (inject("fsync", fd))
         return -1;

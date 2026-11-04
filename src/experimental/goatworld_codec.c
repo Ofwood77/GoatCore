@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 uint32_t g1_u32(const uint8_t *p) {
     return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
@@ -291,4 +292,16 @@ done:
     if (rc)
         errno = EBADMSG;
     return rc;
+}
+
+int g1_sync(int fd) {
+    int r;
+    do {
+        r = fsync(fd);
+    } while (r < 0 && errno == EINTR);
+    return r;
+}
+int g1_path(g1_store_t *s, const char *name, char path[4096]) {
+    int n = snprintf(path, 4096, "/proc/self/fd/%d/%s", s->root, name);
+    return n < 0 || n >= 4096 ? -1 : 0;
 }

@@ -644,7 +644,7 @@ static int save_chunk_to_store_with_entities(const mc_world_t *w, mc_chunk_t *ch
     if (rc != 0) {
         int e = errno;
         log_error("chunk store save %s chunk=(%d,%d) world=%s (errno=%d %s)",
-                  rc == MC_SAVE_DURABILITY_UNCERTAIN ? "durability uncertain after replacement" : "failed before replacement",
+                  rc == MC_SAVE_DURABILITY_UNCERTAIN ? "durability uncertain after publication" : "failed (not acknowledged durable)",
                   chunk->cx, chunk->cz, w->world_path ? w->world_path : "(null)", e, strerror(e));
     } else if (w->debug_containers && w->debug_container_pos_set) {
         int32_t cx = 0, cz = 0;
@@ -1176,7 +1176,7 @@ int mc_world_destroy_checked(mc_world_t *w) {
     free(w->updates);
     free(w->jobs);
     mc_be_store_destroy(&w->block_entities);
-    mc_storage_close(w->storage);
+    if(mc_storage_close_checked(w->storage)!=0)storage_rc=-1;
     free(w->world_path);
 
     pthread_mutex_destroy(&w->job_lock);

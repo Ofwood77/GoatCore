@@ -3,6 +3,7 @@
 #include "mc_anvil.h"
 #include "mc_atomic_file.h"
 #include "mc_util.h"
+#include "goatworld_store.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -17,13 +18,16 @@ struct mc_world_storage {
     const char *path;
     mc_storage_kind_t kind;
     int owner, session, s2;
+    mc_goatworld_t *sql;
 };
 bool mc_storage_is_native(const mc_world_storage_t *s) {
-    return s && s->kind == MC_STORAGE_ANVIL_ATOMIC;
+    return s && s->kind != MC_STORAGE_BIN;
 }
+bool mc_storage_is_sqlite(const mc_world_storage_t *s) { return s && s->kind==MC_STORAGE_GOATWORLD_SQLITE; }
 const char *mc_storage_name(mc_storage_kind_t kind) {
     return kind == MC_STORAGE_BIN            ? "bin"
            : kind == MC_STORAGE_ANVIL_ATOMIC ? "anvil-atomic-experimental"
+           : kind == MC_STORAGE_GOATWORLD_SQLITE ? "goatworld-sqlite-experimental"
                                              : "invalid";
 }
 int mc_storage_parse(const char *name, mc_storage_kind_t *kind) {
@@ -35,6 +39,8 @@ int mc_storage_parse(const char *name, mc_storage_kind_t *kind) {
         *kind = MC_STORAGE_BIN;
     else if (!strcmp(name, "anvil-atomic-experimental"))
         *kind = MC_STORAGE_ANVIL_ATOMIC;
+    else if(!strcmp(name,"goatworld-sqlite-experimental"))
+        *kind=MC_STORAGE_GOATWORLD_SQLITE;
     else {
         errno = EINVAL;
         return -1;
@@ -105,21 +111,19 @@ static int lock_file(const char *path, int operation) {
     }
     return fd;
 }
-void mc_storage_close(mc_world_storage_t *s) {
-    if (!s)
-        return;
-    int saved = errno;
-    if (s->session >= 0 && close(s->session) != 0)
-        log_error("storage session close errno=%d", errno);
-    if (s->s2 >= 0 && close(s->s2) != 0)
-        log_error("storage S2 guard close errno=%d", errno);
-    if (s->owner >= 0 && close(s->owner) != 0)
-        log_error("storage owner close errno=%d", errno);
-    free(s);
-    errno = saved;
+int mc_storage_close_checked(mc_world_storage_t *s) {
+    if(!s)return 0;
+    int rc=0;
+    if(mc_goatworld_close(s->sql))rc=-1;
+    if(s->session>=0&&close(s->session))rc=-1;
+    if(s->s2>=0&&close(s->s2))rc=-1;
+    if(s->owner>=0&&close(s->owner))rc=-1;
+    if(rc)log_error("storage close/checkpoint FAILED mode=%s errno=%d",mc_storage_name(s->kind),errno);
+    free(s);return rc;
 }
+void mc_storage_close(mc_world_storage_t *s) { (void)mc_storage_close_checked(s); }
 int mc_storage_open(const char *root, mc_storage_kind_t kind, mc_world_storage_t **out) {
-    if (!out || (kind != MC_STORAGE_BIN && kind != MC_STORAGE_ANVIL_ATOMIC)) {
+    if (!out || (kind != MC_STORAGE_BIN && kind != MC_STORAGE_ANVIL_ATOMIC && kind != MC_STORAGE_GOATWORLD_SQLITE)) {
         errno = EINVAL;
         return -1;
     }
@@ -208,6 +212,15 @@ int mc_storage_open(const char *root, mc_storage_kind_t kind, mc_world_storage_t
             goto bad;
         }
     }
+    if(kind==MC_STORAGE_GOATWORLD_SQLITE){
+        int present=contains(region,".mca");
+        if(present){if(present>0)errno=EINVAL;goto bad;}
+    }else{
+        struct stat existing;
+        if(filename(path,root,"goatworld")!=0)goto bad;
+        if(lstat(path,&existing)==0){errno=EINVAL;goto bad;}
+        if(errno!=ENOENT)goto bad;
+    }
     const char *common[] = {"players", "containers"};
     for (unsigned i = 0; i < 2; i++) {
         if (filename(path, root, common[i]) != 0 || mc_persistence_mkdirs(path, 0755) != 0 ||
@@ -220,7 +233,7 @@ int mc_storage_open(const char *root, mc_storage_kind_t kind, mc_world_storage_t
             if (filename(path, root, dirs[i]) != 0 || mc_persistence_mkdirs(path, 0755) != 0 ||
                 access(path, R_OK | W_OK | X_OK) != 0)
                 goto bad;
-    } else {
+    } else if(kind==MC_STORAGE_ANVIL_ATOMIC) {
         if (mc_persistence_mkdirs(region, 0755) != 0 || access(region, R_OK | W_OK | X_OK) != 0)
             goto bad;
         if (filename(path, region, ".s2-owner.lock") != 0)
@@ -234,6 +247,8 @@ int mc_storage_open(const char *root, mc_storage_kind_t kind, mc_world_storage_t
                 errno = EBUSY;
             goto bad;
         }
+    } else if(mc_goatworld_open(root,bound,&s->sql))goto bad;
+    if(kind!=MC_STORAGE_BIN){
         if (filename(path, root, "session.lock") != 0)
             goto bad;
         do {
@@ -305,6 +320,7 @@ int mc_storage_read(const mc_world_storage_t *s, int32_t cx, int32_t cz, mc_chun
     int rc = -1;
     if (s->kind == MC_STORAGE_BIN)
         rc = mc_chunk_store_read(s->path, cx, cz, out, entities);
+    else if(s->kind==MC_STORAGE_GOATWORLD_SQLITE)rc=mc_goatworld_read(s->sql,cx,cz,out);
     else {
         char path[4096];
         unsigned slot;
@@ -359,6 +375,7 @@ int mc_storage_write(const mc_world_storage_t *s, mc_chunk_t *chunk,
     }
     if (s->kind == MC_STORAGE_BIN)
         return mc_chunk_store_write(s->path, chunk, entities);
+    if(s->kind==MC_STORAGE_GOATWORLD_SQLITE){mc_chunk_t *one[]={chunk};return mc_goatworld_write(s->sql,one,1);}
     mc_save_clock_t span = mc_save_profile_begin();
     uint8_t *raw = NULL;
     size_t n = 0;
@@ -389,6 +406,7 @@ int mc_storage_write_region(const mc_world_storage_t *s, mc_chunk_t *const *chun
         errno = EINVAL;
         return -1;
     }
+    if(s->kind==MC_STORAGE_GOATWORLD_SQLITE)return mc_goatworld_write(s->sql,chunks,count);
     mc_save_clock_t span = mc_save_profile_begin();
     mc_anvil_chunk_write_t *writes = calloc(count, sizeof(*writes));
     if (!writes) return -1;

@@ -236,6 +236,16 @@ aucun gain de TPS n'est déduit d'un outil non intégré.
 
 Les mesures G1 favorisent SQLite WAL FULL comme référence principale de G2 sur
 les scénarios réels/sparse ; le natif reste un candidat dense, sans choix de
-production ni défaut nouveau. Les résultats, empreintes, limites et choix G2 figurent dans la section G1 de
+production ni défaut nouveau. Les résultats, empreintes et limites G1 figurent dans la section G1 de
 `docs/vanilla-compatibility.md` et le manifeste léger de validation. Les mondes
 et SDK de test ne sont pas versionnés.
+
+## Suite G2 : intégration SQLite
+
+G2 intègre uniquement la branche SQLite dans `mc_server`, avec le codec G1 et
+le pipeline S4. Le natif append-only de G1 demeure un outil séparé. Voir la section
+G2 de [vanilla-compatibility.md](vanilla-compatibility.md) pour le schéma réutilisé,
+les connexions bornées, le SQLite 3.51.3 épinglé, les checkpoints et l'activation
+explicite `chunk-storage=goatworld-sqlite-experimental` + `chunk-save-mode=async`.
+Les mesures historiques G1 restent celles de leurs versions de bibliothèques ;
+les nouveaux outils et tests G2 utilisent la version corrigée embarquée.

@@ -27,13 +27,6 @@ static int bad(void) {
     errno = EBADMSG;
     return -1;
 }
-int g1_sync(int fd) {
-    int r;
-    do {
-        r = fsync(fd);
-    } while (r < 0 && errno == EINTR);
-    return r;
-}
 static int close_fd(int fd, int rc) {
     int error = errno;
     if (close(fd) && !rc) {
@@ -42,10 +35,6 @@ static int close_fd(int fd, int rc) {
     }
     errno = error;
     return rc;
-}
-int g1_path(g1_store_t *s, const char *name, char path[4096]) {
-    int n = snprintf(path, 4096, "/proc/self/fd/%d/%s", s->root, name);
-    return n < 0 || n >= 4096 ? -1 : 0;
 }
 static int random_bytes(void *data, size_t n) {
     uint8_t *p = data;
@@ -915,7 +904,7 @@ fail:;
         close(parent);
     free(copy);
     if (s->sql)
-        sqlite3_close(s->sql);
+        g1_sql_close(s);
     if (s->lock >= 0)
         close(s->lock);
     if (s->root >= 0)
@@ -933,7 +922,7 @@ int g1_close(g1_store_t *s) {
     if (s->sql) {
         if (s->writable)
             rc = g1_sql_finish(s, false);
-        if (sqlite3_close(s->sql) != SQLITE_OK)
+        if (g1_sql_close(s) != 0)
             rc = -1;
     }
     invalidate(s);

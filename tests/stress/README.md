@@ -1,5 +1,53 @@
 # Stress multijoueur GoatCore (26.1.1 / protocole 775)
 
+## GoatWorld SQLite intégré — G2
+
+Ces scénarios se lancent depuis une copie de staging sur `10.0.4.66`, avec
+des ports libres distincts de 25565/25587 et des mondes jetables. Ils ne
+déploient aucun service principal. Préparer le SDK privé avec `make storage-deps`
+(SQLite 3.51.3 épinglé, aucune installation système), puis compiler normalement.
+
+La configuration explicite d'un monde neuf est :
+
+```ini
+chunk-storage=goatworld-sqlite-experimental
+chunk-save-mode=async
+```
+
+`chunk-save-mode` accepte également l'ancien nom `anvil-save-mode`. Le mode
+SQLite de `mc_server` exige `async` ; `.bin` reste le défaut. Ne pas changer
+de backend sur le même monde ni copier une base SQLite ouverte sans son WAL.
+
+Les outils suivants complètent les scénarios historiques :
+
+- `check_goatworld_integrated.py` : placement, redémarrages, 100 ramassages,
+  192 observations d'escaliers comparées à un nouveau serveur Vanilla et
+  conservation de sept block entities d'une fixture officielle. Le paramètre
+  `--complex-nbt` désigne une copie NBT identifiée du corpus S3B/G1 ; le seed
+  est réservé aux tests, sans conversion automatique du serveur.
+- `check_goatworld_crash.py` : SIGKILL d'un vrai `mc_server_g2_fault` avant
+  COMMIT et après confirmation durable ; deux observateurs, redémarrage du
+  binaire normal et lecture indépendante du NBT enregistré.
+- `profile_goatworld_checkpoints.py` : microbenchmark hors serveur, trois
+  répétitions de 2 000 transactions de deux chunks aux seuils 1 000/4 096 pages.
+- `sample_goatworld_files.py` : tailles apparentes/allouées des fichiers SQLite,
+  WAL et SHM, uniquement par `stat`, sans ouverture concurrente de leurs fichiers.
+- `tests/test_goatworld_integrated.py` : injections de pannes déterministes,
+  métadonnées invalides, BUSY et propagation d'erreurs à l'arrêt S4 ; exécutable
+  localement puisqu'il ne démarre aucun serveur Minecraft.
+- `check_goatworld_sanitizers.py --result-dir results/chemin-neuf` : six suites
+  et les injections sous ASan/UBSan puis TSan ; compile aussi SQLite avec le
+  sanitizer et ne démarre aucun serveur Minecraft.
+
+`profile_tick.py` compare directement les trois stockages avec `--storage-backend`
+et `--save-mode`. Il inclut save-all, arrêt vérifié, lecture indépendante et
+redémarrage ; conserver les traces et `comparison.json`. Le manifeste léger G2
+est publié dans `tests/fixtures/goatworld-g2-validation.json`, les mondes et logs
+volumineux restent sous `tests/stress/results/goatworld-g2/`, ignorés par Git.
+
+Voir [le contrat et les résultats G2](../../docs/vanilla-compatibility.md)
+avant d'interpréter les ACK réseau comme une confirmation de durabilité.
+
 Client Python indépendant du serveur C. Il reprend le cadrage des paquets de
 `tools/mc_ping.py` et les identifiants de `src/generated/generated_minecraft_ids.h`.
 Mineflayer et son shim dans `tests/minecraft-bot/` ont été examinés ; ils restent

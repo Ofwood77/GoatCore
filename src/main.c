@@ -170,12 +170,12 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
 
         if (strcmp(key, "chunk-storage") == 0) {
             if (mc_storage_parse(val,&out->chunk_storage)!=0) {
-                log_error("invalid chunk-storage '%s' (bin or anvil-atomic-experimental)",val);
+                log_error("invalid chunk-storage '%s' (bin, anvil-atomic-experimental or goatworld-sqlite-experimental)",val);
                 return -1;
             }
             continue;
         }
-        if (strcmp(key,"anvil-save-mode")==0) {
+        if ((strcmp(key,"anvil-save-mode")==0 || strcmp(key,"chunk-save-mode")==0)) {
             if(mc_save_mode_parse(val,&out->anvil_save_mode)!=0) {
                 log_error("invalid anvil-save-mode '%s'",val);
                 return -1;
@@ -248,9 +248,12 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
 
         log_info("server.config: ignoring unknown key '%s'", key);
     }
-    if(out->anvil_save_mode!=MC_SAVE_IMMEDIATE && out->chunk_storage!=MC_STORAGE_ANVIL_ATOMIC) {
-        log_error("anvil-save-mode requires explicit anvil-atomic-experimental storage");
+    if(out->anvil_save_mode!=MC_SAVE_IMMEDIATE && out->chunk_storage==MC_STORAGE_BIN) {
+        log_error("chunk-save-mode requires explicit Anvil or GoatWorld storage");
         return -1;
+    }
+    if(out->chunk_storage==MC_STORAGE_GOATWORLD_SQLITE && out->anvil_save_mode!=MC_SAVE_ASYNC){
+        log_error("GoatWorld requires chunk-save-mode=async (S4 bounded I/O worker)");return -1;
     }
     return 0;
 }

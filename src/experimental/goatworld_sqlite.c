@@ -5,9 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "mc_util.h"
 static int sql_error(g1_store_t *s, int code) {
-    (void)s;
-    errno = (code & 255) == SQLITE_FULL ? ENOSPC : (code & 255) == SQLITE_BUSY ? EBUSY : EIO;
+    if(s->runtime)log_error("GoatWorld SQLite code=%d extended=%d message=%s",code,s->sql?sqlite3_extended_errcode(s->sql):code,s->sql?sqlite3_errmsg(s->sql):"no handle");
+    int base=code&255;
+    errno = base==SQLITE_FULL?ENOSPC:base==SQLITE_BUSY||base==SQLITE_LOCKED?EBUSY:base==SQLITE_CORRUPT||base==SQLITE_NOTADB?EBADMSG:base==SQLITE_ABORT?ESTALE:EIO;
     return -1;
 }
 static int exec_sql(g1_store_t *s, const char *text) {
@@ -54,7 +56,7 @@ static int world_identity(g1_store_t *s, bool create) {
     bool valid = rc == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW &&
                  sqlite3_column_type(st, 0) == SQLITE_BLOB && sqlite3_column_bytes(st, 0) == 16 &&
                  !memcmp(sqlite3_column_blob(st, 0), s->id, 16) &&
-                 sqlite3_column_type(st, 1) == SQLITE_INTEGER && sqlite3_column_int(st, 1) == 4788 &&
+                 sqlite3_column_type(st, 1) == SQLITE_INTEGER && sqlite3_column_int64(st, 1) == 4788 &&
                  sqlite3_step(st) == SQLITE_DONE;
     int closed = sqlite3_finalize(st);
     return valid && closed == SQLITE_OK ? 0 : sql_error(s, rc);
@@ -116,11 +118,14 @@ int g1_sql_open(g1_store_t *s, bool create) {
 }
 int g1_sql_read(g1_store_t *s, uint32_t dim, int32_t x, int32_t z, uint8_t **raw, size_t *len,
                 uint64_t *gen) {
-    sqlite3_stmt *st = NULL;
-    int rc = sqlite3_prepare_v2(s->sql, "SELECT g,c,f,l,n,sha,payload FROM chunks WHERE d=? AND x=? AND z=?",
-                                -1, &st, NULL);
-    if (rc != SQLITE_OK)
-        return sql_error(s, rc);
+    mc_save_clock_t lookup=s->runtime?mc_save_profile_begin():(mc_save_clock_t){0};
+    sqlite3_stmt *st=s->read_sql;
+    int rc=SQLITE_OK;
+    if(!st){
+        rc=sqlite3_prepare_v2(s->sql,"SELECT g,c,f,l,n,sha,payload FROM chunks WHERE d=? AND x=? AND z=?",-1,&st,NULL);
+        if(rc!=SQLITE_OK)return sql_error(s,rc);
+        s->read_sql=st;
+    }
     sqlite3_bind_int(st, 1, (int)dim);
     sqlite3_bind_int(st, 2, x);
     sqlite3_bind_int(st, 3, z);
@@ -130,18 +135,24 @@ int g1_sql_read(g1_store_t *s, uint32_t dim, int32_t x, int32_t z, uint8_t **raw
         result = 1;
     else if (step == SQLITE_ROW) {
         sqlite3_int64 g = sqlite3_column_int64(st, 0);
-        int n = sqlite3_column_int(st, 4), bytes = sqlite3_column_bytes(st, 6);
+        sqlite3_int64 n = sqlite3_column_int64(st, 4);
+        int bytes = sqlite3_column_bytes(st, 6);
         bool ints = true;
         for (int i = 0; i < 5; i++)
             if (sqlite3_column_type(st, i) != SQLITE_INTEGER)
                 ints = false;
-        int c = sqlite3_column_int(st, 1), f = sqlite3_column_int(st, 2), level = sqlite3_column_int(st, 3);
+        sqlite3_int64 c = sqlite3_column_int64(st, 1), f = sqlite3_column_int64(st, 2),
+                      level = sqlite3_column_int64(st, 3);
         if (ints && g > 0 && n > 0 && n <= (int)G1_MAX_RAW && bytes > 0 && bytes <= (int)G1_MAX_RAW * 2 &&
             c >= 0 && c <= 3 && f >= 0 && f <= 3 && level >= 0 && level <= 9 &&
             sqlite3_column_type(st, 5) == SQLITE_BLOB && sqlite3_column_type(st, 6) == SQLITE_BLOB &&
             sqlite3_column_bytes(st, 5) == 32) {
             g1_profile_t p = {(uint8_t)c, (uint8_t)f, (int8_t)level};
-            if (!g1_decode(sqlite3_column_blob(st, 6), (size_t)bytes, (size_t)n, p, raw)) {
+            if(s->runtime)mc_save_profile_end("sqlite_lookup",x,z,lookup,(size_t)bytes,0);
+            mc_save_clock_t decompress=s->runtime?mc_save_profile_begin():(mc_save_clock_t){0};
+            int decoded=g1_decode(sqlite3_column_blob(st, 6), (size_t)bytes, (size_t)n, p, raw);
+            if(s->runtime)mc_save_profile_end("sqlite_decompress",x,z,decompress,(size_t)n,decoded);
+            if (!decoded) {
                 uint8_t hash[32];
                 if (!row_digest(dim, x, z, (uint64_t)g, p, *raw, (size_t)n, hash) &&
                     !memcmp(hash, sqlite3_column_blob(st, 5), 32)) {
@@ -155,9 +166,10 @@ int g1_sql_read(g1_store_t *s, uint32_t dim, int32_t x, int32_t z, uint8_t **raw
             }
         }
     }
-    rc = sqlite3_finalize(st);
-    if (rc != SQLITE_OK || result < 0)
-        return sql_error(s, rc);
+    rc=sqlite3_reset(st);
+    int cleared=sqlite3_clear_bindings(st);
+    if(rc!=SQLITE_OK||cleared!=SQLITE_OK||result<0)
+        return sql_error(s,rc!=SQLITE_OK?rc:cleared!=SQLITE_OK?cleared:SQLITE_CORRUPT);
     return result;
 }
 int g1_sql_write(g1_store_t *s, uint32_t dim, const g1_update_t *u, size_t n, g1_profile_t p) {
@@ -176,25 +188,31 @@ int g1_sql_write(g1_store_t *s, uint32_t dim, const g1_update_t *u, size_t n, g1
     for (size_t i = 0; !rc && i < n; i++) {
         uint8_t hash[32], *encoded = NULL;
         size_t len = 0;
+        mc_save_clock_t compression=s->runtime?mc_save_profile_begin():(mc_save_clock_t){0};
         if (row_digest(dim, u[i].x, u[i].z, u[i].generation, p, u[i].raw, u[i].length, hash) ||
             g1_encode(u[i].raw, u[i].length, p, &encoded, &len)) {
             rc = -1;
             break;
         }
-        sqlite3_bind_int(st, 1, (int)dim);
-        sqlite3_bind_int(st, 2, u[i].x);
-        sqlite3_bind_int(st, 3, u[i].z);
-        sqlite3_bind_int64(st, 4, (sqlite3_int64)u[i].generation);
-        sqlite3_bind_int(st, 5, p.codec);
-        sqlite3_bind_int(st, 6, p.framed);
-        sqlite3_bind_int(st, 7, p.level);
-        sqlite3_bind_int(st, 8, (int)u[i].length);
-        sqlite3_bind_blob(st, 9, hash, 32, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 10, encoded, (int)len, SQLITE_TRANSIENT);
+        if(s->runtime)mc_save_profile_end("sqlite_compress",u[i].x,u[i].z,compression,len,0);
+        int bind=sqlite3_bind_int(st, 1, (int)dim);
+        bind|=sqlite3_bind_int(st, 2, u[i].x);
+        bind|=sqlite3_bind_int(st, 3, u[i].z);
+        bind|=sqlite3_bind_int64(st, 4, (sqlite3_int64)u[i].generation);
+        bind|=sqlite3_bind_int(st, 5, p.codec);
+        bind|=sqlite3_bind_int(st, 6, p.framed);
+        bind|=sqlite3_bind_int(st, 7, p.level);
+        bind|=sqlite3_bind_int(st, 8, (int)u[i].length);
+        bind|=sqlite3_bind_blob(st, 9, hash, 32, SQLITE_TRANSIENT);
+        bind|=sqlite3_bind_blob(st, 10, encoded, (int)len, SQLITE_TRANSIENT);
         free(encoded);
+        if(bind!=SQLITE_OK){code=bind;rc=-1;break;}
         code = sqlite3_step(st);
-        if (code != SQLITE_DONE || sqlite3_changes(s->sql) != 1)
+        if (code != SQLITE_DONE || sqlite3_changes(s->sql) != 1) {
+            if(code==SQLITE_DONE)code=SQLITE_ABORT;
             rc = -1;
+        }
+        G1_HOOK("sql-inserted");
         if (sqlite3_reset(st) != SQLITE_OK)
             rc = -1;
         if (sqlite3_clear_bindings(st) != SQLITE_OK)
@@ -203,9 +221,11 @@ int g1_sql_write(g1_store_t *s, uint32_t dim, const g1_update_t *u, size_t n, g1
     if (sqlite3_finalize(st) != SQLITE_OK)
         rc = -1;
     G1_HOOK("sql-before-commit");
-    if (!rc)
+    if (!rc) {
+        mc_save_clock_t commit=s->runtime?mc_save_profile_begin():(mc_save_clock_t){0};
         rc = exec_sql(s, "COMMIT");
-    else
+        if(s->runtime)mc_save_profile_end("sqlite_commit",0,(int32_t)n,commit,0,rc);
+    } else
         exec_sql(s, "ROLLBACK");
     if (!rc) {
         G1_HOOK("sql-committed");
@@ -290,4 +310,11 @@ int g1_sql_finish(g1_store_t *s, bool compact) {
             return sql_error(s, rc);
     }
     return g1_sync(s->root);
+}
+
+int g1_sql_close(g1_store_t *s) {
+    int rc=0;
+    if(s->read_sql){if(sqlite3_finalize(s->read_sql)!=SQLITE_OK)rc=-1;s->read_sql=NULL;}
+    if(s->sql){int r=sqlite3_close(s->sql);if(r!=SQLITE_OK)rc=sql_error(s,r);else s->sql=NULL;}
+    return rc;
 }

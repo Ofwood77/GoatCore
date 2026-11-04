@@ -43,7 +43,10 @@ static mc_world_storage_t *disposable(const char *world) {
         lstat(marker, &st) != 0 || !S_ISREG(st.st_mode))
         fail("disposable marker");
     mc_world_storage_t *s = NULL;
-    if (mc_storage_open(world, MC_STORAGE_ANVIL_ATOMIC, &s) != 0)
+    mc_storage_kind_t kind=MC_STORAGE_ANVIL_ATOMIC;
+    const char *test_backend=getenv("MC_TEST_STORAGE");
+    if(test_backend && mc_storage_parse(test_backend,&kind))fail("test storage mode");
+    if (mc_storage_open(world, kind, &s) != 0)
         fail("storage open");
     return s;
 }
@@ -210,7 +213,10 @@ int main(int argc, char **argv) {
         fail("disposable marker");
     int cx = number(argv[seed ? 3 : 2]), cz = number(argv[seed ? 4 : 3]);
     mc_world_storage_t *store = NULL;
-    if (mc_storage_open(world, MC_STORAGE_ANVIL_ATOMIC, &store) != 0)
+    mc_storage_kind_t kind=MC_STORAGE_ANVIL_ATOMIC;
+    const char *backend=getenv("MC_TEST_STORAGE");
+    if(backend&&mc_storage_parse(backend,&kind))fail("test backend");
+    if (mc_storage_open(world, kind, &store) != 0)
         fail("storage open");
     if (seed) {
         int fd = open(argv[5], O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -220,6 +226,16 @@ int main(int argc, char **argv) {
         uint8_t *raw = malloc((size_t)st.st_size);
         if (!raw || mc_file_pread_all(fd, raw, (size_t)st.st_size, 0) != 0 || close(fd) != 0)
             fail("seed read");
+        if(kind==MC_STORAGE_GOATWORLD_SQLITE){
+            mc_chunk_t chunk={0};
+            if(mc_anvil_decode_native(raw,(size_t)st.st_size,cx,cz,&chunk))fail("test seed decode");
+            chunk.storage_nbt=raw;chunk.storage_nbt_len=(size_t)st.st_size;
+            if(!chunk.save_generation)chunk.save_generation=1;
+            if(mc_storage_write(store,&chunk,NULL))fail("test seed SQLite");
+            mc_chunk_destroy(&chunk);
+            if(mc_storage_close_checked(store))fail("test seed close");
+            return 0;
+        }
         int32_t rx, rz;
         unsigned slot;
         mc_region_coordinates(cx, cz, &rx, &rz, &slot);
@@ -290,6 +306,6 @@ int main(int argc, char **argv) {
            hwm, rss, u.ru_maxrss, reps);
     mc_chunk_destroy(&verify);
     mc_chunk_destroy(&c);
-    mc_storage_close(store);
+    if(mc_storage_close_checked(store))fail("storage close");
     return 0;
 }

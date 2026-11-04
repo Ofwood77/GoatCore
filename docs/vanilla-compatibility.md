@@ -5924,3 +5924,514 @@ ne subsiste. Aucun service, monde, binaire principal, permission ou configuratio
 principale n'a été modifié. Aucun déploiement, aucune migration automatique et
 aucun push. La validation positive d'authentification Mojang n'a pas été rejouée
 et n'est pas revendiquée par ce lot de stockage.
+
+# G2 — GoatWorld SQLite intégré à mc_server
+
+## Périmètre et architecture
+
+HEAD initial `906ede04a74c48b838908429eb5a1888136ee780`, arbre suivi propre.
+Les fichiers personnels `.vscode/`, `src/main.py`, `start-aider.sh` restent exclus.
+G2 intègre **un** backend expérimental, sans nouveau scheduler ni worker : le
+writer S4 existant conserve sa file d'un lot, 64 snapshots et 64 Mio de copies.
+Aucune migration, aucun export nouveau, aucune modification du gameplay ;
+`.bin` reste le défaut, Anvil et les prototypes G1/S2 restent disponibles/séparés.
+
+Configuration explicite pour un **nouveau répertoire de monde** :
+
+```ini
+chunk-storage=goatworld-sqlite-experimental
+chunk-save-mode=async
+```
+
+`chunk-save-mode` est un alias générique du paramètre S4 `anvil-save-mode`, toujours
+accepté pour compatibilité. Le nouveau backend exige explicitement async ; un
+oubli ou un mode synchrone dans `server.config` provoque un refus de démarrage.
+Les API C de stockage synchrones servent toujours aux tests, à l'initialisation
+et aux barrières explicites. La sélection persiste dans `.goatcore-storage`.
+Une sélection différente sur le même monde est refusée, sans fallback `.bin`.
+
+Une seule base par monde : `goatworld/chunks.sqlite`, avec ses sidecars SQLite
+`-wal`/`-shm` et un fichier `goatworld/identity` de 16 octets aléatoires. Le verrou
+exclusif de monde S3A reste détenu jusqu'à la fermeture de tous les lecteurs et
+writers. Le `session.lock` existant est aussi maintenu. Un monde Anvil ou `.bin`
+avec chunks existants n'est jamais adopté implicitement. Un monde lié à GoatWorld
+dont la base ou l'identité manque échoue : une absence de **ligne** peut générer
+un chunk ; une base absente/corrompue ne le peut pas.
+
+Le nouveau module `src/world/goatworld_store.c` utilise directement le moteur
+SQLite, les checksums, codecs et invariants G1. Les connexions et requêtes restent
+privées ; aucun chunk vivant n'est transmis au writer. Le module Anvil existant
+sert de codec NBT natif, pas de stockage intermédiaire : **aucun `.mca` n'est
+produit** par le nouveau mode. Les sources NBT opaques et les masques S3B restent
+présents dans les snapshots et les chunks rechargés.
+
+## Dépendances et correctif SQLite
+
+Les lectures et checkpoints peuvent désormais se chevaucher. G1 utilisait une
+connexion unique et excluait ce cas ; G2 utilise **SQLite 3.51.3** épinglé avec
+le correctif upstream WAL-reset. Le serveur refuse une bibliothèque antérieure
+à 3.51.3 ou compilée sans support de threads. Voir les sources primaires :
+[release 3.51.3](https://www.sqlite.org/releaselog/3_51_3.html),
+[WAL](https://www.sqlite.org/wal.html),
+[threading](https://www.sqlite.org/threadsafe.html),
+[checkpoints](https://www.sqlite.org/c3ref/wal_checkpoint_v2.html).
+
+`tools/prepare_storage_deps.py` télécharge dans `.local/storage-deps` une archive
+SQLite épinglée par SHA-256 puis vérifie aussi le SHA3-256 officiel de `sqlite3.c` :
+`32d5424f97e0a7fc5ed2f6335afbb58be4e0298bd7117a34e39d345ff13d859e`.
+Le build produit une archive statique privée, avec `SQLITE_THREADSAFE=1` et
+`SQLITE_OMIT_LOAD_EXTENSION=1`. Les en-têtes LZ4 1.9.4 et Zstd 1.5.4 sont aussi
+épinglés ; les bibliothèques SONAME Linux existantes sont utilisées pour ces
+codecs. Aucune installation ni remplacement des bibliothèques système distantes.
+Le SDK/source tiers et les binaires ne sont pas versionnés. Un premier build
+nécessite l'accès aux URLs épinglées ou leur cache validé. Les compilations
+sanitizers instrumentent aussi le SQLite embarqué.
+
+## Schéma et codec
+
+Le schéma G1 est réutilisé, application_id **1196896561**, user_version **1**.
+Cette version de schéma fixe le codec de conteneur G1 v1 et la DataVersion Int
+**4788**, déclarée/vérifiée dans `meta` avec l'identité du monde. Il n'y a pas de
+migration de schéma ni de DataFixer implicite. Un autre schéma/identifiant/version
+est refusé. Les anciennes bases de prototypes ne sont pas adoptées automatiquement.
+
+| Table | Colonnes et invariants |
+|---|---|
+| `meta` | `id=1`, `world_id` Blob 16 octets, `data_version=4788` |
+| `chunks WITHOUT ROWID` | PK `(d,x,z)`, génération `g>0`, codec `c`, layout `f`, niveau `l`, longueur brute `n`, `sha` Blob 32, `payload` Blob |
+
+Une recherche et un upsert sont préparés/paramétrés ; la requête de lecture est
+conservée par connexion et remise à zéro après chaque résultat. Les coordonnées
+sont des entiers signés, sans nom de région à construire. La dimension est
+explicite ; seul l'Overworld (`d=0`) est actif dans GoatCore aujourd'hui.
+
+Le writer utilise **LZ4 block G1** `(c=2,f=0,l=0)`, choisi parmi les résultats G1
+pour sa faible charge CPU et sa décompression rapide. Ce n'est pas l'encodage
+LZ4 d'un fichier Anvil. Aucun nouveau packing destructeur : les sections uniformes,
+palettes, indices alignés, BE et données opaques utilisent le codec natif existant.
+Le checksum SHA-256 lie coordonnées, dimension, longueur, génération et paramètres
+de codec au SHA du NBT brut. Les tags/types/tailles NBT sont contrôlés au décodage
+natif. Le brut est limité à 8 Mio ; les allocations/compressions sont bornées,
+les versions/codecs/longueurs invalides refusés. Aucun bloc inconnu n'est remplacé
+par de l'air pour faire réussir une lecture.
+
+## Connexions, lectures et mémoire
+
+Un writer NOMUTEX est protégé par un mutex explicite : initialisation sur le
+thread de démarrage, puis utilisation sérialisée par le worker S4 ; les barrières
+et la fermeture ne peuvent le reprendre qu'après drainage. Quatre connexions
+READONLY/NOMUTEX forment un pool borné, chacune protégée par son propre mutex.
+Les workers de chunks utilisent ce pool ; le writer ne prend jamais ces mutex
+pour un COMMIT normal. Les lecteurs ne prennent pas le mutex writer. SQLite
+est compilé threadsafe ; le modèle respecte l'interdiction d'utiliser une même
+connexion/statement simultanément dans plusieurs pthreads.
+
+Chaque lecture remet son statement à zéro et libère son snapshot SQL, puis
+retourne un chunk privé au chemin de chargement existant. Aucune transaction de
+lecture persistante n'est exposée. Les caches SQLite sont bornés : 4 Mio writer,
+1 Mio par lecteur (8 Mio au total comme budget de pages, hors structures SQLite).
+Pas de cache NBT G1 supplémentaire : le cache de chunks/palettes/réseau existant
+reste propriétaire des données vivantes. Le contrôle d'intégrité structurelle
+au démarrage ne charge pas les chunks décodés dans le monde ; les checksums sont
+validés lors de leur lecture. Les coûts de ce contrôle et de décodage sont inclus
+respectivement dans démarrage et chargement.
+
+Les spans réutilisent la sonde S4 optionnelle : `sqlite_lookup`,
+`sqlite_decompress`, `sqlite_read`, `sqlite_decode`, `sqlite_encode`,
+`sqlite_compress`, `sqlite_commit`, `sqlite_transaction`, `sqlite_checkpoint`.
+Ils sont imbriqués et **ne doivent pas être additionnés** comme coûts exclusifs.
+Le span lookup décrit les recherches existantes ; les absences restent comptées
+séparément dans les chargements. Aucune trace détaillée n'est activée par défaut.
+
+## Transactions et générations
+
+S4 capture l'état autoritaire et les générations dirty sur le tick, puis remet
+les copies indépendantes au writer existant. Anvil reste groupé par région ;
+**SQLite utilise une transaction pour le lot entier**, y compris plusieurs
+régions : BEGIN IMMEDIATE, upserts des snapshots, COMMIT, synchronisation du
+répertoire. Pas de transaction par bloc ni de fsync par mutation gameplay.
+Les requêtes utilisent `WHERE chunks.g < excluded.g` ; un snapshot obsolète fait
+échouer tout le batch et ses changements antérieurs sont annulés par SQLite.
+
+Contrairement à l'époque runtime Anvil remise à zéro, la génération SQLite est
+persistée et restaurée dans `save_generation`/`durable_generation`. Elle avance
+avec les mutations existantes. Une confirmation G ne remplace jamais les blocs
+vivants, et garde dirty si une génération G+1 existe. Les sources NBT privées
+reviennent au tick par la complétion S4. L'éviction attend une confirmation propre
+et le rechargement restaure la génération et les états persistés. Le test couvre
+une mutation pendant sauvegarde et une éviction suivie d'une relecture.
+
+## WAL, checkpoints et erreurs
+
+`journal_mode=WAL`, `synchronous=FULL` et désactivation de l'autocheckpoint sont
+vérifiés par leurs valeurs réellement retournées, pas seulement un code SQL_OK.
+Un hook WAL léger observe le nombre de frames. La politique contrôlée par défaut
+fait un checkpoint **PASSIVE après 4 096 pages**, puis espace les nouvelles
+tentatives si un lecteur empêche son achèvement. Les lecteurs API sont courts.
+Le réglage borné `MC_GOATWORLD_CHECKPOINT_PAGES` accepte 256..16384, destiné à
+l'exploitation/validation explicite. Le test compare notamment 1000 et 4096 :
+1000 correspond au seuil usuel SQLite, mais les deux essais utilisent le même
+contrôleur explicite ; ce n'est pas une comparaison exhaustive de tous les
+comportements de l'autocheckpoint SQLite standard.
+
+`journal_size_limit=16 Mio` permet de limiter la taille réutilisée quand SQLite
+peut réinitialiser le WAL ; ce n'est pas une limite absolue pendant des lectures
+bloquantes. À 32768 frames (~128 Mio), un TRUNCATE avec timeout zéro impose une
+backpressure avant le batch suivant. Si un lecteur empêche cette maintenance,
+l'erreur remonte au pipeline, qui conserve dirty et n'accumule pas une file
+illimitée. Un batch peut dépasser le seuil avant cette vérification ; le plafond
+n'est donc pas présenté comme une limite exacte de fichier à l'octet près.
+
+Les checkpoints ordinaires sont exécutés sur le writer S4, pas à chaque tick sur
+le thread autoritaire. Leurs frames totales/checkpointées, durées et erreurs
+sont tracées. La fermeture joint les workers de chunks, draine S4, ferme les
+lecteurs, effectue un TRUNCATE vérifié, ferme le writer puis libère les verrous.
+Aucun VACUUM en tick, ni après chaque batch ; pas de suppression manuelle des WAL/
+SHM. SQLite réutilise ses pages libres ; un compactage administratif futur n'est
+pas nécessaire à la validation de ce lot.
+
+BUSY ne provoque aucune attente SQL infinie (`busy_timeout=0`). Une erreur arrête
+les tentatives automatiques S4 et conserve les générations dirty ; une barrière
+administrative peut retenter une condition BUSY résolue. Les erreurs disque ou
+maintenance rendent le backend en échec fermé jusqu'au redémarrage, sans boucle
+par tick ni abandon silencieux. Une erreur de checkpoint après COMMIT est remontée
+conservativement sans acquittement S4 propre, même si le COMMIT avait déjà réussi.
+`mc_storage_close_checked` transmet les erreurs de checkpoint/close à
+`mc_world_destroy_checked`, puis au code d'arrêt de `mc_server`.
+
+## Contrat de durabilité
+
+1. **Action appliquée / ACK réseau** : état vivant validé et visible, pas un reçu
+   de disque. La sémantique protocole 775 reste inchangée.
+2. **Snapshot/transaction en cours** : génération encore susceptible de disparaître
+   après SIGKILL ; la file bornée n'est pas une garantie de persistance.
+3. **COMMIT FULL et fsync répertoire réussis, puis acquittement S4** : génération
+   annoncée durable dans les limites SQLite/filesystem/matériel.
+
+À la création, identité, base initialisée, répertoire GoatWorld et parent sont
+synchronisés avant la publication du marqueur de backend S3A. Les transactions
+synchronisent explicitement le répertoire pour les noms des fichiers associés.
+Un SIGTERM propre draine les mutations et vérifie la fermeture ; un échec ne
+produit pas un arrêt sauvegardé annoncé comme réussi. Après SIGKILL, SQLite
+récupère son WAL ; ne pas copier la base seule ni supprimer les sidecars pour
+« réparer ». Une sauvegarde hors ligne doit prendre tout le monde après arrêt,
+ou employer ultérieurement une API de backup validée.
+
+Un échec après COMMIT/synchronisation de namespace est signalé comme résultat
+incertain ; pas de rollback manuel des fichiers ni de génération régénérée.
+Une première initialisation interrompue et incomplète peut être refusée : sur ces
+mondes neufs jetables, recréer explicitement une autre destination, pas adopter
+silencieusement une base partielle. Les noms de sidecars nettoyés par SQLite à
+la fermeture ne constituent pas une transaction globale de monde. Le contrat
+porte sur les données validées ; aucun test SIGKILL ne prouve une résistance
+physique à une coupure électrique ni aux caches matériels mensongers.
+
+Pas de transaction atomique entre chunks, joueurs, inventaires et objets au sol.
+Les sauvegardes joueurs existantes, dont celles du ramassage, gardent leur contrat
+séparé ; les scénarios testés n'autorisent pas à promettre une cohérence globale
+face à toute interruption entre ces sous-systèmes.
+
+## Création, retour technique et activation
+
+Créer une destination vide identifiée, conserver les configurations/permissions,
+sélectionner les deux paramètres ci-dessus et démarrer une instance isolée.
+Vérifier connexion, blocs, save-all, arrêt propre et redémarrage. Pour revenir à
+`.bin` ou Anvil, arrêter proprement puis sélectionner **un autre monde** avec sa
+configuration explicite ; aucune ouverture `.bin` de la base GoatWorld. Les
+anciens mondes ne sont pas migrés ni supprimés automatiquement.
+
+Une activation principale reste soumise à une autorisation de déploiement,
+à une sauvegarde des fichiers administratifs et à la procédure du dépôt. G2 ne
+redémarre ni ne remplace 25565/25587 ; leur authentification et leurs permissions
+ne sont pas changées. La validation positive Mojang éventuelle reste une condition
+indépendante des tests de stockage.
+
+## Qualification finale G2 — Xeon et tests locaux, 4 novembre 2026
+
+Le manifeste reproductible est
+[`tests/fixtures/goatworld-g2-validation.json`](../tests/fixtures/goatworld-g2-validation.json).
+Les résultats bruts sont conservés sous `tests/stress/results/goatworld-g2/`,
+ignorés par Git, dont `remote-qualified/` récupéré de staging. Les sources de
+départ sont `906ede04a74c48b838908429eb5a1888136ee780` ; un seul commit G2,
+sans push. Aucun ancien monde n'a été converti ou adopté.
+
+### Matériel et méthode
+
+Les **exécutions Minecraft, Vanilla et benchmarks intégrés ont toutes eu lieu
+sur 10.0.4.66**, dans des stages créés par `scripts/remote-build-stage.sh`.
+Xeon E5-2637 v2 à 3,50 GHz, volume ext4/LVM (`stripe=32`) du serveur déclaré
+HDD RAID ; le conteneur ne permet pas de certifier la configuration du contrôleur,
+son cache ou les écritures physiques sur plateaux. Aucune manipulation du RAID.
+Les compteurs d'octets `write/pwrite` décrivent les appels du processus ;
+`/proc/PID/io/write_bytes` est conservé séparément et n'est pas une mesure physique
+du RAID. Les fsync très courts observés ne prouvent pas à eux seuls les garanties
+du matériel.
+
+Tests sous `nice 10`, `ionice -c2 -n7`, `taskset -c8-11`, une instance temporaire
+à la fois. Configuration réseau commune `tests/stress/network/one.conf` :
+un worker réseau, deux workers chunks, tick 20 Hz, aucune simulation parallèle.
+View/simulation distance 10 pour la charge. Trois mondes initiaux indépendants de
+**441 chunks**, dont les empreintes sémantiques de tous les blocs sont égales.
+Trois répétitions par mode et charge, ordre inversé lors de la deuxième répétition.
+Préparation, échauffement 3 s, inactivité 3 s, charge active entière, inactivité
+3 s, barrière durable, SIGTERM vérifié et nouvelle instance de relecture.
+
+Chaque bot effectue 100 poses et 100 destructions. Les compteurs d'envoi,
+réception par handler, mises à jour observées et ACK de séquence correspondent.
+Les 36 essais totalisent **77 400 poses + 77 400 destructions**, zéro manquant,
+plus **774 poses finales de vérification**, contrôlées indépendamment sur disque
+et après redémarrage. Ces sentinelles sont comptées séparément. Les ramassages
+incidents dépendent du timing et sont enregistrés par observateur ; leurs
+broadcasts ne sont pas additionnés comme des ramassages uniques. La comparaison
+est à travail de pose/casse égal, pas une isolation de toutes les activités annexes.
+
+`profile_tick.py` conserve les ticks continus, les passages rapides entre ticks,
+files d'actions, ressources, étapes de sauvegarde, fsync et écritures. Zéro trace
+d'écriture perdue, zéro erreur d'écriture durant cette campagne. Les distributions
+suivantes sont les **médianes des quantiles des trois exécutions**, pas des quantiles
+fusionnés. Les maxima et dépassements concernent l'ensemble des trois charges
+actives. Les fenêtres très courtes à un bot peuvent compter légèrement plus de
+20 ticks/s à leurs bornes ; le tick configuré reste 20 Hz.
+
+| Bots | Mode | TPS médians | MSPT P50 | P95 | P99 | Tick max ms | Ticks >50 ms |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | `.bin` immédiat | 20,16 | 0,196 | 2,677 | 2,833 | 3,653 | 0 |
+| 1 | Anvil async | 20,12 | 0,185 | 0,343 | 0,420 | 0,551 | 0 |
+| 1 | SQLite async | 20,04 | 0,181 | 0,307 | 0,399 | 0,437 | 0 |
+| 10 | `.bin` immédiat | 20,07 | 5,249 | 6,531 | 8,482 | 10,977 | 0 |
+| 10 | Anvil async | 19,93 | 3,287 | 4,952 | 6,024 | 7,082 | 0 |
+| 10 | SQLite async | 20,06 | 3,371 | 4,673 | 5,464 | 7,141 | 0 |
+| 25 | `.bin` immédiat | 20,03 | 6,389 | 16,370 | 24,562 | 41,929 | 0 |
+| 25 | Anvil async | 19,95 | 5,557 | 8,417 | 11,550 | 16,110 | 0 |
+| 25 | SQLite async | 19,98 | 6,255 | 9,496 | 12,076 | 16,250 | 0 |
+| 50 | `.bin` immédiat | 19,95 | 5,407 | 27,227 | 49,554 | 121,215 | 19 |
+| 50 | Anvil async | 19,99 | 5,025 | 24,893 | 38,700 | 54,693 | 4 |
+| 50 | SQLite async | 20,00 | 5,329 | 23,350 | 30,816 | 66,938 | 4 |
+
+Les passages rapides comptent aussi : à 50 bots, les maxima tick+fast atteignent
+154,800 / 94,815 / 109,794 ms (`.bin` / Anvil / SQLite), avec respectivement
+139 / 41 / 51 intervalles >50 ms. **20 TPS constants ne sont pas démontrés.**
+Le client Python utilise environ 99 % d'un cœur pendant ces charges ; le débit
+fermé par les confirmations n'est pas un plafond de capacité établi du serveur.
+Les P99 bout en bout des actions sont 447,5 / 371,1 / 350,8 ms ; ils incluent
+client, réseau et files, pas seulement le COMMIT ou le tick.
+
+### Écritures, taille et travail différé — 50 bots
+
+Les médianes incluent tout le processus initial, les sauvegardes différées,
+save-all et l'arrêt. La nouvelle instance de vérification est rapportée séparément.
+
+| Indicateur | `.bin` | Anvil async | SQLite async |
+|---|---:|---:|---:|
+| Octets demandés au FS (Mio) | 2,16 | 1 105,83 | 4,97 |
+| Appels write/pwrite monde | 5 882 | 27 862 | 2 765 |
+| fsync processus | 11 882 | 5 554 | 1 991 |
+| `/proc` write_bytes (Mio) | 30,39 | 1 088,82 | 11,82 |
+| CPU processus total (s) | 32,45 | 40,37 | 32,78 |
+| Durée totale jusqu'à arrêt durable (s) | 62,72 | 67,09 | 59,65 |
+| Barrière de durabilité finale (s) | 0,230 | 0,451 | 0,228 |
+| Arrêt SIGTERM (s) | 0,064 | 0,065 | 0,064 |
+| RSS maximal des trois essais (Mio) | 38,70 | 44,74 | 50,72 |
+| Données chunks, taille apparente finale (Kio) | 149,33 | 1 796,00 | 352,00 |
+| Données chunks, allocation finale (Kio) | 1 764,00 | 1 796,00 | 352,00 |
+
+Le dernier poste SQLite inclut le SHM de 32 Kio et le WAL vide laissés/recréés
+par les lectures de vérification ; la base principale occupe 320 Kio. Les tailles
+totales du monde avec joueurs et métadonnées sont dans le manifeste. Sur ce monde
+plat, `.bin` a le moins d'octets logiques, mais ses petits fichiers occupent plus
+de blocs FS. Ce résultat de taille n'est pas extrapolé à un Overworld généré.
+
+SQLite réduit les octets demandés d'environ **99,55 % face à Anvil async** dans
+ce scénario. Ce n'est pas un facteur de gain TPS, ni une mesure d'usure physique
+du RAID. La médiane de durée totale diminue d'environ 11 %, mais client, timings
+et ramassages variables interdisent de l'attribuer exclusivement au stockage.
+Les WAL des trois essais à 50 bots ont des maxima échantillonnés de 5,75 / 5,01 /
+5,04 Mo décimaux. L'échantillonnage 250 ms peut manquer des pics courts ; le WAL
+est tronqué à l'arrêt vérifié. Aucun travail non sauvegardé n'est exclu du résultat.
+
+### Lecture et coûts restants
+
+Pour 441 lectures initiales existantes par essai à 50 bots, médianes des P50/P95/P99 :
+
+| Étape | P50 ms | P95 ms | P99 ms |
+|---|---:|---:|---:|
+| Chargement `.bin` | 1,817 | 3,864 | 5,109 |
+| Chargement Anvil | 3,893 | 4,633 | 10,704 |
+| Chargement SQLite complet | 3,824 | 7,392 | 8,683 |
+| Recherche SQLite + accès blob | 0,019 | 0,043 | 0,064 |
+| Décompression LZ4 | 0,003 | 0,008 | 0,012 |
+| Décodage natif/NBT SQLite | 3,753 | 7,196 | 7,664 |
+| Encodage snapshot SQLite | 2,070 | 2,393 | 3,905 |
+| COMMIT SQLite FULL | 0,334 | 0,465 | 0,902 |
+| Transaction SQLite (hors encodage natif) | 0,689 | 0,910 | 1,411 |
+
+Les lecteurs sont recréés au démarrage, mais le cache OS/disque n'est pas purgé.
+Le contrôle d'intégrité initial lit la base : **aucune latence physiquement froide
+HDD n'est revendiquée**. Les relectures chaudes, connexions renouvelées et évictions
+sont testées ; les requêtes et le codec ont des spans distincts. Le contrôle
+d'intégrité complet au démarrage est susceptible de devenir coûteux sur un très
+grand monde ; G2 n'a pas qualifié des millions de chunks.
+
+SQLite reste plus lent à décoder que `.bin` et ne réduit pas ce coût natif hérité
+d'Anvil. Dans un essai médian à 50 bots : 2 219 snapshots pour 662 transactions,
+environ 4,77 s CPU d'encodage contre 0,12 s CPU COMMIT. La capture S4 est à
+4 µs médianes par snapshot ; son coût et sa mémoire restent bornés. Aucun nouveau
+cache opaque ni optimisation gameplay n'a été ajouté pour masquer ce coût.
+Les simulations d'items et traitements réseau restent visibles dans les traces ;
+les données ne justifient pas une nouvelle refonte du tick pendant G2.
+
+### Checkpoints, seuils et NVMe
+
+`profile_goatworld_checkpoints.py` effectue trois répétitions de 2 000 transactions
+de deux chunks par seuil : **12 000 transactions / 24 000 mises à jour vérifiées**
+sur chacun des deux matériels. La génération finale attendue 2 001 et les blocs
+sont relus indépendamment à chaque exécution.
+
+| Hôte / seuil pages | Durée médiane s | COMMIT P50/P95/P99 ms | Checkpoints par essai |
+|---|---:|---|---:|
+| Xeon / 1 000 | 8,31 | 0,175 / 0,314 / 0,466 | 3 |
+| Xeon / 4 096 | 8,49 | 0,183 / 0,337 / 0,499 | 1 |
+| NVMe local / 1 000 | 3,45 | 0,558 / 0,648 / 0,731 | 3 |
+| NVMe local / 4 096 | 3,60 | 0,600 / 0,702 / 0,768 | 1 |
+
+Les matériels/CPU/filesystems ne sont pas interchangeables. Ce microbenchmark
+n'est pas une mesure de TPS. Le seuil 1 000 déclenche deux
+PASSIVE complets (1 000/1 000 pages) puis le TRUNCATE final ; le seuil 4 096
+n'est pas atteint par ces petites lignes (maximum 2 000 frames), donc seul le
+TRUNCATE final est nécessaire. Les maxima de checkpoint observés sur Xeon sont
+0,85 / 1,94 ms. Dans les charges Minecraft finales, aucun PASSIVE périodique
+n'est nécessaire avant l'arrêt. Le chemin PASSIVE est couvert au seuil 1 000.
+
+Les écarts courts ne démontrent pas un gain décisif d'un seuil ; la politique
+4096 reste simple, contrôlée et ajustable. Aucun fsync nécessaire n'a été retiré.
+La limite de backpressure à 32768 frames est implémentée ; **une saturation réelle
+à cette limite n'a pas été provoquée**. Le lecteur externe maintenant un snapshot
+SQL est testé : COMMIT réussi, ancienne lecture cohérente, TRUNCATE BUSY signalé
+sans attente infinie ; après libération, récupération des deux générations 2.
+
+### Tests de durabilité, corruption et générations
+
+`test_goatworld_storage` réussit **658 contrôles** : monde neuf via l'API monde,
+relecture, éviction/rechargement, arrêt avec dirty, coordonnées négatives et
+plusieurs régions, lecteur concurrent à 100 sauvegardes, deux snapshots d'un
+même monde, file occupée EAGAIN, mutation G+1 pendant sauvegarde G, stale refusé,
+verrou exclusif, identité/backend, checksum et base liée manquante.
+
+`tests/test_goatworld_integrated.py` réussit **huit méthodes** ; les sous-cas ne
+sont pas confondus avec huit seuls crashs. Le test SIGKILL utilise deux chunks
+dans des régions différentes pour vérifier l'atomicité du lot SQLite.
+
+| Interruption déterministe | Résultat retrouvé |
+|---|---|
+| prepare, BEGIN, première insertion, avant COMMIT | Deux anciennes générations 1 |
+| Après COMMIT, après barrière durable | Deux nouvelles générations 2 |
+| Avant/après checkpoint, avant/après close | Deux nouvelles générations 2 |
+| Milieu d'une véritable pwrite de frame WAL | Deux anciennes générations 1 |
+| Avant fsync du WAL complet | Ancien ou nouveau autorisé, jamais un mélange ; nouveau observé |
+| Milieu d'une véritable pwrite de checkpoint | Deux nouvelles générations 2 récupérées depuis WAL |
+
+La récupération est relancée et comparée une deuxième fois. Les erreurs
+pwrite/fsync EIO et ENOSPC échouent sans faux acquittement ; écritures courtes
+et EINTR pwrite réussissent, EINTR de sync est signalé conservativement comme
+échec SQLite dans le scénario injecté. La base reste récupérable. Une erreur
+fsync au checkpoint, après COMMIT, échoue mais les nouvelles données restent
+lisibles. Le test S4 injecte fsync EIO et exige le message d'échec de persistance
+à l'arrêt, sans annonce d'arrêt sauvegardé réussi.
+
+Les refus couvrent checksum, payload, codec inconnu, types et valeurs de génération,
+entiers codec/layout/niveau hors domaine, schéma, identité, DataVersion, fichier
+tronqué, base absente liée et writer BUSY externe. Aucun fallback ni chunk vide
+de remplacement. Le test BUSY reprend correctement après libération du verrou.
+
+Une régression réelle du lecteur G1 réutilisé a été reproduite : les entiers
+SQLite 64 bits de codec/layout/niveau étaient rétrécis avant validation.
+`4294967298` pouvait devenir le codec connu 2. G2 valide maintenant les entiers
+64 bits avant conversion, ainsi que la DataVersion metadata. Les fixtures
+corrompues correspondantes échouent. La campagne finale de 36 essais a été
+**entièrement rejouée après cette correction** ; les 36 mesures antérieures
+restent des références, pas la qualification du binaire final.
+
+Quatre scénarios SIGKILL supplémentaires exécutent un **vrai mc_server** avec
+hooks compilés uniquement dans `mc_server_g2_fault` : avant COMMIT et après
+durabilité, sur un monde plat et une copie du chunk officiel complexe. Les deux
+observateurs voient la pierre avant SIGKILL ; l'instance normale restaurée retrouve
+respectivement air / pierre. L'oracle NBT indépendant retrouve le même résultat.
+Les NBT opaques non concernés, dont **sept block entities**, sont identiques après
+récupération dans la copie complexe. La requête autoritaire au redémarrage utilise
+uniquement l'administrateur ; aucun privilège n'est ajouté au second observateur.
+
+SIGKILL ne reproduit ni coupure secteur ni perte des caches du contrôleur.
+L'atomicité SQLite d'un batch ne crée pas une transaction globale avec les joueurs
+et items. Les corruptions arbitraires de matériel, journaux perdus lors d'une copie
+incorrecte, contraintes du filesystem et pannes physiques restent hors preuve.
+
+### Minecraft, Vanilla et non-régression
+
+`check_goatworld_integrated.py` réussit sur des mondes GoatWorld neufs, avec
+deux redémarrages de vérification par scénario :
+
+- Blocs pleins, bûches orientées, dalles basses/hautes et fusion, placements invalides,
+  collisions existantes, inventaire et consommation Survival, deux observateurs.
+  Frontières testées à -513/-512 et 511/512, coordonnées négatives et régions multiples.
+- **192 cas d'escaliers/voisinage** comparés exactement à une nouvelle instance du
+  serveur officiel 26.1.1, protocole 775 ; mêmes propriétés et résultats persistés.
+- **100 pierres ramassées**, 100 observées, inventaire 100 puis 100 après chacun
+  des deux redémarrages. Ce résultat ne promet pas une transaction globale après crash.
+- Une fixture officielle S3B/G1 identifiée (NBT SHA-256
+  `d765c23679ca9b23d646f6713b5e84b9a9007c6494671882d5692e506ea27ae7`) :
+  coffre, four froid, panneau, bannière, shulker, tonneau, pot décoré. Seed réservé
+  aux tests, brut initial identique octet par octet ; mutation ordinaire autorisée,
+  sept suppressions dangereuses refusées, inventaires/composants/types et valeurs
+  des BE conservés. Ce n'est pas un nouveau convertisseur ni du gameplay BE.
+
+Le JAR serveur intérieur officiel utilisé a le SHA-256
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Vanilla n'ouvre pas directement la base SQLite ; la comparaison porte sur les
+états Minecraft, pas sur une prétendue compatibilité du fichier propriétaire.
+Protochunks, scheduled ticks, `.mcc` et autres cas non qualifiés restent protégés
+par les règles natives S3B. Aucune règle de gameplay n'est modifiée.
+
+Les premiers pilotes ont rencontré deux erreurs de harnais : attente de 21×21
+chunks du test pickup avec view-distance 2 (corrigé en 10 pour ce scénario), puis
+requête QA d'un observateur non administrateur (refus serveur correct ; test
+corrigé pour interroger l'administrateur). Les traces d'échec restent conservées.
+Un premier contrôle d'éviction C utilisait un budget zéro ; le test utilise
+maintenant un budget effectif et vérifie la relecture. Aucun résultat échoué
+n'est présenté comme une validation sanitizer.
+
+Les suites ciblées locales **ASan+UBSan et TSan** passent : GoatWorld intégré,
+G1/codec, pipeline S4, stockage natif, escaliers, NBT, et les huit méthodes
+d'injection/corruption. SQLite est lui-même recompilé avec le sanitizer, pas
+remplacé par une archive release non instrumentée. Les bibliothèques système
+externes ne sont pas toutes instrumentées ; absence de diagnostic n'est pas
+preuve absolue d'absence de races. Le script reproductible
+`tests/stress/check_goatworld_sanitizers.py` ne lance aucun serveur Minecraft.
+
+La vérification finale distante `make -B precommit-check GOATWORLD_G1_CHECK=1`
+réussit : **30 suites C**, tests réseau/login, générateurs, migration, G1 et huit
+méthodes de panne G2. Le build avec `USE_OPENSSL=0` réussit également (compilation,
+sans lancement) ; libcrypto reste requise pour l'intégrité SHA. Après restauration
+du build normal, son binaire est **identique octet par octet** à celui des 36
+benchmarks, tests Minecraft et tests SIGKILL. Aucun résultat d'un ancien binaire
+n'est utilisé pour qualifier un binaire final différent.
+
+### Décision G2 et reprise de la phase 2
+
+Le stockage est **intégré et validé sur le Xeon dans ces scénarios**, avec
+activation explicite sur monde neuf. `.bin` reste le défaut, Anvil reste disponible,
+S2 et le natif G1 restent des outils expérimentaux séparés. Aucun nouveau worker
+gameplay, aucune migration ni conversion automatique. Le writer et les limites S4
+restent ceux du pipeline existant.
+
+Les mesures justifient GoatWorld SQLite comme candidat pour les **futurs mondes
+neufs**, avec configuration async explicite et surveillance des erreurs/WAL.
+Elles ne justifient ni une bascule automatique ni une promesse de 20 TPS permanents.
+L'activation principale attend une demande de déploiement et les validations
+administratives/authentification du dépôt. Un retour technique à `.bin` utilise
+un autre monde neuf, sans ouvrir ni effacer cette base.
+
+Les limites résiduelles (décodage NBT, startup integrity_check sur grands mondes,
+générateur Python, pics tick+fast, garanties physiques du RAID, absence de transaction
+chunks/joueurs/items) sont identifiées sans lancer un nouveau lot de stockage.
+**Le projet peut reprendre la phase 2A portes/trappes dans une mission distincte.**
+Cette fonctionnalité n'est pas commencée dans G2.

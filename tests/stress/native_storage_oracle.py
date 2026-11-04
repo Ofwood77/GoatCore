@@ -105,6 +105,25 @@ def chunks(world, backend='anvil-atomic-experimental'):
         for path in sorted((world/'chunks').glob('*.bin')):
             raw=zlib.decompress(path.read_bytes(),wbits=47);root=parse(raw)
             yield (integer(root,'xPos'),integer(root,'zPos')),root,raw
+    elif backend=='goatworld-sqlite-experimental':
+        import sqlite3,ctypes
+        lib=ctypes.CDLL('liblz4.so.1')
+        decode=lib.LZ4_decompress_safe
+        decode.argtypes=[ctypes.c_void_p,ctypes.c_void_p,ctypes.c_int,ctypes.c_int];decode.restype=ctypes.c_int
+        db=sqlite3.connect((world/'goatworld/chunks.sqlite').resolve().as_uri()+'?mode=ro',uri=True)
+        try:
+            assert db.execute('PRAGMA application_id').fetchone()[0]==1196896561
+            assert db.execute('PRAGMA user_version').fetchone()[0]==1
+            assert db.execute('PRAGMA integrity_check').fetchone()==('ok',)
+            for d,x,z,g,c,f,level,n,digest,payload in db.execute('SELECT d,x,z,g,c,f,l,n,sha,payload FROM chunks ORDER BY d,x,z'):
+                assert d==0 and 0<n<=8388608 and (c,f,level)==(2,0,0) and g>0
+                out=ctypes.create_string_buffer(n);assert decode(payload,out,len(payload),n)==n
+                raw=out.raw;metadata=bytearray(80)
+                struct.pack_into('>IiiIQIII',metadata,0,d,x,z,n,g,c,f,level)
+                metadata[40:72]=hashlib.sha256(raw).digest();assert hashlib.sha256(metadata).digest()==digest
+                root=parse(raw);assert (integer(root,'xPos'),integer(root,'zPos'),integer(root,'DataVersion'))==(x,z,4788)
+                yield (x,z),root,raw
+        finally:db.close()
     else:
         for path in sorted((world/'dimensions/minecraft/overworld/region').glob('*.mca')):
             _,_,decoded=reference(path)

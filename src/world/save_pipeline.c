@@ -67,6 +67,12 @@ void mc_save_batch_execute(const mc_world_storage_t *store, mc_save_batch_t *bat
     for (size_t i = 0; i < batch->count; i++)
         sorted[i] = &batch->chunks[i];
     qsort(sorted, batch->count, sizeof(*sorted), order);
+    if(mc_storage_is_sqlite(store)){
+        int rc=mc_storage_write_region(store,sorted,batch->count);
+        int error=rc?(errno?errno:EIO):0;
+        for(size_t i=0;i<batch->count;i++){batch->results[i]=rc;batch->errors[i]=error;}
+        return;
+    }
     for (size_t begin = 0; begin < batch->count;) {
         int32_t rx, rz;
         mc_region_coordinates(sorted[begin]->cx, sorted[begin]->cz, &rx, &rz, NULL);

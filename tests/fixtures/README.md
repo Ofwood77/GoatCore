@@ -60,3 +60,16 @@ facings, moitiés, angles, veto, rotations/destructions voisines, eau source,
 collisions de placement et frontières négatives. Il ne valide ni la simulation
 des fluides ni les collisions générales. La matrice et ses limites sont décrites
 dans `docs/vanilla-compatibility.md`, section du lot 2.
+
+# Validation GoatWorld intégrée G2
+
+`goatworld-g2-validation.json` décrit le backend SQLite WAL FULL activé
+explicitement sur des mondes neufs. Il contient les 36 charges Xeon (trois
+répétitions, 1/10/25/50 bots, trois backends), les tailles, checkpoints, tests de
+crash/corruption, sanitizers et empreintes des binaires/résultats bruts.
+Les données volumineuses restent dans le répertoire ignoré
+`tests/stress/results/goatworld-g2/` ; aucun monde complet n'est inclus ici.
+Les 192 cas d'escaliers sont comparés à une nouvelle instance officielle 26.1.1.
+Le seed de sept block entities réutilise une fixture officielle S3B/G1 identifiée ;
+il n'active pas de convertisseur dans le serveur. Voir la section G2 de
+`docs/vanilla-compatibility.md` pour les limites et le contrat de durabilité.

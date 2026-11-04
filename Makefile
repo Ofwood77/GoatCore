@@ -12,6 +12,15 @@ else
     AUTH_SRC = src/protocol/auth_stub.c
 endif
 
+# G2 uses a private, checksum-pinned SQLite with the upstream WAL-reset fix.
+STORAGE_SDK = .local/storage-deps
+SQLITE_LIB = $(STORAGE_SDK)/libsqlite3.a
+SQLITE_CFLAGS ?= -std=c11 -O2 -pthread -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION=1
+CFLAGS += -I$(STORAGE_SDK)/include
+# Integrity SHA-256 also needs libcrypto when Mojang authentication is stubbed.
+LDFLAGS += $(SQLITE_LIB) -ldl -l:liblz4.so.1 -l:libzstd.so.1 -lcrypto
+GOATWORLD_SRC = src/world/goatworld_store.c src/experimental/goatworld_codec.c src/experimental/goatworld_pack.c src/experimental/goatworld_sqlite.c
+
 SRC = \
     src/main.c \
     src/net/server.c \
@@ -49,7 +58,7 @@ SRC = \
     src/world/paletted_container.c \
     src/world/player_store.c \
     src/world/block_registry.c \
-    src/world/world.c src/world/world_storage.c src/world/save_pipeline.c \
+    src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c \
     src/util/arena.c \
     src/util/setup.c \
     src/util/mc_util.c \
@@ -66,7 +75,7 @@ SRC = \
 
 OBJ = $(SRC:.c=.o)
 
-TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench mc_world_migrate mc_migrate_fault mc_goatworld mc_goatworld_fault test_goatworld
+TOOL_BINS = mc_recorder mc_anvil_dump mc_gen_bench mc_save_bench mc_trace_io mc_region_bench mc_region_txn mc_native_bench mc_world_migrate mc_migrate_fault mc_goatworld mc_goatworld_fault test_goatworld test_goatworld_storage_fault mc_server_g2_fault
 
 TEST_BINS = \
     test_varint \
@@ -97,7 +106,8 @@ TEST_BINS = \
     test_chunk_migration \
     test_setup \
     test_task_queue \
-    test_perf_config
+    test_perf_config \
+    test_goatworld_storage
 
 GENERATED_HEADERS = \
     src/generated/generated_block_ids.h \
@@ -212,7 +222,7 @@ mc_recorder: tools/mc_recorder.c src/net/buffer.c src/protocol/varint.c src/prot
 mc_anvil_dump: tools/mc_anvil_dump.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/util/arena.c src/util/mc_util.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/paletted_container.c src/world/block_registry.c src/util/arena.c src/util/mc_util.c src/generated/generated_registries.c | generated_sources
+mc_gen_bench: tools/mc_gen_bench.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/paletted_container.c src/world/block_registry.c src/util/arena.c src/util/mc_util.c src/generated/generated_registries.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_varint: tests/test_varint.c src/protocol/varint.c
@@ -238,7 +248,7 @@ test_framing_crypto: tests/test_framing_crypto.c src/net/buffer.c src/protocol/v
 
 test_pvp: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 
-test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_pvp: tests/test_pvp.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync
 
 test_nbt: tests/test_nbt.c src/world/nbt.c src/util/arena.c
@@ -262,10 +272,10 @@ test_paletted_container: tests/test_paletted_container.c src/world/paletted_cont
 test_chunk_network_codec: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 test_anvil_roundtrip: src/protocol/offline_uuid.c src/protocol/profile_wire.c
 
-test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
+test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_player_nbt: tests/test_player_nbt.c tests/fixtures/vanilla-26.1.1-player.dat src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
@@ -277,7 +287,7 @@ test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_b
 test_block_drops: tests/test_block_drops.c src/gameplay/block_drops.c src/gameplay/mining.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_minecraft_ids.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_world_consistency: tests/test_world_consistency.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_world_consistency: tests/test_world_consistency.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_setup: tests/test_setup.c src/util/setup.c
@@ -345,13 +355,13 @@ distclean: clean
 -include $(OBJ:.o=.d)
 
 # Isolated remote persistence microbenchmark (no server listener).
-mc_save_bench: tools/mc_save_bench.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+mc_save_bench: tools/mc_save_bench.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 mc_trace_io: tools/mc_trace_io.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-test_atomic_persistence: tests/test_atomic_persistence.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_atomic_persistence: tests/test_atomic_persistence.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fread,--wrap=__fread_chk,--wrap=openat,--wrap=write,--wrap=pwrite,--wrap=pread,--wrap=fsync,--wrap=renameat,--wrap=close,--wrap=fstat,--wrap=flock,--wrap=calloc
 
 test_region_storage: tests/test_region_storage.c src/world/region_storage.c src/util/atomic_file.c src/util/mc_util.c
@@ -368,17 +378,17 @@ mc_region_txn: tools/mc_region_txn.c $(REGION_TXN_SRC) | generated_sources
 test_region_txn: tests/test_region_txn.c $(REGION_TXN_SRC) | generated_sources
 	$(CC) $(CFLAGS) -DMC_REGION_TXN_TESTING -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--wrap=write,--wrap=pwrite,--wrap=fsync,--wrap=unlinkat,--wrap=ftruncate,--wrap=realloc,--wrap=close,--wrap=renameat -o $@ $^ $(LDFLAGS) -lcrypto
 
-test_native_storage: tests/test_native_storage.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_native_storage: tests/test_native_storage.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync
 
-mc_native_bench: tools/mc_native_bench.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+mc_native_bench: tools/mc_native_bench.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_save_pipeline: tests/test_save_pipeline.c src/world/world.c src/world/world_storage.c src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
+test_save_pipeline: tests/test_save_pipeline.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/world/chunk.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/gameplay/furnace.c src/protocol/inventory.c src/protocol/varint.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_cooking_recipes.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=fsync,--wrap=malloc,--wrap=calloc
 
 # Offline migration only. No migration code or fault hook is linked into SRC.
-MIGRATION_SRC = src/world/chunk_migration.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/chunk.c src/world/paletted_container.c src/world/block_registry.c src/world/world.c src/world/world_storage.c src/world/region_storage.c src/util/atomic_file.c src/util/arena.c src/util/mc_util.c src/world/block_entity_store.c src/protocol/inventory.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c
+MIGRATION_SRC = src/world/chunk_migration.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/chunk.c src/world/paletted_container.c src/world/block_registry.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/region_storage.c src/util/atomic_file.c src/util/arena.c src/util/mc_util.c src/world/block_entity_store.c src/protocol/inventory.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c
 mc_world_migrate: tools/mc_world_migrate.c $(MIGRATION_SRC) | generated_sources
 	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto
 
@@ -393,9 +403,9 @@ migration-check: mc_world_migrate mc_migrate_fault
 	python3 tests/test_world_migration.py --tool ./mc_world_migrate --fault-tool ./mc_migrate_fault
 	python3 tests/test_migration_mounts.py --tool ./mc_world_migrate
 
-# G1 experimental tools only; these dependencies are never linked into mc_server.
+# G1 append-only tools stay separate; G2 reuses their SQLite/codec components.
 G1_CPPFLAGS ?=
-G1_LIBS = -l:libsqlite3.so.0 -l:liblz4.so.1 -l:libzstd.so.1
+G1_LIBS = -l:liblz4.so.1 -l:libzstd.so.1
 G1_SRC = src/experimental/goatworld_pack.c src/experimental/goatworld.c src/experimental/goatworld_codec.c src/experimental/goatworld_sqlite.c src/util/atomic_file.c src/world/region_storage.c src/world/anvil.c src/world/nbt.c src/world/packed.c src/world/chunk.c src/world/paletted_container.c src/world/block_registry.c src/world/block_entity_store.c src/protocol/inventory.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c
 mc_goatworld: tools/mc_goatworld.c $(G1_SRC) | generated_sources
 	$(CC) $(CFLAGS) $(G1_CPPFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS) -lcrypto $(G1_LIBS)
@@ -410,3 +420,29 @@ goatworld-check: mc_goatworld mc_goatworld_fault test_goatworld
 ifeq ($(GOATWORLD_G1_CHECK),1)
 precommit-check: goatworld-check
 endif
+
+.PHONY: storage-deps
+storage-deps: $(SQLITE_LIB)
+$(STORAGE_SDK)/sqlite3.c $(STORAGE_SDK)/include/sqlite3.h $(STORAGE_SDK)/include/lz4.h $(STORAGE_SDK)/include/zstd.h &: tools/prepare_storage_deps.py
+	python3 tools/prepare_storage_deps.py
+$(SQLITE_LIB): $(STORAGE_SDK)/sqlite3.c $(STORAGE_SDK)/include/sqlite3.h
+	$(CC) $(SQLITE_CFLAGS) -c $(STORAGE_SDK)/sqlite3.c -o $(STORAGE_SDK)/sqlite3.o
+	ar rcs $@ $(STORAGE_SDK)/sqlite3.o
+$(OBJ) $(TEST_BINS) $(TOOL_BINS) mc_server: | storage-deps
+$(TEST_BINS) $(TOOL_BINS) mc_server: $(SQLITE_LIB)
+
+test_goatworld_storage: tests/test_goatworld_storage.c $(MIGRATION_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/gameplay/furnace.c src/protocol/varint.c src/generated/generated_cooking_recipes.c
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS)
+
+test_goatworld_storage_fault: tests/test_goatworld_storage.c $(MIGRATION_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/world/block_state.c src/world/chunk_store.c src/gameplay/furnace.c src/protocol/varint.c src/generated/generated_cooking_recipes.c tests/goatworld_fault.c
+	$(CC) $(CFLAGS) -DMC_GOATWORLD_TESTING -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $^ $(LDFLAGS)
+
+.PHONY: integrated-goatworld-fault-check
+integrated-goatworld-fault-check: test_goatworld_storage test_goatworld_storage_fault
+	python3 tests/test_goatworld_integrated.py --tool ./test_goatworld_storage --fault-tool ./test_goatworld_storage_fault
+precommit-check: integrated-goatworld-fault-check
+test_goatworld_storage test_goatworld_storage_fault: | storage-deps
+
+# Deterministic hooks only in this disposable integration binary.
+mc_server_g2_fault: $(SRC) tests/goatworld_fault.c | generated_sources storage-deps
+	$(CC) $(CFLAGS) -DMC_GOATWORLD_TESTING -o $@ $^ $(LDFLAGS)

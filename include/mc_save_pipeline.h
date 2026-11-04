@@ -14,8 +14,8 @@ const char *mc_save_mode_name(mc_save_mode_t mode);
 int mc_save_mode_parse(const char *name, mc_save_mode_t *mode);
 /* Single owner until submission. add never retains source pointers. */
 int mc_save_batch_add(mc_save_batch_t *batch, const mc_chunk_t *source);
-/* Deterministic region/slot ordering; per-region atomicity, not a transaction
- * across regions. Writes and result buffers belong exclusively to the caller. */
+/* Deterministic region/slot ordering. Anvil publishes each region separately;
+ * SQLite commits the bounded batch in one transaction. Caller owns buffers. */
 void mc_save_batch_execute(const mc_world_storage_t *store, mc_save_batch_t *batch);
 void mc_save_batch_destroy(mc_save_batch_t *batch);
 typedef struct mc_save_io mc_save_io_t;

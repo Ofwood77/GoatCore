@@ -9,6 +9,8 @@ void g1_test_hook(const char *phase) {
     const char *wanted = getenv("G1_TEST_PHASE");
     if (entered || !wanted || strcmp(wanted, phase))
         return;
+    const char *armed=getenv("G1_TEST_ARM_FILE");
+    if(armed && access(armed,F_OK)!=0)return;
     entered = 1;
     const char *a = getenv("G1_TEST_READY"), *b = getenv("G1_TEST_RELEASE");
     if (a && b) {

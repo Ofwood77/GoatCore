@@ -33,6 +33,8 @@ struct g1_store {
     g1_backend_t backend;
     bool writable, poisoned;
     sqlite3 *sql;
+    sqlite3_stmt *read_sql;
+    bool runtime;
     size_t cache_limit, cache_bytes;
     uint64_t clock, hits, misses, reads, writes;
     struct g1_cache cache[G1_CACHE_ENTRIES];
@@ -52,6 +54,7 @@ int g1_sql_write(g1_store_t *s, uint32_t dim, const g1_update_t *u, size_t n, g1
 int g1_sql_keys(g1_store_t *s, uint32_t **d, int32_t **x, int32_t **z, size_t *n);
 int g1_sql_finish(g1_store_t *s, bool compact);
 int g1_sql_check(g1_store_t *s);
+int g1_sql_close(g1_store_t *s);
 #ifdef MC_GOATWORLD_TESTING
 void g1_test_hook(const char *phase);
 #define G1_HOOK(p) g1_test_hook(p)

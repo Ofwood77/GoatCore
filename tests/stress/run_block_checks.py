@@ -170,7 +170,7 @@ if __name__=="__main__":
     parser.add_argument("--region-boundaries",action="store_true",help="placement suite: region boundary scenarios")
     parser.add_argument("--verify-only",action="store_true",help="verify a supplied saved snapshot without editing the copied world")
     parser.add_argument("--snapshot-template",type=Path)
-    parser.add_argument("--chunk-storage",choices=("bin","anvil-atomic-experimental"),default="bin")
+    parser.add_argument("--chunk-storage",choices=("bin","anvil-atomic-experimental","goatworld-sqlite-experimental"),default="bin")
     parser.add_argument("--world-template",type=Path,help="copy a reference world into this fresh isolated runtime")
     parser.add_argument("--view-distance",type=int,default=10,choices=range(2,33))
     parser.add_argument("--blocks-only",action="store_true",help="skip the separate shulker BlockEvent check")
