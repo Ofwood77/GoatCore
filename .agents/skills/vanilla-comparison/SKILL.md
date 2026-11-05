@@ -24,6 +24,15 @@ peut valider le chemin positif `hasJoined` ; ne jamais fabriquer une session
 Mojang réussie pour déclarer le mode online fonctionnel. Rapporter ce qui a
 été testé, la référence utilisée et les écarts restants.
 
+## Optimisations mémoire et persistance
+
+Les optimisations RAM, caches et sauvegardes différées ne doivent pas modifier
+les mutations autoritaires, les états ou l'ordre observable des actions Vanilla.
+Comparer séparément action appliquée, snapshot accepté et génération durable.
+Vérifier les inventaires et états après reconnexion/redémarrage et après les
+interruptions couvertes par le contrat ; un état en RAM n'est pas une preuve de
+durabilité. La cible mémoire 4–100 Go n'autorise aucune approximation gameplay.
+
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers

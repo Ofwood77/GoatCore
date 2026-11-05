@@ -255,6 +255,10 @@ async def run(args):
    # Indirect drops, pickup observed by both, inventory verified after reconnect.
    for index,(item,face) in enumerate((('torch',1),('soul_torch',5),('copper_torch',5),('lantern',1),('soul_lantern',0),('ladder',5))):
     await teleport((-16,80,48+index*4));p=await reset(direction=face^1);await put(item,face=face);await record('drop-place-'+item)
+    # Catch drops before removing support. Otherwise a fast, unstalled tick
+    # lets the item fall below the later floor while the state query completes.
+    # This fixture isolates loot/persistence from unqualified falling physics.
+    await batch(a,['setblock '+at((C[0],C[1]-2,C[2]))+' stone'])
     await hold(a,items['minecraft:stone']);before_a,before_b=collected(a),collected(b)
     await remove_support(p);await record('drop-loss-'+item,'minecraft:air',True)
     await batch(a,['setblock '+at((C[0],C[1]-1,C[2]))+' stone']);await command(a,f'tp {C[0]+.5} {C[1]} {C[2]+.5}');await a.conn.send(30,struct.pack('>ddd?',C[0]+.5,C[1],C[2]+.5,True))

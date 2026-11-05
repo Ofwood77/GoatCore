@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include "mc_server.h"
 #include "mc_inventory.h"
+#include "mc_player_save.h"
 #include "mc_mining.h"
 #include "mc_world.h"
 #include "mc_profile.h"
@@ -123,6 +124,7 @@ struct mc_conn {
     float last_hurt_amount;
     int32_t teleport_id;
     mc_player_data_t *player;
+    mc_player_save_state_t player_save; /* authoritative tick only */
     bool pickup_save_pending; /* tick-owned; committed at end of the item pass */
     int64_t keepalive_id;
     int64_t last_keepalive_sent_ms;

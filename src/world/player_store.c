@@ -1,4 +1,6 @@
 #include "mc_player_store.h"
+#include "mc_player_save.h"
+#include "mc_util.h"
 
 #include "generated_minecraft_ids.h"
 #include "mc_nbt.h"
@@ -22,6 +24,35 @@ typedef struct {
 
 /* Player gameplay is tick-owned, but this also serializes direct store users. */
 static pthread_mutex_t player_store_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int mc_player_save_mark(mc_player_save_state_t *state, int64_t now_ms) {
+    if (!state || now_ms < 0 || state->current == UINT64_MAX) { errno = EOVERFLOW; return -1; }
+    if (state->current == state->durable)
+        state->due_ms = now_ms > INT64_MAX - MC_PLAYER_HOTBAR_FLUSH_MS ? INT64_MAX : now_ms + MC_PLAYER_HOTBAR_FLUSH_MS;
+    state->current++;
+    return 0;
+}
+
+bool mc_player_save_due(const mc_player_save_state_t *state, int64_t now_ms) {
+    return state && state->current != state->durable && !state->in_flight && now_ms >= state->due_ms;
+}
+
+uint64_t mc_player_save_begin(mc_player_save_state_t *state) {
+    if (!state || state->in_flight || state->current == state->durable) return 0;
+    return state->in_flight = state->current;
+}
+
+int mc_player_save_complete(mc_player_save_state_t *state, uint64_t generation, bool success) {
+    if (!state || !generation || generation != state->in_flight || generation > state->current || generation < state->durable) {
+        errno = EINVAL; return -1;
+    }
+    state->in_flight = 0;
+    if (success) {
+        state->durable = generation;
+        if (state->current == generation) state->due_ms = 0;
+    }
+    return 0;
+}
 
 #define MC_PLAYER_NBT_MAX_BYTES (8u * 1024u * 1024u)
 #define MC_PLAYER_DATA_VERSION_26_1_1 4788
@@ -127,6 +158,18 @@ static int player_dat_path(char *buf, size_t cap, const char *world_path, const 
     return 0;
 }
 
+static int player_sync(int fd) {
+    int rc;
+    do { rc = fsync(fd); } while (rc < 0 && errno == EINTR);
+    return rc;
+}
+
+static int player_open(const char *path, int flags) {
+    int fd;
+    do { fd = open(path, flags); } while (fd < 0 && errno == EINTR);
+    return fd;
+}
+
 static int gzip_write_file_atomic(const char *path, const char *dir_path, const uint8_t *data, size_t len) {
     char temporary[1100];
     gzFile gz;
@@ -135,10 +178,13 @@ static int gzip_write_file_atomic(const char *path, const char *dir_path, const 
     int sync_fd = -1;
     int dir_fd = -1;
     int rc = -1;
+    bool published = false;
 
     if (!path || !dir_path || !data) return -1;
-    if (snprintf(temporary, sizeof(temporary), "%s/.player-XXXXXX", dir_path) >= (int)sizeof(temporary)) return -1;
-    fd = mkstemp(temporary);
+    do {
+        if (snprintf(temporary, sizeof(temporary), "%s/.player-XXXXXX", dir_path) >= (int)sizeof(temporary)) return -1;
+        fd = mkstemp(temporary);
+    } while (fd < 0 && errno == EINTR);
     if (fd < 0) return -1;
     if (fchmod(fd, 0644) != 0) goto cleanup;
     gz = gzdopen(fd, "wb");
@@ -154,26 +200,36 @@ static int gzip_write_file_atomic(const char *path, const char *dir_path, const 
         pos += (size_t)written;
     }
     if (gzclose(gz) != Z_OK) goto cleanup;
-    sync_fd = open(temporary, O_RDONLY | O_CLOEXEC);
-    if (sync_fd < 0 || fsync(sync_fd) != 0) goto cleanup;
+    sync_fd = player_open(temporary, O_RDONLY | O_CLOEXEC);
+    if (sync_fd < 0 || player_sync(sync_fd) != 0) goto cleanup;
     if (close(sync_fd) != 0) { sync_fd = -1; goto cleanup; }
     sync_fd = -1;
-    if (rename(temporary, path) != 0) goto cleanup;
-    dir_fd = open(dir_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (dir_fd < 0 || fsync(dir_fd) != 0) goto cleanup;
+    int renamed;
+    do { renamed = rename(temporary, path); } while (renamed < 0 && errno == EINTR);
+    if (renamed != 0) goto cleanup;
+    published = true;
+    rc = MC_PLAYER_SAVE_UNCERTAIN;
+    dir_fd = player_open(dir_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dir_fd < 0 || player_sync(dir_fd) != 0) goto cleanup;
+    if (close(dir_fd) != 0) { dir_fd = -1; goto cleanup; }
+    dir_fd = -1;
     rc = 0;
 cleanup:
+    ; int saved_errno = errno;
     if (fd >= 0) close(fd);
     if (sync_fd >= 0) close(sync_fd);
     if (dir_fd >= 0) close(dir_fd);
-    if (rc != 0) unlink(temporary);
+    if (rc != 0 && !published) unlink(temporary);
+    if (rc == MC_PLAYER_SAVE_UNCERTAIN)
+        log_error("player file replaced but directory durability uncertain: path=%s errno=%d", path, saved_errno);
+    errno = saved_errno;
     return rc;
 }
 
 static int sync_directory(const char *path) {
-    int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int fd = player_open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) return -1;
-    int rc = fsync(fd);
+    int rc = player_sync(fd);
     if (close(fd) != 0) rc = -1;
     return rc;
 }
@@ -853,6 +909,7 @@ static int player_parse_nbt(const mc_nbt_tag_t *root, mc_player_data_t *out) {
 }
 
 int mc_player_store_save_to_file(const char *world_path, const mc_player_data_t *player) {
+    mc_save_clock_t span = mc_save_profile_begin();
     char dir_path[1024];
     char parent_path[1024];
     char file_path[1024];
@@ -876,13 +933,13 @@ int mc_player_store_save_to_file(const char *world_path, const mc_player_data_t 
     if (player_build_nbt(player, &root) != 0) goto cleanup;
     if (mc_nbt_write_named_root(root, &raw, &raw_len) != 0) goto cleanup;
     if (raw_len > MC_PLAYER_NBT_MAX_BYTES) goto cleanup;
-    if (gzip_write_file_atomic(file_path, dir_path, raw, raw_len) != 0) goto cleanup;
-    rc = 0;
+    rc = gzip_write_file_atomic(file_path, dir_path, raw, raw_len);
 
 cleanup:
     free(raw);
     mc_nbt_free(root);
     pthread_mutex_unlock(&player_store_mutex);
+    mc_save_profile_end("player_file_save", 0, 0, span, raw_len, rc);
     return rc;
 }
 

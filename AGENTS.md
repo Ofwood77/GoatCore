@@ -213,6 +213,39 @@ Conserver :
 
 Ne pas ajouter de multithreading sans modèle de propriété et de synchronisation sûr.
 
+## Politique mémoire et matériel cible
+
+GoatCore cible Linux x86-64, notamment les homelabs, Xeon anciens (E5 et
+plateformes de 2011 et suivantes), machines bi-processeurs, RAM ECC abondante,
+HDD/RAID mécaniques comme SSD/NVMe. Le minimum matériel cible est **4 Go
+disponibles pour l'instance** ; les budgets configurables couvrent au moins
+4, 8, 16, 32, 64 et 100 Go, sans plafond architectural arbitraire à 100 Go.
+Ces profils ne sont ni des réservations au démarrage ni des garanties de
+capacité joueur.
+
+Rechercher l'équilibre fidélité Vanilla, débit de simulation, latence des ticks,
+lectures/écritures, durabilité et utilisation efficace de la RAM. Plusieurs Go
+supplémentaires sont acceptables s'ils réduisent de façon mesurée les accès
+disque ou les latences. Ne pas considérer une RSS plus faible comme une victoire
+en soi. Conserver un seul état autoritaire des joueurs, coalescer les demandes
+redondantes et borner les caches/snapshots selon les besoins réels.
+
+Ne pas préallouer toute la mémoire, charger tout un monde sans nécessité,
+introduire des copies inutiles, des fuites ou des files illimitées. Respecter
+les limites cgroup/LXC et préserver les autres services, le système, les buffers
+et le cache disque Linux. Une configuration supérieure aux ressources utilisables
+doit être signalée et limitée ou refusée explicitement. La RAM ne rend pas une
+sauvegarde durable et ne justifie ni moins de synchronisations nécessaires ni
+plus de threads de simulation.
+
+Pour une optimisation significative, mesurer RSS/max, tailles et occupation des
+caches/files/snapshots, allocations pertinentes, TPS/MSPT, CPU, lectures,
+écritures et latences, ainsi que les échecs d'allocation et la pression mémoire.
+Distinguer RAM applicative, cache SQLite et cache de pages OS. Tester le profil
+4 Go, un profil intermédiaire (par exemple 16 Go) et un profil haut quand le
+matériel le permet ; signaler les capacités configurées mais non exercées.
+Ne jamais présenter un budget de 100 Go accepté comme 100 Go réellement utilisés.
+
 ## 11. Règles de développement
 
 - Codex réalise les modifications du code.

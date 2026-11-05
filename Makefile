@@ -63,6 +63,7 @@ SRC = \
     src/util/setup.c \
     src/util/mc_util.c \
     src/util/atomic_file.c \
+    src/util/memory.c \
     src/generated/generated_minecraft_ids.c \
     src/generated/generated_registries.c \
     src/generated/generated_block_loot.c \
@@ -109,7 +110,9 @@ TEST_BINS = \
     test_perf_config \
     test_goatworld_storage \
     test_hinged_blocks \
-    test_attached_blocks
+    test_attached_blocks \
+    test_player_save \
+    test_memory
 
 GENERATED_HEADERS = \
     src/generated/generated_block_ids.h \
@@ -280,8 +283,14 @@ test_chunk_network_codec: tests/test_chunk_network_codec.c src/protocol/handlers
 test_anvil_roundtrip: tests/test_anvil_roundtrip.c src/protocol/handlers/play.c src/gameplay/placement.c src/world/block_state.c src/generated/generated_block_ids.c src/protocol/inventory.c src/net/buffer.c src/protocol/varint.c src/world/world.c src/world/world_storage.c $(GOATWORLD_SRC) src/world/save_pipeline.c src/gameplay/block_neighbors.c src/gameplay/hinged_blocks.c src/gameplay/attached_blocks.c src/gameplay/hinged_world.c src/gameplay/attached_world.c src/world/chunk_store.c src/world/chunk.c src/world/container_store.c src/world/anvil.c src/world/region_storage.c src/util/atomic_file.c src/world/nbt.c src/world/packed.c src/world/block_entity_store.c src/world/paletted_container.c src/world/block_registry.c src/world/player_store.c src/gameplay/block_drops.c src/gameplay/crafting.c src/gameplay/furnace.c src/gameplay/mining.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c src/generated/generated_registries.c src/generated/generated_block_loot.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_item_food.c src/generated/generated_crafting_recipes.c src/generated/generated_cooking_recipes.c src/generated/generated_item_place.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test_player_nbt: tests/test_player_nbt.c tests/fixtures/vanilla-26.1.1-player.dat src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/generated/generated_minecraft_ids.c | generated_sources
+test_player_nbt: tests/test_player_nbt.c tests/fixtures/vanilla-26.1.1-player.dat src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $(filter %.c,$^) $(LDFLAGS) -Wl,--wrap=rename
+
+test_player_save: tests/test_player_save.c src/protocol/inventory.c src/protocol/varint.c src/world/player_store.c src/world/nbt.c src/util/arena.c src/util/mc_util.c src/generated/generated_minecraft_ids.c | generated_sources
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -Wl,--wrap=rename,--wrap=fsync,--wrap=gzwrite
+
+test_memory: tests/test_memory.c src/util/memory.c src/util/mc_util.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test_mining: tests/test_mining.c src/gameplay/mining.c src/generated/generated_block_hardness.c src/generated/generated_mining_data.c src/generated/generated_minecraft_ids.c src/world/block_registry.c | generated_sources
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

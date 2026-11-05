@@ -30,6 +30,25 @@ Pour l'authentification online, utiliser un vrai client Java officiel sur
 25588 avant toute promotion de 25565. Les tests négatifs automatiques ne
 prouvent pas une connexion positive ni les privilèges d'Ofwood_.
 
+## Mémoire, caches et matériel homelab
+
+Appliquer la politique mémoire d'AGENTS.md : cible 4–100 Go configurables par
+instance, allocation progressive et bénéfice mesuré, sans garantie de joueurs.
+Pour les campagnes touchant mémoire/persistance, inclure le profil cible 4 Go,
+un profil intermédiaire (par exemple 16 Go) et un profil haut matériellement
+possible. Noter le budget demandé, le budget effectif, les limites cgroup et la
+consommation réelle ; ne jamais prétendre avoir exercé 100 Go si seul le calcul
+ou le paramètre a été testé.
+
+Mesurer RSS/max, caches, snapshots et occupation des files, allocations
+pertinentes, CPU/TPS/MSPT, latences, lectures/écritures et synchronisations.
+Inclure montée en charge progressive, pression mémoire bornée sur une instance
+isolée, échecs d'allocation, redémarrage, durée d'arrêt et données persistées.
+Surveiller swap, memory.events/OOM et PSI quand accessibles. Arrêter avant de
+mettre les services principaux en danger ; ne pas provoquer volontairement d'OOM.
+Distinguer cache applicatif, SQLite et pages Linux. Qualifier les lectures à
+froid/chaud ; aucune purge globale des caches sur le serveur partagé.
+
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers

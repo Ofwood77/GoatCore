@@ -465,7 +465,11 @@ static void server_process_departures(mc_server_t *s) {
                     proto_play_send_presence_message(viewer, departed, false) != 0) conn_close(viewer);
             }
         }
-        proto_play_conn_cleanup(departed);
+        if (proto_play_conn_cleanup(departed) != 0) {
+            log_error("player departure save failed; stopping instead of accepting stale reconnects");
+            atomic_store(&s->network_error, true);
+            net_server_stop(s);
+        }
         conn_release(departed);
         departed = next;
     }
@@ -2612,7 +2616,7 @@ int net_server_destroy_checked(mc_server_t *s) {
     while (c) {
         mc_conn_t *next = c->next;
         if (atomic_load(&c->state) == MC_STATE_PLAY || c->player) {
-            proto_play_conn_cleanup(c);
+            if (proto_play_conn_cleanup(c) != 0) atomic_store(&s->network_error, true);
         }
         conn_destroy(c);
         c = next;
@@ -2621,7 +2625,7 @@ int net_server_destroy_checked(mc_server_t *s) {
     c = s->departures;
     while (c) {
         mc_conn_t *next = c->departure_next;
-        proto_play_conn_cleanup(c);
+        if (proto_play_conn_cleanup(c) != 0) atomic_store(&s->network_error, true);
         conn_release(c);
         c = next;
     }
@@ -2635,6 +2639,7 @@ int net_server_destroy_checked(mc_server_t *s) {
     }
     free(s->item_entities);
     int storage_rc=mc_world_destroy_checked(s->world);
+    if (atomic_load(&s->network_error)) storage_rc = -1;
     mc_task_queue_destroy(&s->task_queue);
     pthread_mutex_destroy(&s->conns_lock);
     free(s);
@@ -2669,6 +2674,7 @@ mc_auth_service_t *net_server_auth(mc_server_t *server) {
 
 bool net_server_identity_in_use(mc_server_t *server, const mc_conn_t *exclude, const char *name, const uint8_t uuid[16]) {
     if (!server || !name || !uuid) return false;
+    if (atomic_load(&server->stop_requested)) return true;
     bool found = false;
     pthread_mutex_lock(&server->conns_lock);
     for (mc_conn_t *c = server->conns; c; c = c->next) {

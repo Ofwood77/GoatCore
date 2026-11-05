@@ -7147,3 +7147,464 @@ Fichiers du lot (33, sans fichiers personnels ni mondes) :
 | Harnais | `tests/stress/test_attached_placement.py`, `profile_attached.py`, `check_hinged_async.py`, `check_goatworld_sanitizers.py`, `profile_tick.py`, `run_block_checks.py` |
 | Observations | `tests/fixtures/vanilla-26.1.1-attached.tsv`, `vanilla-26.1.1-attached.json`, `vanilla-26.1.1-attached-validation.json` |
 | Construction et rapport | `Makefile`, `docs/vanilla-compatibility.md` |
+
+# Phase 2 — Persistance joueurs et politique mémoire 4–100 Go
+
+## Point de départ et défaut mesuré
+
+HEAD initial : `38696af6eb0634392324f88399b242983d2a50ca`.
+Le lot ne modifie ni gameplay, ni codecs de chunks, ni SQLite, ni S4, ni les
+valeurs par défaut des backends. Les serveurs/bots sont exclusivement exécutés
+dans un export sous `/opt/goatcore/phase2a-stage.LQAZEV`, sur 10.0.4.66.
+
+Le paquet SetCarriedItem (53) mettait à jour la sélection puis appelait
+`save_player_data`, même pour une sélection identique. Cette fonction copie
+les champs runtime dans l'état joueur puis appelle `mc_player_store_save` →
+`mc_player_store_save_to_file` → construction NBT, gzip et remplacement atomique.
+Chaque remplacement courant réalise un fsync de fichier et un de répertoire.
+À 50 bots, 3 000 sélections du scénario Phase 2B causaient donc 6 000 fsync
+sur le tick. La référence fraîche confirme ce coût, distinct de celui des
+supports et de SQLite.
+
+### Audit des points de persistance
+
+| Événement | Chemin et contrat conservé |
+|---|---|
+| Authentification | Aucun fichier joueur écrit par les workers d'authentification ; identité validée avant le chargement gameplay |
+| Chargement/connexion | `ensure_player_loaded`, lecture unique par session, UUID comme clé, lecteur historique et erreurs existants conservés |
+| Sélection hotbar | Seul chemin retardé par ce lot : sélection mémoire immédiate, génération si le slot change réellement |
+| Placement Survival | `consume_selected_item`, synchronisation du slot puis sauvegarde immédiate inchangée |
+| Placement/destruction Creative | Pas de consommation ; les mutations de chunks restent dans leur pipeline indépendant |
+| Destruction Survival | Les mutations d'inventaire/outils/épuisement continuent leurs chemins existants ; aucune transaction globale ajoutée |
+| Craft et fenêtres | `take_*crafting_result`, `quick_move_*`, `handle_window_click`, `finish_furnace_quick_move`, `save_active_window` pour l'ender chest : points immédiats conservés |
+| Inventaire Creative | `handle_set_creative_slot`, sauvegarde immédiate conservée |
+| Consommation alimentaire | `finish` de l'usage → `consume_selected_item`, puis sauvegarde immédiate ; aucune modification des règles alimentaires |
+| Ramassage | `pickup_ground_slot` direct immédiat ; variante différée inchangée, flush par joueur en fin de passe d'items (`proto_play_flush_pickup_save`) |
+| Drop manuel | `drop_selected_mainhand_items`, sauvegarde avant publication de l'item, même ordre et limites transactionnelles qu'avant |
+| Déplacement, rotation, sprint/saut | Pas de fichier écrit par paquet de mouvement ; champs runtime/exhaustion repris aux points de sauvegarde, comportement antérieur conservé |
+| Santé/faim/mort/respawn | `player_sync_food_state`/exhaustion selon leur indicateur persist, `handle_player_death`, `player_set_health_debug`, `respawn_player` : points existants conservés |
+| Commandes QA/admin | Gamemode, santé/faim, armure/clear et inventaires conservent leurs sauvegardes existantes ; les sondes readonly ne sauvegardent pas |
+| Changement de dimension | Pas de nouveau système ou point de persistance de dimension dans ce lot |
+| Déconnexion | `proto_play_conn_cleanup` force un état final, y compris retour de la grille de craft ; erreur désormais propagée |
+| Arrêt propre | Nettoyage de tous les joueurs avant destruction du monde ; erreur joueur contribue au code de sortie non nul |
+| Autosave | Nouveau flush des joueurs marqués dirty par les demandes de ce lot, éligible 30 s après la première mutation non sauvegardée |
+| Sauvegarde explicite | Les points immédiats restent durables ; `/save-all` garde son contrat explicite **chunks chargés**, sans promesse nouvelle sur les joueurs |
+
+L'audit identifie aussi des appels immédiats parfois redondants dans les commandes
+et fenêtres. Ils ne sont pas supprimés : leur coalescence aurait un périmètre et
+un contrat d'inventaire différents. Les changements de position seuls ne sont
+pas transformés ici en un nouvel autosave général.
+
+## État autoritaire RAM, générations et regroupement
+
+Le joueur connecté possède déjà un seul `mc_player_data_t` en RAM, avec UUID,
+inventaire, équipement, expérience, santé et autres champs pris en charge.
+Ce lot réutilise cette source de vérité. Aucun deuxième cache joueur, aucune
+copie complète par paquet et aucune file supplémentaire ne sont créés.
+
+`mc_player_save_state_t` ajoute **32 octets par connexion** : génération courante,
+dernière génération durable, génération en cours et échéance. Les générations
+sont locales à une session, ne changent pas le NBT disque et ne sont pas des
+identifiants de transaction persistants. Elles sont possédées par le tick.
+
+Une vraie sélection incrémente la génération et fixe l'échéance si le joueur
+était propre. Les sélections suivantes ne repoussent **pas** cette échéance.
+Une sélection identique garde les effets réseau/runtime existants (dont
+l'annulation d'utilisation) mais ne demande pas d'écriture. Les indices
+invalides restent ignorés comme auparavant.
+
+La sauvegarde capture la génération courante, sérialise l'état cohérent sur le
+tick et confirme uniquement cette génération après succès durable. Une ancienne
+complétion ne peut pas acquitter une génération différente. Le test 10 → 11
+pendant une capture vérifie que la confirmation de 10 laisse 11 dirty et qu'une
+complétion obsolète est refusée. En production, l'écriture reste synchrone :
+aucune mutation gameplay ne se produit simultanément avec cette capture.
+
+Un point de sauvegarde immédiate d'inventaire acquitte également la sélection
+hotbar en attente puisqu'il sauvegarde l'état joueur entier. La déconnexion et
+l'arrêt forcent ce même état complet. Les profils C mesurent 3 088 octets pour
+la structure joueur et 872 pour la connexion, auxquels s'ajoutent les buffers,
+slots dynamiques et structures réseau mesurés par RSS ; ces nombres ne sont
+pas le coût mémoire complet d'un joueur.
+
+### Choix proportionné : pas de nouveau worker joueur
+
+Le worker S4 écrit des snapshots de chunks et acquitte des générations de chunks.
+Lui confier aussi des fichiers joueurs imposerait un nouveau protocole de durée
+de vie, de backpressure et d'ordre entre sessions. Le regroupement suffit à
+retirer le goulet confirmé ; aucun worker joueur insuffisamment qualifié n'est
+activé. Il n'existe donc ni file de snapshots joueurs à saturer ni complétion
+tardive de tâche portant un pointeur libéré.
+
+Les flushs périodiques et forcés restent synchrones et peuvent produire des pics
+sur HDD. Le mutex historique du store sérialise aussi les utilisateurs directs
+de son API pendant le remplacement ; aucun verrou réseau n'est ajouté autour
+du fsync. Une éventuelle évolution asynchrone devra traiter ces limites séparément,
+sans retarder silencieusement les garanties actuelles des inventaires.
+
+## Durabilité, reconnexion et erreurs
+
+Les trois états restent distincts : **action appliquée en RAM**, **génération
+capturée**, **génération durable acquittée**. L'ACK réseau ne devient pas un ACK
+disque. La sélection hotbar peut revenir à sa dernière sauvegarde après SIGKILL
+avant flush. La fenêtre cible est 30 secondes après la première mutation dirty,
+plus le retard éventuel du tick et de l'I/O ; ce n'est pas une garantie de délai
+réel lorsque le système est bloqué ou en erreur. Les champs runtime capturés
+opportunément, comme position/rotation, peuvent aussi revenir à leur dernier
+état enregistré. Aucune mutation d'inventaire sensible n'est nouvellement retardée.
+
+Le fichier joueur reste un NBT gzip publié dans `players/data/<uuid>.dat` :
+temporaire unique, écriture vérifiée, fermeture gzip, fsync du temporaire,
+rename atomique puis fsync du répertoire. Aucune troncature du fichier actif.
+Les reprises EINTR des ouvertures/synchronisations/rename sont explicites.
+Une erreur après rename renvoie `MC_PLAYER_SAVE_UNCERTAIN` et journalise la
+durabilité incertaine ; elle ne confirme pas la génération, ne restaure pas
+l'ancien fichier et ne supprime pas le nouveau. Le dirty est conservé sur échec.
+Des temporaires orphelins après SIGKILL peuvent subsister ; ils ne sont jamais
+pris comme fichiers joueurs et aucun nettoyage destructif automatique n'est ajouté.
+
+Le tick traite les paquets, sauvegardes et départs en série. Les anciennes tâches
+réseau d'une connexion fermée ne deviennent pas des écritures d'une nouvelle
+session. La connexion et ses références restent vivantes jusqu'au nettoyage.
+Si un flush périodique échoue, la connexion ferme et le nettoyage peut retenter
+une fois. Si ce nettoyage final échoue, le serveur journalise l'échec, refuse
+les nouvelles identités pendant son arrêt et termine en erreur. Il n'annonce
+pas une déconnexion/fermeture entièrement sauvegardée sur cet échec permanent.
+
+Aucune transaction globale chunks/joueurs/items n'est inventée. Les garanties
+supposent un seul propriétaire du monde et les garanties fsync du filesystem
+et du matériel. SIGKILL ne simule ni perte des pages du noyau ni coupure électrique.
+
+## Budget mémoire et limites existantes
+
+La politique permanente est ajoutée à `AGENTS.md` et aux trois skills du dépôt.
+Les autres instructions d'architecture et de sécurité sont conservées. Les
+profils 4/8/16/32/64/100 Go sont des capacités configurables, pas des réservations
+ni des promesses de joueurs. Les unités du paramètre sont binaires :
+`memory-budget-mib=4096` pour 4 GiB, `102400` pour 100 GiB. Le défaut est 4096.
+Les valeurs supérieures à 100 GiB sont représentables sans plafond artificiel ;
+les signes, valeurs sous le minimum cible et dépassements d'entier sont refusés.
+
+`src/util/memory.c` calcule un **garde-fou d'espace d'adressage RLIMIT_AS**, sans
+allocation. Il tient compte de MemAvailable, des plafonds memory.max et de
+memory.current de la hiérarchie cgroup v2 visible, puis de la limite héritée du
+processus. Il préserve une marge conservatrice de 512 MiB et signale tout
+plafonnement. Si la marge n'est pas disponible ou si les limites ne peuvent pas
+être résolues, le démarrage est refusé avant création du monde. Il ne relève
+aucune limite héritée et ne modifie aucune limite systemd/cgroup existante.
+
+Ce garde-fou n'est **pas** un gestionnaire exhaustif de heap ou de caches :
+RLIMIT_AS inclut les réservations/mappings virtuels et peut limiter un processus
+avant qu'il consomme autant de RSS. Les cgroups restent l'autorité pour la RAM
+chargée, les pages et les autres processus. Les ancêtres invisibles dans un
+namespace LXC et les futures allocations d'autres services ne sont pas devinés.
+Le chemin est validé sous cgroup v2 ; v1 et les environnements sans hiérarchie
+lisible restent refusés/non qualifiés. Les sanitizers à grande réservation
+d'adresses sont exécutés sur les suites C sans appliquer ce plafond de serveur ;
+aucun serveur Minecraft ASan/TSan complet sous RLIMIT_AS=4 GiB n'est revendiqué.
+
+| Composant | Politique de ce lot |
+|---|---|
+| Joueurs actifs | État existant en RAM, un par connexion, pas d'éviction dirty silencieuse |
+| Suivi de sauvegarde joueur | 32 octets par connexion, aucune copie par sélection |
+| File I/O joueurs | Absente ; capture/écriture synchrone au flush |
+| Snapshots S4 | Limites conservées : un lot, 64 chunks, 64 MiB de copies |
+| Cache pages SQLite | Réglages existants conservés : writer 4 MiB, quatre lecteurs de 1 MiB ; pas une préallocation de ces plafonds |
+| Chunks chargés | Politique existante de maintien autour des joueurs et d'éviction conservée ; pas de nouveau cache monde géant |
+| Réseau | File de tâches bornée existante, 8 192 entrées par défaut ; buffers et allocations soumis au plafond global, sans refonte |
+| Connexions | Défaut 128, `MC_MAX_CONNECTIONS` configurable jusqu'à la borne existante 1 024 ; 100/200/500 sont représentables, leur capacité gameplay n'est pas démontrée |
+| Cache disque Linux | Distinct de RSS et du cache SQLite ; aucune purge globale effectuée |
+
+Les tableaux de cache ne prétendent pas fournir une comptabilité dynamique
+exhaustive par composant. Aucune proportion arbitraire des 100 GiB n'est allouée
+aux caches. La charge utilise environ 30–42 MiB de RSS, car son jeu de données
+actif est petit ; augmenter artificiellement cette consommation n'apporterait
+aucune preuve de performance. L'agrandissement futur des caches demandera une
+mesure de working set et de lectures réelles, sans bloquer la reprise du gameplay.
+
+## Comparaison Xeon/HDD à travail égal
+
+Campagne **fraîche**, distincte des anciennes mesures Phase 2B : 15 essais de
+référence puis 15 du correctif, 1/2/10/25/50 bots, trois répétitions, même
+`profile_attached.py`, même template jetable, 30 cycles par bot et mêmes actions,
+distances, pacing, compilation et instrumentation fsync. La campagne complète
+est exécutée dans une unité temporaire MemoryMax=4 GiB, swap interdit, affinité
+CPU 8–11, nice 10, ionice best-effort/priorité 7. Aucun autre serveur temporaire
+pendant les mesures. Le Xeon et le volume ext4/LVM exposant des disques ROTA=1
+sont observés ; les écritures physiques des plateaux/contrôleurs RAID ne sont
+pas déduites des seuls compteurs processus. La RAM visible est relevée à nouveau
+avant la campagne ; les anciennes mesures NVMe/anciens budgets RAM ne servent
+pas à calculer les gains de ce lot.
+
+**23 760 actions par version**, toutes reçues et confirmées, mêmes 7 920 drops
+indirects, zéro manquante. Après drainage et arrêt, les slots sélectionnés et
+les inventaires NBT typés des joueurs correspondent exactement avant/après.
+Les chunks finaux sont relus par l'oracle indépendant et une nouvelle instance.
+Le temps total inclut préparation, warmup/idle, travail, validation finale,
+déconnexions et arrêt sauvegardé. Le gain ne repose donc pas sur des données
+restant uniquement en mémoire à la fin.
+
+Les quantiles sont les médianes des quantiles par essai. Les maxima et nombres
+de dépassements ci-dessous regroupent les trois répétitions.
+
+| Bots | TPS avant → après | MSPT P50 avant → après (ms) | P95 avant → après | P99 avant → après | Max avant → après (ms) | Ticks >50 ms avant → après |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 20,023 → 20,042 | 0,124 → 0,107 | 0,284 → 0,217 | 0,356 → 0,616 | 51,421 → 4,725 | 1 → 0 |
+| 2 | 17,518 → 19,963 | 0,266 → 0,167 | 59,080 → 0,288 | 111,722 → 0,404 | 196,256 → 0,411 | 54 → 0 |
+| 10 | 3,506 → 20,007 | 33,797 → 2,236 | 375,409 → 3,057 | 869,524 → 3,346 | 899,043 → 4,218 | 98 → 0 |
+| 25 | 2,445 → 20,043 | 7,418 → 4,827 | 917,823 → 6,759 | 1 236,546 → 10,690 | 1 601,422 → 16,904 | 128 → 0 |
+| 50 | 1,969 → 19,965 | 4,995 → 7,126 | 1 833,751 → 10,736 | 1 918,757 → 15,057 | 2 153,895 → 18,588 | 167 → 0 |
+
+| Bots | fsync joueurs en phase active avant → après | Temps cumulé médian avant → après (s) | Durée totale médiane jusqu'à arrêt avant → après (s) |
+|---:|---:|---:|---:|
+| 1 | 120 → 0 | 2,607 → 0 | 13,922 → 10,661 |
+| 2 | 240 → 0 | 5,454 → 0 | 17,392 → 11,806 |
+| 10 | 1 200 → 0 | 23,621 → 0 | 41,725 → 17,724 |
+| 25 | 3 000 → 0 | 54,847 → 0 | 89,439 → 27,979 |
+| 50 | 6 000 → 0 | 109,832 → 0 | 173,336 → 53,608 |
+
+À 50 bots, en comptant **toute l'exécution** et pas seulement les actions,
+les synchronisations de fichiers/répertoires `players/data` passent de
+**6 500 à 300** (3 250 à 150 fichiers), soit 95,38 % de réduction. Les médianes
+de temps cumulé correspondant passent de **120,503 à 5,872 s**. Les barrières des
+sauvegardes restantes sont conservées. Après correctif, les 3 000 paquets de
+sélection provoquent 2 950 mutations réelles et aucune écriture pendant la
+phase active. Leurs traitements totalisent environ 3 ms dans chaque essai.
+
+Le P99 médian incluant le travail « fast » entre ticks passe, à 50 bots, de
+3 480,054 à 33,149 ms. Aucun dépassement actif de 50 ms n'est observé après
+correctif dans ces 15 essais (max tick + fast 46,223 ms), mais d'autres phases
+atteignent 163,552 ms. Ces fenêtres courtes **ne démontrent pas 20 TPS constants**.
+À un bot, le petit changement de P99 reste sous la milliseconde et ne démontre
+pas de régression significative ; le maximum et le travail fast diminuent.
+
+Le générateur Python passe d'environ 20 % à **98–99 % d'un CPU** à 50 bots :
+il est désormais proche de sa limite. Le processus serveur utilise environ
+69–71 % d'un CPU pendant ces phases actives. La capacité maximale serveur
+ne peut donc pas être extrapolée de ce harnais. Les latences d'action P99 à
+50 bots passent de 2 400,308 à 240,710 ms (médianes par essai), avec les mêmes
+confirmations. Aucun chantier réseau ou SQLite n'est ajouté pour améliorer
+ces chiffres.
+
+La RSS maximale observée sur la campagne passe de 31 232–41 828 KiB à
+31 036–42 024 KiB. La coalescence ne nécessite pas un gros cache ; elle élimine
+les sérialisations déclenchées par chaque paquet tout en conservant l'état RAM
+existant. La faible RSS n'est pas présentée comme le critère de réussite.
+
+## Profils mémoire réellement exercés
+
+Chaque ligne ci-dessous est une instance neuve sous une **limite cgroup propre**,
+avec le budget configuré correspondant, 100 paquets de sélection, inventaire,
+arrêt avec joueur dirty et relecture après redémarrage. Il s'agit d'un exercice
+de configuration/persistance à un joueur, **pas d'un working set de 100 GiB**.
+La campagne 1/2/10/25/50 bots, elle, est exécutée sous le profil 4 GiB.
+
+| Budget demandé (MiB) | Plafond AS effectif annoncé (MiB, tronqué) | RSS après 100 sélections (KiB) | Persistance |
+|---:|---:|---:|---|
+| 4 096 | 3 567 | 22 356 | correcte après arrêt et redémarrage |
+| 8 192 | 7 664 | 22 136 | correcte |
+| 16 384 | 15 855 | 22 300 | correcte |
+| 32 768 | 32 239 | 22 392 | correcte |
+| 65 536 | 65 007 | 22 160 | correcte |
+| 102 400 | 101 871 | 22 348 | correcte |
+
+Les plafonnements tiennent compte de la mémoire déjà chargée dans l'unité
+(dont le runner) et des 512 MiB de marge. Les valeurs exactes en octets et
+VmSize/VmPeak/VmHWM sont conservées dans les preuves. Aucune allocation
+artificielle de 4–100 GiB ni aucun changement des limites des services principaux.
+La mémoire visible dans le LXC est relevée séparément ; elle ne démontre pas
+à elle seule l'inventaire physique de RAM du serveur hôte.
+
+Un test supplémentaire impose **MemoryMax=4 GiB, MemoryHigh=512 MiB**, avec
+un processus de pression jetable de 512 MiB, distinct de GoatCore et arrêté
+après validation. Il enregistre 3 476 événements `high`, zéro OOM/OOM-kill,
+zéro swap et un pic de groupe de 568 905 728 octets, comprenant ce générateur.
+Les 100 sélections, la sauvegarde, l'inventaire et le redémarrage réussissent.
+Le shutdown atteint **4,239 s** sous cette pression, qui impose réellement des
+attentes ; la RSS échantillonnée de GoatCore est 17 136 KiB et ne constitue pas
+un gain en soi. Un groupe séparé limité à **256 MiB** valide le refus préventif
+avant création du monde, avec code de sortie 1.
+
+Le premier pilote de pression, à 640 MiB pour un seuil high de 512 MiB,
+throttlait trop fortement son propre générateur. Seule cette unité de test a
+été arrêtée. Le harnais final borne aussi l'attente de préparation et termine
+son helper en cas d'erreur. Ce pilote n'est pas compté comme validation.
+
+Les calculs C couvrent aussi 200 GiB, les dépassements d'entier, plafonnements
+et refus. Ils ne prouvent pas une consommation réelle à cette échelle.
+Les benchmarks complets ne sont pas répétés pour chaque grand budget, ni pour
+100/200/500 joueurs : le générateur Python est déjà proche de sa limite à 50.
+Les lectures sur cache de pages matériellement froid ne sont pas qualifiées ;
+les redémarrages utilisent les caches OS courants, sans purge du serveur partagé.
+
+## Tests de persistance, pannes et observabilité
+
+Le nouveau test C `test_player_save` vérifie neuf interruptions SIGKILL : avant
+capture, avant/pendant écriture (gzip partiellement flushé sur disque), avant
+et après fsync du fichier, avant et après rename, avant et après fsync du
+répertoire. Avant rename, l'ancien fichier reste identique octet par octet.
+Après rename, le nouveau contenu est lisible ; avant sync du répertoire sa
+durabilité n'est pas annoncée. Deux relectures vérifient la sélection, deux
+stacks distincts et l'expérience. Les huit injections couvrent gzwrite court,
+EIO, ENOSPC, échec fsync fichier/répertoire, échec rename et reprises EINTR de
+fsync/rename. Elles ciblent les API dans un exécutable jetable, sans saturer
+un disque réel.
+
+Les tests réseau du binaire normal couvrent :
+
+- Un joueur avec 100 sélections et dix joueurs avec 100 paquets chacun,
+  sélections répétées/invalides, zéro écriture immédiate dans ces phases,
+  flush périodique, déconnexion/reconnexion et arrêt avec joueur dirty.
+- SIGKILL sur une sélection seulement en RAM : ancien slot retrouvé et
+  inventaire déjà durable conservé.
+- Chemin de sauvegarde rendu indisponible uniquement dans le monde jetable :
+  échec final journalisé, sortie 2, source récupérable et ancienne sélection.
+- Écriture bloquée par une bibliothèque **de test uniquement**, après fsync du
+  temporaire et avant publication : fermeture du socket, nouvelle connexion du
+  même UUID en attente, puis inventaire 9/slot 2 corrects après libération.
+  Une seconde séquence envoie SIGTERM pendant l'écriture et retrouve inventaire
+  11/slot 4 après redémarrage.
+- Mélange Survival : pose avec consommation, pain consommé, sélection, drop
+  manuel puis ramassage vu par deux clients, reconnexion et redémarrage. Les
+  trois pierres et deux pains attendus sont conservés.
+
+Le premier flush périodique du scénario à un joueur est confirmé après
+**30,061453 s**, mesurées entre la première mutation hotbar et la fin du store,
+et non depuis un ACK réseau. Les 1 000 paquets de sélection du test à dix
+joueurs représentent 999 mutations réelles : l'un d'eux sélectionne initialement
+le slot déjà actif. Le manifeste distingue ces compteurs des 80 répétitions
+explicites, 20 indices invalides et dix mutations après reconnexion.
+
+Deux hypothèses de harnais ont été corrigées sans changer le gameplay : un
+item lancé doit être rejoint à sa position diffusée plutôt qu'à une position
+estimée ; un drop après perte du support doit disposer d'un sol de réception
+**avant** les requêtes de vérification. Le tick accéléré révélait que l'item
+pouvait tomber sous un sol posé trop tard. La fixture ajoute un bloc de réception
+sous les six scènes de loot. Une nouvelle exécution officielle Vanilla, sur
+copie pré-générée, reproduit **les mêmes 275 observations et sentinelles** que
+la référence précédente. La physique des items ne devient pas entièrement
+conforme par cette correction de préparation.
+
+`make -B precommit-check GOATWORLD_G1_CHECK=1` passe sur l'export distant nettoyé :
+**34 suites C**, réseau, login, multi-epoll, outils/migration et injections G2.
+Les ressources brutes non présentes dans l'export restent signalées comme telles
+par generated-check ; aucune table générée n'est modifiée par ce lot.
+Les suites **ASan+UBSan et TSan** passent sur 13 exécutables ciblés, plus les huit
+injections G2, avec le SQLite privé instrumenté. Elles incluent joueurs/NBT,
+générations, hotbar, pannes, mémoire, inventaires, snapshots, Anvil et les blocs.
+Les gates de serveurs Minecraft sont validées en binaire normal. L'absence de
+diagnostic n'est pas une preuve absolue d'absence de races ou de toute fuite.
+
+L'observabilité est désactivable via l'absence de `MC_SAVE_TRACE_PATH`.
+`player_hotbar` compte les paquets acceptés et utilise `bytes` comme indicateur
+0/1 de vraie mutation ; `player_immediate_request` compte les points immédiats,
+pas exclusivement des mutations d'inventaire. `player_file_save` mesure les
+écritures effectives, octets NBT bruts, CPU et latence complète. Le probe
+`profile_fsync.c` distingue les chemins joueurs et les barrières. Les écritures
+compressées, `/proc` I/O, RSS et ticks viennent des outils existants. Les
+mutations d'inventaire des scénarios sont assertées ; il n'est pas prétendu
+disposer d'un compteur exhaustif de toutes les allocations et de chaque mutation
+d'objet dans tous les handlers. Avant correction, la latence complète du store
+n'était pas instrumentée : les mesures fsync ne sont pas présentées comme
+incluant sa sérialisation NBT.
+
+L'asynchrone des chunks et ses limites S4 restent inchangés. Les flushs joueurs
+restants sont synchrones ; une longue activité et plusieurs centaines de joueurs
+peuvent encore provoquer une rafale d'autosaves à l'échéance. Cette capacité,
+ainsi que les caches de très grands mondes et toutes les allocations sous
+pression, ne sont pas qualifiés par les petits exercices de budget ci-dessus.
+
+## Reproduction et conservation des preuves
+
+Depuis le dépôt local, `scripts/remote-build-stage.sh` exporte les sources vers
+un **nouveau** staging distant sans toucher aux services principaux. Dans cet
+export, compiler puis exécuter `GOATCORE_SOURCE_EXPORT=1 make -B precommit-check
+GOATWORLD_G1_CHECK=1`. Les serveurs et bots des commandes ci-dessous tournent
+exclusivement sur le distant, dans une unité temporaire dédiée. Relever au
+préalable ressources, services, fichiers protégés et limites cgroup ; aucun
+effacement global de caches Linux.
+
+Exemples de commandes à lancer **dans le staging distant**, en remplaçant les
+variables par les chemins vérifiés des copies jetables et du binaire de
+référence. Chaque répertoire de résultats doit être initialement absent :
+
+```sh
+cc -shared -fPIC -O2 -o player-save-gate.so tests/stress/player_save_gate.c -ldl
+cc -shared -fPIC -O2 -o fsync-probe.so tests/stress/profile_fsync.c -ldl
+python3 tests/stress/check_player_saves.py --binary ./mc_server \
+  --result-dir tests/stress/results/player-saves/network-new \
+  --fsync-probe ./fsync-probe.so --gate-probe ./player-save-gate.so
+python3 tests/stress/profile_player_saves.py --before-binary "$reference_binary" \
+  --after-binary ./mc_server --template "$disposable_template" \
+  --fsync-probe ./fsync-probe.so \
+  --result-dir tests/stress/results/player-saves/bench-new
+python3 tests/stress/check_memory_profiles.py --binary ./mc_server \
+  --budgets 4096 --result-dir tests/stress/results/player-saves/memory-new
+python3 tests/stress/check_player_regressions.py --server ./mc_server \
+  --seed-tool "$disposable_seed_tool" --complex-nbt "$official_complex_nbt" \
+  --java "$java25" --vanilla-root "$vanilla_root" \
+  --vanilla-template "$disposable_vanilla_template" \
+  --result-dir tests/stress/results/player-saves/regression-new
+```
+
+Le comparatif utilise `MemoryMax=4G`, `MemorySwapMax=0`, CPU 8–11, nice 10,
+priorité I/O best-effort 7 ; quinze essais avant puis quinze après, sans
+autre serveur temporaire simultané. Adapter les CPU après audit du matériel.
+Le profil sous pression utilise un groupe distinct limité à 4 Go avec
+`MemoryHigh=512M` et `--pressure`, avec helper borné à 512 Mio/90 s. Le refus
+se vérifie dans un autre groupe à 256 Mio avec `--expect-refusal`. Les profils
+supérieurs se lancent séparément, uniquement quand les ressources disponibles
+le permettent, sans augmentation des limites des services principaux.
+
+Les sanitizers C peuvent se lancer localement, **sans serveur Minecraft**, avec
+`python3 tests/stress/check_goatworld_sanitizers.py --result-dir <destination>`.
+Récupérer les rapports/CSV et empreintes dans
+`tests/stress/results/player-saves/`, ignoré par Git, en excluant les mondes.
+`tools/validate_player_save_results.py` consolide les preuves qualifiées et
+refuse toute discordance de travail, de SHA, de persistance ou de code source.
+Les résultats légers sont conservés dans
+`tests/fixtures/vanilla-26.1.1-player-save-validation.json` ; les noms des
+répertoires qualifiés y distinguent les essais finaux des pilotes échoués.
+
+## Matrice finale de non-régression et clôture
+
+| Validation sur le binaire final | Résultat effectivement obtenu |
+|---|---|
+| Blocs attachés | 275 cas principaux + 35 échelles/trappes/eau, identiques aux fixtures officielles, deux observateurs, deux redémarrages |
+| Référence officielle fraîche | 275 cas attachés et sentinelles identiques à la fixture précédente ; les 192 escaliers sont aussi rejoués sur le JAR officiel |
+| Portes/trappes | 335 scénarios rejoués, identiques à la fixture officielle ; pas de nouvelle exécution exhaustive officielle de ce corpus dans ce correctif |
+| Escaliers | 192 observations GoatCore identiques à la nouvelle exécution Vanilla |
+| Stockages historiques | 18 cas de placement par backend `.bin` et Anvil, deux redémarrages ; aucune modification de leurs formats |
+| GoatWorld SQLite async | Placement aux frontières de régions, escaliers, 100 ramassages et persistance ; source du moteur inchangée |
+| Données opaques | Coffre, four froid, panneau, bannière, shulker, tonneau, pot décoré : types et valeurs NBT identiques après modifications et relectures |
+| Joueurs | Six scénarios réseau qualifiés, hotbar périodique, reconnexion même UUID, panne, SIGKILL RAM, arrêt pendant écriture et mélange Survival |
+| Pannes C | Neuf stages SIGKILL et huit injections courtes/erreurs/EINTR, fichier ancien ou nouveau complet selon la publication |
+| Technique | 34 suites C/precommit ; ASan+UBSan et TSan ciblés réussis ; aucune course/fuite détectée dans ces suites |
+
+La consolidation passe et vérifie l'égalité des **125 fichiers source/interface
+et Makefile** entre le dépôt local et l'export compilé. Le binaire normal final
+testé a pour SHA-256 :
+
+```text
+d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e
+```
+
+Le contrôle final retrouve `goatcore.service` actif, PID **147**, zéro restart,
+et `goatcore-test.service` inactif, PID **0**, zéro restart. Les SHA-256 du
+binaire principal et des deux configurations sont inchangés. Aucun serveur
+temporaire du chantier ne reste lancé. Les mondes principaux ne sont pas
+modifiés, aucun déploiement n'est réalisé et **aucun push n'est effectué**,
+conformément à l'instruction spécifique de cette mission.
+
+Les fichiers livrés couvrent le suivi joueur (`mc_player_save.h`, player store,
+connexion et adapters play), le garde-fou mémoire (`mc_memory.h`, `memory.c`,
+configuration), Makefile, trois tests C nouveaux/étendus, les harnais de
+hotbar/charge/mémoire/régression, le gate de test, le consolidateur, le manifeste,
+ce rapport, `AGENTS.md` et les trois skills. Aucun monde complet ni fichier
+personnel n'est ajouté.
+
+La reprise de la **physique partielle et de l'escalade des échelles** peut se
+faire au prochain lot. Le défaut hotbar mesuré est corrigé sans nouveau moteur
+de stockage. Les pics de flush périodique/forcé, l'usage de grands working sets,
+les centaines de joueurs et les environnements cgroup v1 restent des limites
+explicites, sans affirmation de parité Vanilla complète ni de 20 TPS permanents.

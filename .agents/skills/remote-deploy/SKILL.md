@@ -71,6 +71,23 @@ du chemin exact.
 
 Ne pas supprimer les fichiers hors des répertoires de test identifiés.
 
+## Ressources et politique mémoire 4–100 Go
+
+Avant une campagne, relever RAM physique/visible, MemAvailable, swap, PSI,
+mémoire des services existants et limites **effectives** LXC/cgroup, y compris
+les ancêtres et memory.current/events si disponibles. Ne pas confondre RAM du
+serveur physique et RAM accessible au conteneur, ni cache de pages et heap.
+Préserver une marge pour OS, buffers, cache disque, outils et autres services.
+
+Les profils 4–100 Go sont des plafonds de capacité, pas une préallocation.
+Dimensionner et borner les essais temporaires ; surveiller RSS/max, mémoire
+cgroup, swap, pression et espace disque. Un budget supérieur aux ressources
+réelles doit être signalé puis plafonné ou refusé. Ne pas augmenter la mémoire
+sans bénéfice mesuré ni allouer artificiellement 100 Go pour une démonstration.
+Les limites des services principaux ne doivent jamais être modifiées
+automatiquement. Les groupes/units temporaires de test doivent être distincts,
+bornés, identifiables et nettoyés après l'arrêt de leurs processus.
+
 ## Gestion des erreurs
 
 En cas d'échec :

@@ -2,6 +2,7 @@
 #include "mc_net.h"
 #include "mc_setup.h"
 #include "mc_util.h"
+#include "mc_memory.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -25,6 +26,7 @@
 #define DEFAULT_OFFLINE_SKINS false
 
 typedef struct {
+    uint64_t memory_budget_mib;
     mc_storage_kind_t chunk_storage;
     mc_save_mode_t anvil_save_mode;
     int64_t level_seed;
@@ -58,6 +60,7 @@ static int write_default_server_config(const char *path) {
         return -1;
     }
     fprintf(f, "# mc_c_server config\n");
+    fprintf(f, "memory-budget-mib=4096\n");
     fprintf(f, "chunk-storage=bin\n");
     fprintf(f, "anvil-save-mode=immediate\n");
     fprintf(f, "level-seed=%d\n", DEFAULT_LEVEL_SEED);
@@ -142,6 +145,7 @@ static int parse_uuid_hex(const char *value, uint8_t out[16]) {
 static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
     if (!f || !out) return -1;
     *out = (server_disk_config_t){0};
+    out->memory_budget_mib = MC_MEMORY_DEFAULT_MIB;
     out->level_seed = DEFAULT_LEVEL_SEED;
     out->view_distance = DEFAULT_VIEW_DISTANCE;
     out->simulation_distance = DEFAULT_SIMULATION_DISTANCE;
@@ -167,6 +171,14 @@ static int parse_server_config_file(FILE *f, server_disk_config_t *out) {
         trim_ws(key);
         trim_ws(val);
         if (!*key) continue;
+
+        if (strcmp(key, "memory-budget-mib") == 0) {
+            if (mc_memory_parse_mib(val, &out->memory_budget_mib)) {
+                log_error("invalid memory-budget-mib '%s': expected integer >=4096 MiB without overflow", val);
+                return -1;
+            }
+            continue;
+        }
 
         if (strcmp(key, "chunk-storage") == 0) {
             if (mc_storage_parse(val,&out->chunk_storage)!=0) {
@@ -320,6 +332,7 @@ int main(void) {
         log_error("failed to load %s", SERVER_CONFIG_PATH);
         return 1;
     }
+    if (mc_memory_apply(disk_cfg.memory_budget_mib) != 0) return 1;
 
     const char *setup_override = getenv("MC_SETUP_FILE");
     const char *setup_path = (setup_override && *setup_override) ? setup_override : "setup.conf";

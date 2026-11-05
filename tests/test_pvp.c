@@ -632,6 +632,62 @@ static void test_pickup_pass_atomic_save_and_failure(void) {
     g_pickup_world = NULL;
 }
 
+static void test_hotbar_save_batch(void) {
+    char path[] = "/tmp/goatcore-hotbar-XXXXXX";
+    assert(mkdtemp(path));
+    g_pickup_world = mc_world_create_with_workers(path, 0, 1);
+    assert(g_pickup_world);
+    mc_conn_t c;
+    mc_player_data_t *player = calloc(1, sizeof(*player));
+    assert(player);
+    test_conn_init(&c, player, 31);
+    c.server = (mc_server_t *)0x1;
+    snprintf(player->username, sizeof(player->username), "HotbarBatch");
+    assert(mc_player_store_save(path, player) == 0);
+    g_fsync_calls = 0;
+    uint8_t bytes[2] = {0};
+    mc_frame_t frame = {.packet_id = 53, .payload = {.data = bytes, .len = 2}};
+    for (int i = 1; i <= 100; i++) {
+        bytes[1] = (uint8_t)(i % 9);
+        assert(proto_play_handle(&c, &frame, i) == 0);
+        assert(player->inventory.selected_hotbar_slot == i % 9);
+    }
+    assert(g_fsync_calls == 0 && c.player_save.current == 100 && !c.player_save.durable);
+    int64_t deadline = c.player_save.due_ms;
+    assert(proto_play_handle(&c, &frame, 101) == 0); /* same slot: no save request */
+    assert(c.player_save.current == 100 && c.player_save.due_ms == deadline);
+    assert(proto_play_flush_player_save(&c, deadline - 1, false) == 0 && !g_fsync_calls);
+    assert(proto_play_flush_player_save(&c, deadline, false) == 0 && g_fsync_calls == 2);
+    assert(c.player_save.current == c.player_save.durable);
+    mc_player_data_t loaded;
+    mc_player_data_init(&loaded);
+    assert(mc_player_store_load(path, NULL, false, player->username, &loaded) == 0);
+    assert(loaded.inventory.selected_hotbar_slot == 1);
+    mc_player_data_clear(&loaded);
+    bytes[1] = 7;
+    assert(proto_play_handle(&c, &frame, 102) == 0);
+    g_fail_fsync = true;
+    assert(proto_play_flush_player_save(&c, 0, true) == -1);
+    assert(c.player_save.current > c.player_save.durable && !c.player_save.in_flight);
+    g_fail_fsync = false;
+    mc_slot_t slot = {0};
+    assert(mc_slot_set_simple(&slot, mc_minecraft_item_id("minecraft:stone"), 3) == 0);
+    assert(proto_play_try_pickup_ground_slot(&c, &slot) == 3); /* immediate inventory barrier also saves slot */
+    assert(c.player_save.current == c.player_save.durable);
+    assert(mc_player_store_load(path, NULL, false, player->username, &loaded) == 0);
+    assert(loaded.inventory.selected_hotbar_slot == 7 && loaded.inventory.slots[36].count == 3);
+    mc_player_data_clear(&loaded);
+    bytes[1] = 4;
+    assert(proto_play_handle(&c, &frame, 103) == 0);
+    assert(proto_play_conn_cleanup(&c) == 0 && !c.player); /* final flush before release */
+    assert(mc_player_store_load(path, NULL, false, "HotbarBatch", &loaded) == 0);
+    assert(loaded.inventory.selected_hotbar_slot == 4 && loaded.inventory.slots[36].count == 3);
+    mc_player_data_clear(&loaded);
+    pthread_mutex_destroy(&c.out_lock);
+    mc_world_destroy(g_pickup_world);
+    g_pickup_world = NULL;
+}
+
 static void test_manual_drop_selected_item_stack_empty_and_dead(void) {
     mc_conn_t player_conn;
     mc_player_data_t player;
@@ -804,6 +860,7 @@ int main(void) {
     test_lifecycle_respawn_reset();
     test_pickup_inventory_empty_merge_full_and_spectator();
     test_pickup_pass_atomic_save_and_failure();
+    test_hotbar_save_batch();
     test_manual_drop_selected_item_stack_empty_and_dead();
     test_creative_set_slot_gate();
     test_vanilla_movement_exhaustion_and_invalid_position();

@@ -600,11 +600,13 @@ static float clamp_player_health(float health) {
     return health;
 }
 
-static int save_player_data(mc_conn_t *c) {
+static int write_player_data(mc_conn_t *c) {
     mc_world_t *world = get_world(c);
     if (!c || !c->player || !world) return 0;
     const char *world_path = mc_world_path(world);
     if (!world_path || !*world_path) return 0;
+    uint64_t generation = mc_player_save_begin(&c->player_save);
+    if (!generation) return -1;
     c->player->health = c->health;
     c->food = clamp_food_level(c->food);
     c->food_saturation = clamp_food_saturation(c->food, c->food_saturation);
@@ -618,11 +620,27 @@ static int save_player_data(mc_conn_t *c) {
     c->player->yaw = c->yaw;
     c->player->pitch = c->pitch;
     c->player->gamemode = c->gamemode;
-    if (mc_player_store_save(world_path, c->player) != 0) {
+    int result = mc_player_store_save(world_path, c->player);
+    if (mc_player_save_complete(&c->player_save, generation, result == 0)) return -1;
+    if (result != 0) {
         log_error("player save failed: user=%s world=%s", c->player->username, world_path);
         return -1;
     }
     return 0;
+}
+
+static int save_player_data(mc_conn_t *c) {
+    if (!c || !c->player) return 0;
+    mc_save_clock_t span = mc_save_profile_begin();
+    int result = mc_player_save_mark(&c->player_save, mc_now_us() / 1000);
+    mc_save_profile_end("player_immediate_request", c->entity_id, 0, span, 1, result);
+    return result ? -1 : write_player_data(c);
+}
+
+int proto_play_flush_player_save(mc_conn_t *c, int64_t now_ms, bool force) {
+    if (!c || !c->player || c->player_save.current == c->player_save.durable) return 0;
+    if (!force && !mc_player_save_due(&c->player_save, now_ms)) return 0;
+    return write_player_data(c);
 }
 
 static int ensure_player_loaded(mc_conn_t *c) {
@@ -724,14 +742,19 @@ static int ensure_player_loaded(mc_conn_t *c) {
     return 0;
 }
 
-void proto_play_conn_cleanup(mc_conn_t *c) {
-    if (!c) return;
+int proto_play_conn_cleanup(mc_conn_t *c) {
+    if (!c) return 0;
+    int result = 0;
 
     cancel_item_use(c);
     close_active_window(c, false);
     if (c->player) {
-        (void)return_player_crafting_grid(c);
-        (void)save_player_data(c);
+        if (return_player_crafting_grid(c) < 0) result = -1;
+        if (save_player_data(c) != 0) {
+            log_error("player departure NOT durably saved; generation=%llu durable=%llu",
+                      (unsigned long long)c->player_save.current, (unsigned long long)c->player_save.durable);
+            result = -1;
+        }
         mc_player_data_clear(c->player);
         free(c->player);
         c->player = NULL;
@@ -770,6 +793,7 @@ void proto_play_conn_cleanup(mc_conn_t *c) {
     c->remote_players_len = 0;
     sent_chunks_clear(c);
     pending_chunks_clear(c);
+    return result;
 }
 
 static int mark_player_ready(mc_conn_t *c, const char *reason) {
@@ -7355,8 +7379,12 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
         if (r_i16(&r, &slot_id) != 0) return -1;
         if (slot_id >= 0 && slot_id < MC_PLAYER_HOTBAR_SIZE) {
             cancel_item_use(c);
+            bool changed = inv->selected_hotbar_slot != slot_id;
+            mc_save_clock_t span = mc_save_profile_begin();
+            if (changed && mc_player_save_mark(&c->player_save, mc_now_us() / 1000) != 0) return -1;
             inv->selected_hotbar_slot = (int32_t)slot_id;
             inv->state_id++;
+            mc_save_profile_end("player_hotbar", c->entity_id, slot_id, span, changed ? 1 : 0, 0);
             if (debug_place_enabled()) {
                 const mc_slot_t *slot = mc_inventory_selected_slot_const(inv);
                 int32_t sid = proto_play_slot_to_state(mc_world_ids(get_world(c)), slot);
@@ -7372,7 +7400,6 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                          item_name ? item_name : "(empty)", (slot && slot->present) ? slot->item_id : -1,
                          (slot && slot->present) ? slot->count : 0);
             }
-            (void)save_player_data(c);
         }
         return 0;
     }
@@ -7869,6 +7896,10 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 int proto_play_tick(mc_conn_t *c, int64_t now_ms) {
     if (!c || c->state != MC_STATE_PLAY) return 0;
     if (!c->play_init_sent) return 0;
+
+    /* Coalesce selection-only mutations; inventory paths remain immediate.
+     * Failure closes the connection; departure retries once, then fails closed. */
+    if (proto_play_flush_player_save(c, now_ms, false) != 0) return -1;
 
     /* Vanilla Player.aiStep: head yaw catches up at the authoritative tick,
      * not while handling the preceding movement packet. */
