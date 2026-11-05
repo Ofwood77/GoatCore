@@ -27,7 +27,7 @@ Mojang réussie pour déclarer le mode online fonctionnel. Rapporter ce qui a
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers
-le remote GitHub vérifié, sur la branche courante. Le propriétaire autorise ce
+le remote GitHub vérifié, sur `main`. Le propriétaire autorise ce
 push de façon permanente ; aucune nouvelle confirmation n’est nécessaire.
 Vérifier que le hash distant correspond au commit poussé et rapporter le résultat.
 Ne pas utiliser `--force`, changer de branche cible, fusionner ou réécrire
@@ -37,3 +37,6 @@ commande Git sur le serveur de test.
 
 Vérifier avant chaque commit l’auteur et le committer `Ofwood77`, avec l’adresse
 GitHub noreply définie dans `AGENTS.md`. Ne pas ajouter de co-auteur bot.
+
+`main` est l’unique branche de travail et de publication. Ne pas créer ou
+publier d’autre branche sans nouvelle instruction explicite du propriétaire.

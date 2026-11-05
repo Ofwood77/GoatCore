@@ -51,3 +51,27 @@ l'identité Ofwood77 avant chaque commit et un push normal vérifié après chaq
 commit. Aucun co-auteur bot n'est ajouté. Cette règle permanente ne couvre
 pas les futures réécritures ou déploiements, qui gardent leur autorisation propre.
 Les services Minecraft et leurs données ne sont pas concernés par cet audit.
+
+## Nettoyage des branches après publication sur main
+
+À la demande explicite du propriétaire, `main` a été avancée sans réécriture
+jusqu’au commit validé `053d605807d46f714189ac5891d14ffc41391978`.
+Les six autres branches GitHub et les trois autres branches locales ont ensuite
+été supprimées. Les deux tags existants sont conservés.
+
+Avant suppression, une sauvegarde complète des références concernées a été créée
+et vérifiée : `.local/branch-cleanup.9a4sa6uz/before-branch-cleanup.bundle`.
+Elle conserve aussi les commits propres aux anciennes branches. Les suppressions
+distantes ont été regroupées atomiquement avec un contrôle du hash attendu de
+chaque branche ; les suppressions locales utilisaient également le hash capturé.
+`main`, les fichiers de travail et les fichiers personnels sont préservés.
+
+Le contrôle de tous les commits accessibles depuis `main` confirme l’auteur et
+le committer Ofwood77, sans co-auteur bot. L’API des contributeurs GitHub ne
+retourne que Ofwood77 ; ses compteurs et l’encart du site peuvent être mis en
+cache. Les anciennes références de pull requests restent gérées par GitHub.
+Aucun changement de droits d’accès n’est déduit de la liste des contributeurs.
+
+Les instructions et les trois skills imposent désormais `main` comme unique
+branche de travail et de publication, avec un push normal vers `origin/main`
+après chaque commit. Aucun serveur Minecraft ni donnée de monde n’est modifié.

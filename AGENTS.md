@@ -218,11 +218,12 @@ Ne pas ajouter de multithreading sans modèle de propriété et de synchronisati
 - Codex réalise les modifications du code.
 - ChatGPT fournit les analyses, plans et instructions de développement.
 - Préserver les modifications locales existantes.
-- Après chaque commit, effectuer un push normal vers GitHub sur la branche courante (autorisation permanente du propriétaire). Ne pas effectuer de merge sans instruction explicite.
+- Après chaque commit, effectuer un push normal vers `origin/main` (autorisation permanente du propriétaire). Ne pas effectuer de merge sans instruction explicite.
 - Ne pas créer de .venv inutile.
 - Tester les fonctionnalités avant validation.
 - Privilégier les tests C et Minecraft.
-- Utiliser la branche locale la plus récente comme source de vérité.
+- Utiliser la branche locale `main`, synchronisée avec `origin/main`, comme source de vérité.
+- Conserver `main` comme unique branche de travail et de publication. Ne pas créer ni publier d’autre branche sans nouvelle instruction explicite du propriétaire.
 - Ne pas modifier une fonctionnalité stable sans justification.
 - Ne pas cacher les échecs de compilation ou de tests.
 
@@ -270,7 +271,7 @@ L'objectif est de pouvoir revenir facilement à une version précédente en cas 
 - Si les tests échouent et que la correction n'est pas possible, signaler clairement l'échec. Un commit de sauvegarde peut être créé, mais il doit être explicitement identifié comme non validé.
 - Utiliser des messages de commit explicites et descriptifs.
 - Ne jamais utiliser `git reset --hard` ou `git clean -fd` sans autorisation explicite.
-- Après chaque commit, effectuer un `git push` normal vers le remote GitHub vérifié et la branche courante. Cette autorisation permanente ne couvre ni `--force`, ni un merge, ni une réécriture d’historique.
+- Après chaque commit, effectuer un `git push origin main` normal vers le remote GitHub vérifié. Cette autorisation permanente ne couvre ni `--force`, ni un merge, ni une réécriture d’historique.
 - Ne jamais modifier l'historique Git existant sans autorisation.
 
 ### Workflow obligatoire
@@ -280,7 +281,7 @@ L'objectif est de pouvoir revenir facilement à une version précédente en cas 
 3. Déployer et tester sur le serveur distant si nécessaire.
 4. Corriger les erreurs détectées.
 5. Créer un commit Git pour le prompt.
-6. Vérifier que les modifications de la tâche sont bien enregistrées, puis pousser le commit vers GitHub sur la branche courante.
+6. Vérifier que les modifications de la tâche sont bien enregistrées, puis pousser le commit vers GitHub sur `main`.
 7. Vérifier que la branche distante contient le commit et fournir son hash et le résultat du push dans le rapport final.
 
 ### Rapport final obligatoire
