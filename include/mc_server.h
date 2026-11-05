@@ -75,6 +75,9 @@ int net_server_spawn_item_drop_with_motion(mc_server_t *server, double x, double
                                            const mc_slot_t *slot, int32_t pickup_delay_ticks);
 int net_server_sync_item_entities_to_conn(mc_server_t *server, mc_conn_t *conn);
 int net_server_resolve_item_entities_for_block(mc_server_t *server, int32_t x, int32_t y, int32_t z, int32_t state_id);
+/* Authoritative tick only; bounded live-player query, no world mutation. */
+bool net_server_hinged_intersects_players(mc_server_t *server,int x,int y,int z,int32_t state);
+int net_server_broadcast_hinged_sound(mc_server_t *server,mc_conn_t *actor,int x,int y,int z,int32_t old_state);
 void net_server_close_container_viewers(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z);
 int net_server_get_open_container_snapshot(mc_server_t *server, mc_container_kind_t kind, int32_t x, int32_t y, int32_t z,
                                            mc_container_instance_t *out);

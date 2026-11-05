@@ -1,5 +1,6 @@
 #include "mc_block_neighbors.h"
 #include "mc_block_state.h"
+#include "mc_hinged_blocks.h"
 #include <math.h>
 #include <string.h>
 
@@ -26,7 +27,7 @@ static bool same_half(int32_t a, int32_t b) {
 int32_t mc_block_placement_in_water(int32_t state, int level) {
     /* StairBlock tests Fluids.WATER, excluding FLOWING_WATER. Other families
      * retain their existing placement policy for this stair-only change. */
-    return mc_block_state_with_property(state, "waterlogged", mc_stairs_is_state(state) && level != 0 ? "false" : "true");
+    return mc_block_state_with_property(state, "waterlogged", (mc_stairs_is_state(state) || (mc_hinged_family(state) && mc_hinged_family(state)->kind==2)) && level != 0 ? "false" : "true");
 }
 int32_t mc_stairs_placement(int32_t state, float yaw, int32_t face, float hit_y) {
     if (!mc_stairs_is_state(state) || !isfinite(yaw) || !isfinite(hit_y) || face < 0 || face > 5) return -1;

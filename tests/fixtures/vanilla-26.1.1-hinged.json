@@ -1,0 +1,7117 @@
+{
+  "version": "26.1.1",
+  "protocol": 775,
+  "data_version": 4788,
+  "official_jar_sha256": "3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081",
+  "blocks_report_sha256": "c4f6aafb57a085df217fcb93533de7c8baa5711ff6eecad07563b28813713cc0",
+  "description": "Authoritative official server observations, two real protocol clients; equality with GoatCore tested",
+  "status": "passed",
+  "cases": [
+    {
+      "case": "family-place-oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "family-use-oak_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5680
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5672
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-oak_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-iron_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 6824
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 6816
+        }
+      ]
+    },
+    {
+      "case": "family-use-iron_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 6824
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 6816
+        }
+      ]
+    },
+    {
+      "case": "family-use-iron_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 6824
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:iron_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 6816
+        }
+      ]
+    },
+    {
+      "case": "creative-destroy-iron_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "family-use-oak_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7125
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-oak_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-spruce_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7193
+        }
+      ]
+    },
+    {
+      "case": "family-use-spruce_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7189
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-spruce_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7193
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-spruce_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-birch_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7257
+        }
+      ]
+    },
+    {
+      "case": "family-use-birch_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7253
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-birch_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7257
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-birch_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-jungle_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7321
+        }
+      ]
+    },
+    {
+      "case": "family-use-jungle_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7317
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-jungle_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7321
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-jungle_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-acacia_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7385
+        }
+      ]
+    },
+    {
+      "case": "family-use-acacia_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7381
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-acacia_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7385
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-acacia_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-cherry_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7449
+        }
+      ]
+    },
+    {
+      "case": "family-use-cherry_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7445
+        }
+      ],
+      "observer_sound": {
+        "id": 338,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-cherry_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7449
+        }
+      ],
+      "observer_sound": {
+        "id": 337,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-cherry_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-dark_oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7513
+        }
+      ]
+    },
+    {
+      "case": "family-use-dark_oak_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7509
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-dark_oak_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7513
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-dark_oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-pale_oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7577
+        }
+      ]
+    },
+    {
+      "case": "family-use-pale_oak_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7573
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-pale_oak_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7577
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-pale_oak_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-mangrove_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7641
+        }
+      ]
+    },
+    {
+      "case": "family-use-mangrove_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7637
+        }
+      ],
+      "observer_sound": {
+        "id": 1838,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-mangrove_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7641
+        }
+      ],
+      "observer_sound": {
+        "id": 1837,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-mangrove_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-bamboo_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7705
+        }
+      ]
+    },
+    {
+      "case": "family-use-bamboo_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7701
+        }
+      ],
+      "observer_sound": {
+        "id": 133,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-bamboo_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7705
+        }
+      ],
+      "observer_sound": {
+        "id": 132,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-bamboo_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-iron_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 12582
+        }
+      ]
+    },
+    {
+      "case": "family-use-iron_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 12582
+        }
+      ]
+    },
+    {
+      "case": "family-use-iron_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 12582
+        }
+      ]
+    },
+    {
+      "case": "creative-destroy-iron_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-spruce_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14087
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14079
+        }
+      ]
+    },
+    {
+      "case": "family-use-spruce_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14085
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14077
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-spruce_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14087
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:spruce_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14079
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-spruce_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-birch_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14151
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14143
+        }
+      ]
+    },
+    {
+      "case": "family-use-birch_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14149
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14141
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-birch_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14151
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:birch_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14143
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-birch_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-jungle_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14215
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14207
+        }
+      ]
+    },
+    {
+      "case": "family-use-jungle_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14213
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14205
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-jungle_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14215
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:jungle_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14207
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-jungle_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-acacia_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14279
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14271
+        }
+      ]
+    },
+    {
+      "case": "family-use-acacia_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14277
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14269
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-acacia_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14279
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:acacia_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14271
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-acacia_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-cherry_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14343
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14335
+        }
+      ]
+    },
+    {
+      "case": "family-use-cherry_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14341
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14333
+        }
+      ],
+      "observer_sound": {
+        "id": 336,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-cherry_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14343
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:cherry_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14335
+        }
+      ],
+      "observer_sound": {
+        "id": 335,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-cherry_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-dark_oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14407
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14399
+        }
+      ]
+    },
+    {
+      "case": "family-use-dark_oak_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14405
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14397
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-dark_oak_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14407
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:dark_oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14399
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-dark_oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-pale_oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14471
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14463
+        }
+      ]
+    },
+    {
+      "case": "family-use-pale_oak_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14469
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14461
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-pale_oak_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14471
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:pale_oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14463
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-pale_oak_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-mangrove_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14535
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14527
+        }
+      ]
+    },
+    {
+      "case": "family-use-mangrove_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14533
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14525
+        }
+      ],
+      "observer_sound": {
+        "id": 1836,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-mangrove_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14535
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:mangrove_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14527
+        }
+      ],
+      "observer_sound": {
+        "id": 1835,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-mangrove_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-bamboo_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14599
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14591
+        }
+      ]
+    },
+    {
+      "case": "family-use-bamboo_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 14597
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 14589
+        }
+      ],
+      "observer_sound": {
+        "id": 131,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-bamboo_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 14599
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:bamboo_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 14591
+        }
+      ],
+      "observer_sound": {
+        "id": 130,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-bamboo_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-crimson_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 21129
+        }
+      ]
+    },
+    {
+      "case": "family-use-crimson_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 21125
+        }
+      ],
+      "observer_sound": {
+        "id": 1104,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-crimson_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 21129
+        }
+      ],
+      "observer_sound": {
+        "id": 1103,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-crimson_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-warped_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 21193
+        }
+      ]
+    },
+    {
+      "case": "family-use-warped_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 21189
+        }
+      ],
+      "observer_sound": {
+        "id": 1104,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-warped_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 21193
+        }
+      ],
+      "observer_sound": {
+        "id": 1103,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-warped_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-crimson_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 21541
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 21533
+        }
+      ]
+    },
+    {
+      "case": "family-use-crimson_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 21539
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 21531
+        }
+      ],
+      "observer_sound": {
+        "id": 1102,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-crimson_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 21541
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:crimson_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 21533
+        }
+      ],
+      "observer_sound": {
+        "id": 1101,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-crimson_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-warped_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 21605
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 21597
+        }
+      ]
+    },
+    {
+      "case": "family-use-warped_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 21603
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 21595
+        }
+      ],
+      "observer_sound": {
+        "id": 1102,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-warped_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 21605
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:warped_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 21597
+        }
+      ],
+      "observer_sound": {
+        "id": 1101,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-warped_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26050
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26042
+        }
+      ]
+    },
+    {
+      "case": "family-use-copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26048
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26040
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26050
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26042
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-exposed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26114
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26106
+        }
+      ]
+    },
+    {
+      "case": "family-use-exposed_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26112
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26104
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-exposed_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26114
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:exposed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26106
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-exposed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26178
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26170
+        }
+      ]
+    },
+    {
+      "case": "family-use-oxidized_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26176
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26168
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-oxidized_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26178
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26170
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-weathered_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26242
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26234
+        }
+      ]
+    },
+    {
+      "case": "family-use-weathered_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26240
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26232
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-weathered_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26242
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:weathered_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26234
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-weathered_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26306
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26298
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26304
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26296
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26306
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26298
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_exposed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26370
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26362
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_exposed_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26368
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26360
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_exposed_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26370
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26362
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_exposed_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26434
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26426
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_oxidized_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26432
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26424
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_oxidized_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26434
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26426
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_weathered_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26498
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26490
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_weathered_copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26496
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26488
+        }
+      ],
+      "observer_sound": {
+        "id": 410,
+        "source": 4,
+        "position": [
+          -124,
+          524,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_weathered_copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26498
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26490
+        }
+      ],
+      "observer_sound": {
+        "id": 409,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_weathered_copper_door",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26550
+        }
+      ]
+    },
+    {
+      "case": "family-use-copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26546
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26550
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-exposed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26614
+        }
+      ]
+    },
+    {
+      "case": "family-use-exposed_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26610
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-exposed_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:exposed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26614
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-exposed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-oxidized_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26678
+        }
+      ]
+    },
+    {
+      "case": "family-use-oxidized_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26674
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-oxidized_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oxidized_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26678
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-oxidized_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-weathered_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26742
+        }
+      ]
+    },
+    {
+      "case": "family-use-weathered_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26738
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-weathered_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:weathered_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26742
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-weathered_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26806
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26802
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26806
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_exposed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26870
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_exposed_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26866
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_exposed_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_exposed_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26870
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_exposed_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_oxidized_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26934
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_oxidized_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26930
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_oxidized_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_oxidized_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26934
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_oxidized_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "family-place-waxed_weathered_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26998
+        }
+      ]
+    },
+    {
+      "case": "family-use-waxed_weathered_copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26994
+        }
+      ],
+      "observer_sound": {
+        "id": 441,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "family-use-waxed_weathered_copper_trapdoor-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:waxed_weathered_copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26998
+        }
+      ],
+      "observer_sound": {
+        "id": 440,
+        "source": 4,
+        "position": [
+          -124,
+          516,
+          132
+        ],
+        "volume": 1.0,
+        "pitch_in_range": true
+      }
+    },
+    {
+      "case": "creative-destroy-waxed_weathered_copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-0-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-0-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5664
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5656
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-0-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-0-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-0-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5670
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5662
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-0-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=true,powered=false]",
+          "state_id": 5668
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=true,powered=false]",
+          "state_id": 5660
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-0-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5670
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5662
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0--1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0--1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0--1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5670
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5662
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0--1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5670
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5662
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0-1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5670
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5662
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0-1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0-1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-0-1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5658
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-1-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-1-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5712
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5704
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-1-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-1-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-1-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5718
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5710
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-1-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=true,powered=false]",
+          "state_id": 5716
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=true,powered=false]",
+          "state_id": 5708
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-1-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5718
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5710
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1--1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1--1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1--1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5718
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5710
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1--1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5718
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5710
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1-1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5718
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5710
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1-1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1-1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-1-1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5706
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-2-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5686
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5678
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-2-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=true,powered=false]",
+          "state_id": 5684
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=true,powered=false]",
+          "state_id": 5676
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-2-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5686
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5678
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-2-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-2-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-2-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5680
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5672
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-2-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2--1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2--1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2--1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5686
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5678
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2--1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5686
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5678
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2-1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5686
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5678
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2-1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2-1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-2-1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-3-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5702
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5694
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-3-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=true,powered=false]",
+          "state_id": 5700
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=true,powered=false]",
+          "state_id": 5692
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-3-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5702
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5694
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-3-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-hit-3-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-3-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5696
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5688
+        }
+      ]
+    },
+    {
+      "case": "hinge-use-3-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3--1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3--1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3--1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5702
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5694
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3--1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5702
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5694
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3-1-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=right,open=false,powered=false]",
+          "state_id": 5702
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=right,open=false,powered=false]",
+          "state_id": 5694
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3-1-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3-1-door-closed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "hinge-neighbor-3-1-door-open",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5690
+        }
+      ]
+    },
+    {
+      "case": "yaw--135.01",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        }
+      ]
+    },
+    {
+      "case": "yaw--135.0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        }
+      ]
+    },
+    {
+      "case": "yaw--134.99",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        }
+      ]
+    },
+    {
+      "case": "yaw--45.01",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5714
+        }
+      ]
+    },
+    {
+      "case": "yaw--45.0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        }
+      ]
+    },
+    {
+      "case": "yaw--44.99",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        }
+      ]
+    },
+    {
+      "case": "yaw-44.99",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        }
+      ]
+    },
+    {
+      "case": "yaw-45.0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        }
+      ]
+    },
+    {
+      "case": "yaw-45.01",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        }
+      ]
+    },
+    {
+      "case": "yaw-134.99",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5698
+        }
+      ]
+    },
+    {
+      "case": "yaw-135.0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        }
+      ]
+    },
+    {
+      "case": "yaw-135.01",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5666
+        }
+      ]
+    },
+    {
+      "case": "door-support-air",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "door-support-stone",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "door-support-oak_slab[type=bottom,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "door-support-oak_slab[type=top,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "door-support-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "door-support-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "trap-face-0-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-face-0-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-face-0-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-face-1-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-1-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-1-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-2-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-2-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7125
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-2-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-2-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-face-2-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-2-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+          "state_id": 7117
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-2-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-face-3-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7145
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-3-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7141
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-3-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7145
+        }
+      ]
+    },
+    {
+      "case": "trap-face-3-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7145
+        }
+      ]
+    },
+    {
+      "case": "trap-face-3-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7137
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-3-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=top,open=true,powered=false,waterlogged=false]",
+          "state_id": 7133
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-3-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=south,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7137
+        }
+      ]
+    },
+    {
+      "case": "trap-face-4-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7161
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-4-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7157
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-4-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7161
+        }
+      ]
+    },
+    {
+      "case": "trap-face-4-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7161
+        }
+      ]
+    },
+    {
+      "case": "trap-face-4-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7153
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-4-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=top,open=true,powered=false,waterlogged=false]",
+          "state_id": 7149
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-4-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=west,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7153
+        }
+      ]
+    },
+    {
+      "case": "trap-face-5-0.25",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7177
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-5-0.25-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 7173
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-5-0.25-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7177
+        }
+      ]
+    },
+    {
+      "case": "trap-face-5-0.5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7177
+        }
+      ]
+    },
+    {
+      "case": "trap-face-5-0.75",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7169
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-5-0.75-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=top,open=true,powered=false,waterlogged=false]",
+          "state_id": 7165
+        }
+      ]
+    },
+    {
+      "case": "trap-face-use-5-0.75-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=east,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7169
+        }
+      ]
+    },
+    {
+      "case": "trap-replace-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-replace-2",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-replace-3",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-replace-4",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-replace-5",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+          "state_id": 7121
+        }
+      ]
+    },
+    {
+      "case": "trap-supported",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "trap-support-removed",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "deny-upper-occupied",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:stone",
+          "state_id": 1
+        }
+      ]
+    },
+    {
+      "case": "deny-self-collision",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "deny-observer-collision",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "upper-body-overlap",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "world-top-318",
+      "states": [
+        {
+          "point": [
+            -16,
+            318,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        }
+      ]
+    },
+    {
+      "case": "world-top-319",
+      "states": [
+        {
+          "point": [
+            -16,
+            319,
+            16
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "survival-use-holding-block",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5680
+        },
+        {
+          "point": [
+            -16,
+            65,
+            16
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5672
+        }
+      ]
+    },
+    {
+      "case": "drop-placed-oak_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            48
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            48
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-oak_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            48
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            48
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-oak_door-0",
+      "item": 781,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-oak_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            52
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            52
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-oak_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            52
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            52
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-oak_door-1",
+      "item": 781,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-iron_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            56
+          ],
+          "state": "minecraft:iron_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 6824
+        },
+        {
+          "point": [
+            -16,
+            65,
+            56
+          ],
+          "state": "minecraft:iron_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 6816
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-iron_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            56
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            56
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-iron_door-0",
+      "item": 780,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-iron_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            60
+          ],
+          "state": "minecraft:iron_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 6824
+        },
+        {
+          "point": [
+            -16,
+            65,
+            60
+          ],
+          "state": "minecraft:iron_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 6816
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-iron_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            60
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            60
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-iron_door-1",
+      "item": 780,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            64
+          ],
+          "state": "minecraft:copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26050
+        },
+        {
+          "point": [
+            -16,
+            65,
+            64
+          ],
+          "state": "minecraft:copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26042
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-copper_door-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            64
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            64
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-copper_door-0",
+      "item": 793,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            68
+          ],
+          "state": "minecraft:copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26050
+        },
+        {
+          "point": [
+            -16,
+            65,
+            68
+          ],
+          "state": "minecraft:copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26042
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-copper_door-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            68
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            68
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-copper_door-1",
+      "item": 793,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-oak_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            72
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 7129
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-oak_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            72
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-oak_trapdoor-0",
+      "item": 802,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-iron_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            76
+          ],
+          "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 12582
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-iron_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            76
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-iron_trapdoor-0",
+      "item": 801,
+      "count": 1
+    },
+    {
+      "case": "drop-placed-copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            80
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26550
+        }
+      ]
+    },
+    {
+      "case": "survival-destroy-copper_trapdoor-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            80
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "drop-copper_trapdoor-0",
+      "item": 814,
+      "count": 1
+    },
+    {
+      "case": "door-before-support-break",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            96
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -16,
+            65,
+            96
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "door-after-support-break",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            96
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        },
+        {
+          "point": [
+            -16,
+            65,
+            96
+          ],
+          "state": "minecraft:air",
+          "state_id": 0
+        }
+      ]
+    },
+    {
+      "case": "trap-source-water",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=true]",
+          "state_id": 7128
+        }
+      ]
+    },
+    {
+      "case": "trap-water-use-0",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=true]",
+          "state_id": 7124
+        }
+      ]
+    },
+    {
+      "case": "trap-water-use-1",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=true]",
+          "state_id": 7128
+        }
+      ]
+    },
+    {
+      "case": "trap-water-destroy",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:water[level=0]",
+          "state_id": 86
+        }
+      ]
+    },
+    {
+      "case": "trap-water-replace",
+      "states": [
+        {
+          "point": [
+            -16,
+            64,
+            16
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=true]",
+          "state_id": 7128
+        }
+      ]
+    },
+    {
+      "case": "persist-place-oak_door",
+      "states": [
+        {
+          "point": [
+            -513,
+            64,
+            511
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 5682
+        },
+        {
+          "point": [
+            -513,
+            65,
+            511
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 5674
+        }
+      ]
+    },
+    {
+      "case": "persist-open-oak_door",
+      "states": [
+        {
+          "point": [
+            -513,
+            64,
+            511
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 5680
+        },
+        {
+          "point": [
+            -513,
+            65,
+            511
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 5672
+        }
+      ]
+    },
+    {
+      "case": "persist-place-copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -512,
+            64,
+            512
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 26550
+        }
+      ]
+    },
+    {
+      "case": "persist-open-copper_trapdoor",
+      "states": [
+        {
+          "point": [
+            -512,
+            64,
+            512
+          ],
+          "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]",
+          "state_id": 26546
+        }
+      ]
+    },
+    {
+      "case": "persist-place-waxed_oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            511,
+            64,
+            -513
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=false,powered=false]",
+          "state_id": 26434
+        },
+        {
+          "point": [
+            511,
+            65,
+            -513
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=false,powered=false]",
+          "state_id": 26426
+        }
+      ]
+    },
+    {
+      "case": "persist-open-waxed_oxidized_copper_door",
+      "states": [
+        {
+          "point": [
+            511,
+            64,
+            -513
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]",
+          "state_id": 26432
+        },
+        {
+          "point": [
+            511,
+            65,
+            -513
+          ],
+          "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]",
+          "state_id": 26424
+        }
+      ]
+    },
+    {
+      "case": "persist-place-iron_trapdoor",
+      "states": [
+        {
+          "point": [
+            512,
+            64,
+            -512
+          ],
+          "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+          "state_id": 12582
+        }
+      ]
+    }
+  ],
+  "saved": [
+    {
+      "point": [
+        -16,
+        64,
+        16
+      ],
+      "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=true]"
+    },
+    {
+      "point": [
+        -513,
+        64,
+        511
+      ],
+      "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]"
+    },
+    {
+      "point": [
+        -513,
+        65,
+        511
+      ],
+      "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]"
+    },
+    {
+      "point": [
+        -512,
+        64,
+        512
+      ],
+      "state": "minecraft:copper_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]"
+    },
+    {
+      "point": [
+        511,
+        64,
+        -513
+      ],
+      "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=lower,hinge=left,open=true,powered=false]"
+    },
+    {
+      "point": [
+        511,
+        65,
+        -513
+      ],
+      "state": "minecraft:waxed_oxidized_copper_door[facing=south,half=upper,hinge=left,open=true,powered=false]"
+    },
+    {
+      "point": [
+        512,
+        64,
+        -512
+      ],
+      "state": "minecraft:iron_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]"
+    }
+  ],
+  "families": 42,
+  "two_observers": true
+}

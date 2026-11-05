@@ -23,3 +23,17 @@ Pour l'authentification, seule une connexion réelle d'un client Java officiel
 peut valider le chemin positif `hasJoined` ; ne jamais fabriquer une session
 Mojang réussie pour déclarer le mode online fonctionnel. Rapporter ce qui a
 été testé, la référence utilisée et les écarts restants.
+
+## Sauvegarde GitHub après commit
+
+Après chaque commit, effectuer un push normal depuis le dépôt local vers
+le remote GitHub vérifié, sur la branche courante. Le propriétaire autorise ce
+push de façon permanente ; aucune nouvelle confirmation n’est nécessaire.
+Vérifier que le hash distant correspond au commit poussé et rapporter le résultat.
+Ne pas utiliser `--force`, changer de branche cible, fusionner ou réécrire
+l’historique pour résoudre un refus. En cas de rejet, conserver le commit local
+et expliquer le blocage. Cette règle n’autorise aucun déploiement ni aucune
+commande Git sur le serveur de test.
+
+Vérifier avant chaque commit l’auteur et le committer `Ofwood77`, avec l’adresse
+GitHub noreply définie dans `AGENTS.md`. Ne pas ajouter de co-auteur bot.

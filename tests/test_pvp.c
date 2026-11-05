@@ -58,6 +58,9 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     return NULL;
 }
 
+int net_server_broadcast_hinged_sound(mc_server_t *s,mc_conn_t *c,int x,int y,int z,int32_t state){(void)s;(void)c;(void)x;(void)y;(void)z;(void)state;return 0;}
+bool net_server_hinged_intersects_players(mc_server_t *s,int x,int y,int z,int32_t state){(void)s;(void)x;(void)y;(void)z;(void)state;return false;}
+
 mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {
     (void)server;
     (void)entity_id;

@@ -167,6 +167,8 @@ struct mc_conn {
     bool chunk_refresh_ping_pending;
     int32_t chunk_refresh_ping_id;
     int32_t block_ack_sequence;
+    int32_t last_hinged_sequence;
+    bool has_hinged_sequence;
 
     struct {
         int64_t *keys;

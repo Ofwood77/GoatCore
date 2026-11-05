@@ -51,6 +51,9 @@ mc_conn_t *net_server_find_conn_by_name(mc_server_t *server, const char *name) {
     return NULL;
 }
 
+int net_server_broadcast_hinged_sound(mc_server_t *s,mc_conn_t *c,int x,int y,int z,int32_t state){(void)s;(void)c;(void)x;(void)y;(void)z;(void)state;return 0;}
+bool net_server_hinged_intersects_players(mc_server_t *s,int x,int y,int z,int32_t state){(void)s;(void)x;(void)y;(void)z;(void)state;return false;}
+
 mc_conn_t *net_server_find_conn_by_entity_id(mc_server_t *server, int32_t entity_id) {
     (void)server;
     (void)entity_id;
@@ -1196,7 +1199,7 @@ int main(void) {
         return fail("setup oak_trapdoor placement slot");
     }
     if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 2, 90.0f, 0.0f, 0.5f, 0.75f, 0.5f) !=
-        mc_block_state_id("minecraft:oak_trapdoor[facing=east,half=top,open=false,powered=false,waterlogged=false]", -1)) {
+        mc_block_state_id("minecraft:oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]", -1)) {
         mc_world_destroy(w);
         return fail("placement oak_trapdoor facing and half");
     }
@@ -1207,8 +1210,8 @@ int main(void) {
         mc_world_destroy(w);
         return fail("setup oak_door placement slot");
     }
-    int32_t door_lower = mc_block_state_id("minecraft:oak_door[facing=east,half=lower,hinge=left,open=false,powered=false]", -1);
-    int32_t door_upper = mc_block_state_id("minecraft:oak_door[facing=east,half=upper,hinge=left,open=false,powered=false]", -1);
+    int32_t door_lower = mc_block_state_id("minecraft:oak_door[facing=west,half=lower,hinge=left,open=false,powered=false]", -1);
+    int32_t door_upper = mc_block_state_id("minecraft:oak_door[facing=west,half=upper,hinge=left,open=false,powered=false]", -1);
     if (proto_play_resolve_placement_state_ex(ids, &placement_slot, 1, 90.0f, 0.0f, 0.5f, 0.5f, 0.5f) != door_lower ||
         door_upper < 0) {
         mc_world_destroy(w);

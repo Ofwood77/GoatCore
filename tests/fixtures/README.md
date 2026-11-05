@@ -73,3 +73,27 @@ Les 192 cas d'escaliers sont comparés à une nouvelle instance officielle 26.1.
 Le seed de sept block entities réutilise une fixture officielle S3B/G1 identifiée ;
 il n'active pas de convertisseur dans le serveur. Voir la section G2 de
 `docs/vanilla-compatibility.md` pour les limites et le contrat de durabilité.
+
+# Portes et trappes Vanilla 26.1.1
+
+`vanilla-26.1.1-hinged-shapes.tsv` contient les lignes F (42 familles, interaction,
+item et sons) et H (2 688 volumes en seizièmes de bloc) de
+`tools/audit_hinged_blocks.java`. Le programme doit être compilé et exécuté avec
+le JAR **intérieur** officiel 26.1.1 et ses bibliothèques, Java 25. Il vérifie que
+chaque état a un seul volume et que sélection/collision sont identiques.
+
+La même sortie complète contient les lignes S des 29 873 états (collision pleine,
+face supérieure sturdy, remplaçabilité et signal source, avec EmptyBlockGetter).
+`python3 tools/gen_hinged_data.py /copies/audit.tsv src/generated/generated_hinged_data.h`
+régénère les tables C. Les flags ne constituent pas un moteur général de physique
+contextuelle. Les empreintes et limites sont consignées dans la documentation du
+lot et le manifeste de validation ; aucune donnée de monde humain n'est incluse.
+
+`vanilla-26.1.1-hinged.json` conserve les 335 scénarios officiels (499 états,
+42 familles), sons déterministes pertinents, inventaires/drops couverts et sept
+états retrouvés après deux redémarrages. Le manifeste associé
+`vanilla-26.1.1-hinged-validation.json` décrit les trois backends, les sanitizers,
+les quinze charges Xeon et la course de générations S4. Les mêmes actions sont
+exécutées sur deux clients de protocole 775 puis vérifiées par requête autoritaire.
+Les mondes et traces volumineuses restent hors Git. Les limites Redstone, fluides,
+physique générale et interactions non qualifiées figurent dans la documentation.

@@ -17,6 +17,7 @@ typedef struct {
     int32_t z;
     int32_t state_id;
 } mc_block_update_t;
+typedef mc_block_update_t mc_environment_drop_t; /* state_id is the removed lower door */
 
 /* Cached runtime IDs for the handful of blocks that world generation and
  * gameplay touch constantly. */
@@ -128,6 +129,10 @@ int mc_world_tick_furnaces_profiled(mc_world_t *w, mc_world_container_open_fn is
 size_t mc_world_evict_outside(mc_world_t *w, const int64_t *keep_keys, size_t keep_len, size_t budget);
 
 const mc_block_update_t *mc_world_updates(const mc_world_t *w, size_t *out_len);
+const mc_environment_drop_t *mc_world_environment_drops(const mc_world_t *w,size_t *len);
+void mc_world_consume_environment_drops(mc_world_t *w,size_t count);
+/* READY, same column, allocation-atomic lower/upper mutation on the tick. */
+int mc_world_set_block_pair(mc_world_t *w,int32_t x,int32_t y,int32_t z,int32_t lower,int32_t upper);
 void mc_world_clear_updates(mc_world_t *w);
 
 #endif /* MC_WORLD_H */

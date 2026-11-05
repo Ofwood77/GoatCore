@@ -13,6 +13,8 @@
  */
 #include "mc_world.h"
 #include "mc_block_neighbors.h"
+#include "mc_hinged_blocks.h"
+#include "mc_block_state.h"
 
 #include "generated_registries.h"
 #include "mc_chunk_store.h"
@@ -122,6 +124,8 @@ struct mc_world {
     mc_block_update_t *updates;
     size_t updates_len;
     size_t updates_cap;
+    mc_environment_drop_t *environment_drops;
+    size_t environment_drops_len,environment_drops_cap;
 
     int worker_count;
     pthread_t workers[MAX_WORKERS];
@@ -1174,6 +1178,7 @@ int mc_world_destroy_checked(mc_world_t *w) {
     chunk_map_free(&w->chunks);
     free(w->chunk_list);
     free(w->updates);
+    free(w->environment_drops);
     free(w->jobs);
     mc_be_store_destroy(&w->block_entities);
     if(mc_storage_close_checked(w->storage)!=0)storage_rc=-1;
@@ -1291,6 +1296,57 @@ static int reconcile_local(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
         if (reconcile_block(w, x + directions[i][0], y, z + directions[i][1]) != 0) return -1;
     return 0;
 }
+static int reconcile_door_neighbors(mc_world_t *w,int32_t x,int32_t y,int32_t z){
+    for(int dy=-1;dy<=1;dy+=2){
+        int32_t state,next;bool drop=false;
+        if(neighbor_read(w,x,y+dy,z,&state)||!mc_door_is_state(state))continue;
+        int rc=mc_door_neighbor_change(neighbor_read,w,x,y+dy,z,state,y,&next,&drop);
+        if(rc==1)continue;
+        if(rc)return -1;
+        if(next==state||!mc_world_storage_action_allowed(w,x,y+dy,z))continue;
+        /* Reserve a complete vertical cascade before recursion. Reserving only
+         * one slot here lets nested removals consume it before we unwind. */
+        if(drop&&w->environment_drops_cap-w->environment_drops_len<MC_WORLD_HEIGHT){
+            if(w->environment_drops_len>SIZE_MAX-MC_WORLD_HEIGHT)return -1;
+            size_t cap=w->environment_drops_len+MC_WORLD_HEIGHT;
+            if(cap>SIZE_MAX/sizeof(*w->environment_drops))return -1;
+            void *p=realloc(w->environment_drops,cap*sizeof(*w->environment_drops));if(!p)return -1;
+            w->environment_drops=p;w->environment_drops_cap=cap;
+        }
+        if(mc_world_set_block(w,x,y+dy,z,next))return -1;
+        if(drop)w->environment_drops[w->environment_drops_len++]=(mc_environment_drop_t){x,y+dy,z,state};
+    }
+    return 0;
+}
+const mc_environment_drop_t *mc_world_environment_drops(const mc_world_t *w,size_t *len){
+    *len=w?w->environment_drops_len:0;return w?w->environment_drops:NULL;
+}
+void mc_world_consume_environment_drops(mc_world_t *w,size_t count){
+    if(!w||count>w->environment_drops_len)return;
+    w->environment_drops_len-=count;
+    if(w->environment_drops_len)memmove(w->environment_drops,w->environment_drops+count,w->environment_drops_len*sizeof(*w->environment_drops));
+}
+int mc_world_set_block_pair(mc_world_t *w,int32_t x,int32_t y,int32_t z,int32_t lower,int32_t upper){
+    if(!w||y< -64||y>=319||!mc_block_state_desc(lower)||!mc_block_state_desc(upper)||
+       !mc_world_storage_action_allowed(w,x,y,z)||!mc_world_storage_action_allowed(w,x,y+1,z))return -1;
+    if(mc_storage_is_native(w->storage)&&(mc_native_state_sensitive((uint32_t)lower)||mc_native_state_sensitive((uint32_t)upper)))return -1;
+    int32_t cx,cz;int lx,lz;if(coords_to_chunk(x,z,&cx,&cz,&lx,&lz))return -1;
+    mc_chunk_entry_t *e=chunk_map_get(&w->chunks,chunk_key(cx,cz));
+    if(!e||e->state!=CHUNK_SLOT_READY||!e->chunk){errno=EAGAIN;return -1;}
+    if(w->updates_cap-w->updates_len<2){
+        size_t cap=w->updates_cap?w->updates_cap*2:256;
+        if(cap<w->updates_len+2||cap>SIZE_MAX/sizeof(*w->updates))return -1;
+        void *p=realloc(w->updates,cap*sizeof(*w->updates));if(!p)return -1;
+        w->updates=p;w->updates_cap=cap;
+    }
+    if(mc_chunk_set_column_pair(e->chunk,lx,y,lz,(uint32_t)lower,(uint32_t)upper))return -1;
+    (void)updates_push(w,(mc_block_update_t){x,y,z,lower});
+    (void)updates_push(w,(mc_block_update_t){x,y+1,z,upper});
+    /* Both halves already exist before any neighbor can observe them. */
+    if(reconcile_door_neighbors(w,x,y,z)||reconcile_door_neighbors(w,x,y+1,z))
+        log_error("door neighbor reconciliation failed after paired mutation");
+    return 0;
+}
 /* Reconcile loaded stairs when either side of a chunk boundary becomes READY.
  * Palette filtering avoids scanning flat-world sections that have no stairs. */
 static void reconcile_loaded_stairs(mc_world_t *w, mc_chunk_t *chunk) {
@@ -1384,7 +1440,8 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
                      mc_block_state_key(state_id) ? mc_block_state_key(state_id) : "(null)");
         }
         if (updates_push(w, (mc_block_update_t){x, y, z, state_id}) != 0) return -1;
-        return mc_stairs_is_state(old) || mc_stairs_is_state(state_id) ? reconcile_local(w, x, y, z) : 0;
+        if((mc_stairs_is_state(old)||mc_stairs_is_state(state_id))&&reconcile_local(w,x,y,z))return -1;
+        return reconcile_door_neighbors(w,x,y,z);
     }
 
     if (!e) {

@@ -218,7 +218,7 @@ Ne pas ajouter de multithreading sans modèle de propriété et de synchronisati
 - Codex réalise les modifications du code.
 - ChatGPT fournit les analyses, plans et instructions de développement.
 - Préserver les modifications locales existantes.
-- Ne pas effectuer de push ou de merge sans instruction explicite.
+- Après chaque commit, effectuer un push normal vers GitHub sur la branche courante (autorisation permanente du propriétaire). Ne pas effectuer de merge sans instruction explicite.
 - Ne pas créer de .venv inutile.
 - Tester les fonctionnalités avant validation.
 - Privilégier les tests C et Minecraft.
@@ -270,7 +270,7 @@ L'objectif est de pouvoir revenir facilement à une version précédente en cas 
 - Si les tests échouent et que la correction n'est pas possible, signaler clairement l'échec. Un commit de sauvegarde peut être créé, mais il doit être explicitement identifié comme non validé.
 - Utiliser des messages de commit explicites et descriptifs.
 - Ne jamais utiliser `git reset --hard` ou `git clean -fd` sans autorisation explicite.
-- Ne jamais effectuer de `git push` ou de merge sans instruction explicite.
+- Après chaque commit, effectuer un `git push` normal vers le remote GitHub vérifié et la branche courante. Cette autorisation permanente ne couvre ni `--force`, ni un merge, ni une réécriture d’historique.
 - Ne jamais modifier l'historique Git existant sans autorisation.
 
 ### Workflow obligatoire
@@ -280,8 +280,8 @@ L'objectif est de pouvoir revenir facilement à une version précédente en cas 
 3. Déployer et tester sur le serveur distant si nécessaire.
 4. Corriger les erreurs détectées.
 5. Créer un commit Git pour le prompt.
-6. Vérifier que les modifications de la tâche sont bien enregistrées.
-7. Fournir le hash du commit dans le rapport final.
+6. Vérifier que les modifications de la tâche sont bien enregistrées, puis pousser le commit vers GitHub sur la branche courante.
+7. Vérifier que la branche distante contient le commit et fournir son hash et le résultat du push dans le rapport final.
 
 ### Rapport final obligatoire
 
@@ -295,3 +295,13 @@ L'objectif est de pouvoir revenir facilement à une version précédente en cas 
 **Ne jamais terminer une tâche de développement avec des modifications de la tâche non committées, sauf impossibilité technique explicitement signalée.**
 
 L'objectif est de conserver un historique Git propre, traçable et permettant de revenir rapidement à n'importe quelle étape du développement.
+
+### Identité Git obligatoire
+
+Avant chaque commit, vérifier avec `git var GIT_AUTHOR_IDENT` et
+`git var GIT_COMMITTER_IDENT` que l’auteur et le committer sont `Ofwood77`,
+avec `124205937+Ofwood77@users.noreply.github.com` (compte GitHub Ofwood77 vérifié).
+Utiliser la configuration locale du dépôt ; ne pas modifier l’identité globale
+des autres projets. Ne pas ajouter de signature ou de mention `Co-authored-by`
+pour Codex, Aider ou un autre bot. La correction des attributions déjà publiées
+nécessite un audit et une autorisation explicite de réécriture/push forcé.

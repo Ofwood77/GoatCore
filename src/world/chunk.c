@@ -89,6 +89,31 @@ int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_i
     return rc;
 }
 
+int mc_chunk_set_column_pair(mc_chunk_t *chunk,int x,int y,int z,uint32_t lower,uint32_t upper) {
+    if(!chunk||x<0||x>=16||z<0||z>=16||y<MC_WORLD_MIN_Y||y>=MC_WORLD_MIN_Y+MC_WORLD_HEIGHT-1)return -1;
+    int first=chunk_section_index_from_y(y),last=chunk_section_index_from_y(y+1);
+    mc_chunk_t prepared=*chunk;
+    prepared.network_chunkdata=NULL;prepared.network_chunkdata_len=0;
+    prepared.network_heightmaps=NULL;prepared.network_heightmaps_len=0;
+    for(int i=first;i<=last;i++)prepared.sections[i].words=NULL;
+    for(int i=first;i<=last;i++){
+        size_t bytes=chunk->sections[i].word_count*sizeof(uint64_t);
+        if(bytes){prepared.sections[i].words=malloc(bytes);if(!prepared.sections[i].words)goto bad;
+            memcpy(prepared.sections[i].words,chunk->sections[i].words,bytes);}
+    }
+    if(mc_chunk_set_block(&prepared,x,y,z,lower)||mc_chunk_set_block(&prepared,x,y+1,z,upper))goto bad;
+    for(int i=first;i<=last;i++){free(chunk->sections[i].words);chunk->sections[i]=prepared.sections[i];}
+    if(chunk->revision!=prepared.revision){
+        free(chunk->network_chunkdata);chunk->network_chunkdata=NULL;chunk->network_chunkdata_len=0;
+        free(chunk->network_heightmaps);chunk->network_heightmaps=NULL;chunk->network_heightmaps_len=0;
+        chunk->revision=prepared.revision;chunk->save_generation=prepared.save_generation;chunk->dirty=true;
+    }
+    return 0;
+bad:
+    for(int i=first;i<=last;i++)free(prepared.sections[i].words);
+    return -1;
+}
+
 int mc_chunk_mark_dirty(mc_chunk_t *chunk) {
     if (!chunk || chunk->save_generation == UINT64_MAX) {
         errno = chunk ? EOVERFLOW : EINVAL;

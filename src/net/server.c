@@ -16,6 +16,8 @@
 #include "mc_util.h"
 #include "generated_minecraft_ids.h"
 #include "generated_registries.h"
+#include "mc_block_drops.h"
+#include "mc_hinged_blocks.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -146,6 +148,7 @@ struct mc_server {
     int64_t fast_pass_us;
     size_t fast_pass_tasks;
     mc_packet_perf_t play_packet_perf[128]; /* tick-thread only */
+    uint64_t block_sound_rng; /* tick-thread only */
     atomic_int difficulty;
     mc_world_t *world;
     mc_item_entity_t *item_entities;
@@ -1693,8 +1696,55 @@ static int process_task(mc_server_t *s, mc_task_t *task, int64_t now_ms_value) {
     return rc;
 }
 
+int net_server_broadcast_hinged_sound(mc_server_t *s,mc_conn_t *actor,int x,int y,int z,int32_t old_state){
+    const mc_hinged_family_t *family=mc_hinged_family(old_state);if(!s||!family)return -1;
+    bool opening=!mc_hinged_property(old_state,"open","true");
+    uint64_t seed=s->block_sound_rng?s->block_sound_rng:((uint64_t)mc_now_us()|1);
+    seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;s->block_sound_rng=seed;
+    float pitch=.9f+.1f*(float)(seed>>40)/16777216.0f;
+    uint8_t data[48];size_t at=0;
+    if(w_varint(data,sizeof(data),&at,(opening?family->open_sound:family->close_sound)+1)||
+       w_varint(data,sizeof(data),&at,4)||w_i32(data,sizeof(data),&at,x*8+4)||
+       w_i32(data,sizeof(data),&at,y*8+4)||w_i32(data,sizeof(data),&at,z*8+4)||
+       w_f32(data,sizeof(data),&at,1)||w_f32(data,sizeof(data),&at,pitch)||w_u64(data,sizeof(data),&at,seed))return -1;
+    mc_conn_snapshot_t snapshot={0};if(server_snapshot_conns(s,&snapshot))return -1;
+    for(size_t i=0;i<snapshot.len;i++){
+        mc_conn_t *c=snapshot.items[i];
+        if(c==actor||atomic_load(&c->state)!=MC_STATE_PLAY||!c->play_ready||atomic_load(&c->closing))continue;
+        double dx=c->x-(x+.5),dy=c->y-(y+.5),dz=c->z-(z+.5);
+        if(dx*dx+dy*dy+dz*dz<256&&conn_write_packet(c,MC_PKT_PLAY_CLIENTBOUND_SOUND,data,at,-1))conn_close(c);
+    }
+    conn_snapshot_clear(&snapshot);return 0;
+}
+bool net_server_hinged_intersects_players(mc_server_t *s,int x,int y,int z,int32_t state){
+    if(!s)return false;
+    bool intersects=false;
+    pthread_mutex_lock(&s->conns_lock);
+    for(mc_conn_t *c=s->conns;c;c=c->next){
+        if(atomic_load(&c->state)!=MC_STATE_PLAY||!c->play_ready||!c->has_pos||c->dead||c->gamemode==3)continue;
+        double min[]={c->x-.3-x,c->y-y,c->z-.3-z};
+        double max[]={c->x+.3-x,c->y+(c->sneaking?1.5:1.8)-y,c->z+.3-z};
+        if(mc_hinged_intersects(state,min,max)){intersects=true;break;}
+    }
+    pthread_mutex_unlock(&s->conns_lock);return intersects;
+}
+static void server_spawn_environment_drops(mc_server_t *s){
+    size_t len=0,done=0;
+    const mc_environment_drop_t *events=mc_world_environment_drops(s->world,&len);
+    for(;done<len;done++){
+        const mc_environment_drop_t *e=&events[done];mc_block_drop_t drop;
+        if(!mc_block_drop_resolve_default(e->state_id,true,e->x,e->y,e->z,now_ms(),&drop))continue;
+        mc_slot_t slot={0};
+        if(mc_slot_set_simple(&slot,drop.item_id,drop.count))break;
+        int rc=net_server_spawn_item_drop_with_motion(s,e->x+0.5,e->y+0.5,e->z+0.5,0,0,0,&slot,10);
+        mc_slot_clear(&slot);
+        if(rc){log_error("environment door drop failed; retained for retry");break;}
+    }
+    mc_world_consume_environment_drops(s->world,done);
+}
 static size_t server_broadcast_pending_updates(mc_server_t *s, mc_conn_snapshot_t *snapshot, const char *phase) {
     if (!s || !s->world || !snapshot) return 0;
+    server_spawn_environment_drops(s);
 
     const mc_block_update_t *updates = NULL;
     size_t updates_len = 0;
@@ -2005,6 +2055,7 @@ static void *tick_thread_main(void *arg) {
             pthread_mutex_unlock(&s->conns_lock);
         }
 
+        if(s->world)server_spawn_environment_drops(s);
         const mc_block_update_t *updates = NULL;
         size_t updates_len = 0;
         if (s->world) {

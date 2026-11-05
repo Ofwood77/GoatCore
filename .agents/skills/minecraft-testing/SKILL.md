@@ -29,3 +29,17 @@ doit être signalé comme tel ; 1000 bots n'est pas une capacité démontrée.
 Pour l'authentification online, utiliser un vrai client Java officiel sur
 25588 avant toute promotion de 25565. Les tests négatifs automatiques ne
 prouvent pas une connexion positive ni les privilèges d'Ofwood_.
+
+## Sauvegarde GitHub après commit
+
+Après chaque commit, effectuer un push normal depuis le dépôt local vers
+le remote GitHub vérifié, sur la branche courante. Le propriétaire autorise ce
+push de façon permanente ; aucune nouvelle confirmation n’est nécessaire.
+Vérifier que le hash distant correspond au commit poussé et rapporter le résultat.
+Ne pas utiliser `--force`, changer de branche cible, fusionner ou réécrire
+l’historique pour résoudre un refus. En cas de rejet, conserver le commit local
+et expliquer le blocage. Cette règle n’autorise aucun déploiement ni aucune
+commande Git sur le serveur de test.
+
+Vérifier avant chaque commit l’auteur et le committer `Ofwood77`, avec l’adresse
+GitHub noreply définie dans `AGENTS.md`. Ne pas ajouter de co-auteur bot.

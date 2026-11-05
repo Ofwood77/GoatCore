@@ -1037,3 +1037,48 @@ archive native/SQLite → export MCA exact → deux ouvertures GoatCore et deux
 ouvertures Vanilla, avec vérification de tous les blocs sources et des BE.
 Les données globales sont copiées indépendamment et explicitement déclarées,
 pas converties par G1. Ne pas l'exécuter sur un monde personnel.
+
+## Portes et trappes — Phase 2A
+
+Exécuter sur le **serveur distant**, dans un export de sources isolé. Aucun des
+runners suivants ne doit cibler 25565/25587. Les mondes sont créés dans le nouveau
+répertoire de résultats ; une destination existante est refusée.
+
+```sh
+python3 tests/stress/run_block_checks.py --kind goatcore --suite hinged \
+  --server-binary ./mc_server --chunk-storage goatworld-sqlite-experimental \
+  --anvil-save-mode async --view-distance 2 --verify-restarts 2 \
+  --port 25589 --result-dir /stage/resultats/goatworld
+python3 tests/stress/run_block_checks.py --kind vanilla --suite hinged \
+  --java /installation/jdk-25/bin/java --vanilla-root /installation/vanilla-2611 \
+  --verify-restarts 2 --shutdown-timeout 180 \
+  --port 25590 --result-dir /stage/resultats/vanilla
+```
+
+Comparer exactement les tableaux `cases` et `saved` des deux `report-edit.json`.
+`--hinged-core-materials` conserve les six familles bois/fer/cuivre pour les
+non-régressions des backends secondaires ; sans cette option, les 42 familles
+extraites du JAR sont testées. Les volumes de 2 688 états sont aussi comparés
+exhaustivement par `test_hinged_blocks` sans serveur Minecraft.
+
+```sh
+make mc_server_g2_fault
+python3 tests/stress/check_hinged_async.py --server ./mc_server \
+  --fault-server ./mc_server_g2_fault --template /copies/monde-goatworld-jetable \
+  --result-dir /stage/resultats/generation-race
+python3 tests/stress/profile_hinged.py --binary ./mc_server \
+  --template /copies/monde-goatworld-jetable --bots 1 2 10 25 50 \
+  --cycles 200 --repetitions 3 --warmup 2 --idle 2 \
+  --fsync-probe /stage/profile_fsync.so --write-trace --save-trace \
+  --result-dir /stage/resultats/charge
+```
+
+Le premier contrôle bloque uniquement le writer d'un **binaire de test** avant
+COMMIT A, ouvre les deux blocs, libère A et vérifie B après drainage et redémarrage.
+Le second mesure une charge à travail fixé : pose, ouverture, fermeture, casse,
+avec 50 ms de pause entre cycles. Les étapes de préparation, échauffement,
+inactivité, charge, sentinelles et arrêt restent distinctes. Les actions sont
+comptées dans les traces de réception et par états + ACK. Toutes les sauvegardes
+finales sont décodées indépendamment puis contrôlées dans une nouvelle instance.
+Ne pas faire tourner ces charges pendant les campagnes Vanilla fonctionnelles.
+Un ACK réseau n'est pas un accusé de durabilité disque.

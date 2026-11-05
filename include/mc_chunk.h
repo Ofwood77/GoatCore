@@ -45,6 +45,9 @@ int mc_chunk_init(mc_chunk_t *chunk, int32_t cx, int32_t cz, mc_global_state_id_
 void mc_chunk_destroy(mc_chunk_t *chunk);
 mc_global_state_id_t mc_chunk_get_block(const mc_chunk_t *chunk, int x, int y, int z);
 int mc_chunk_set_block(mc_chunk_t *chunk, int x, int y, int z, mc_global_state_id_t global_id);
+/* Tick-owned vertical pair. All palette allocations precede either mutation;
+ * persistence/inflight ownership is retained by the live chunk. */
+int mc_chunk_set_column_pair(mc_chunk_t *chunk,int x,int y,int z,uint32_t lower,uint32_t upper);
 /* Tick/private owner only. Independent sections/source NBT, no network cache or
  * live pointers. Fails before allocation if the explicit snapshot budget is too
  * small. Caller destroys out exactly once, including on later write failure. */

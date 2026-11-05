@@ -116,16 +116,17 @@ def run(args):
                     except ConnectionRefusedError:
                         if time.monotonic()>deadline:raise TimeoutError("server readiness")
                         time.sleep(.1)
-                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py", "complex":"test_complex_storage.py"}[args.suite]
+                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py", "complex":"test_complex_storage.py", "hinged":"test_hinged_placement.py"}[args.suite]
                 cmd=[sys.executable,str(ROOT/"tests/stress"/scenario),
                      "--port",str(args.port),"--snapshot",str(result/"snapshot.json")]
                 if args.kind=="vanilla":cmd.append("--vanilla")
                 if args.complex_dense and args.suite=="complex":cmd.append("--dense")
+                if args.hinged_core_materials and args.suite=="hinged":cmd.append("--core-materials")
                 if args.blocks_only and args.suite=="placement":cmd.append("--blocks-only")
                 if args.region_boundaries and args.suite=="placement":cmd.append("--region-boundaries")
                 if args.suite=="pickup":cmd.extend(["--drop-count",str(args.pickup_count)])
                 if phase!="edit":cmd.append("--verify")
-                test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=600)
+                test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=900 if args.suite=="hinged" else 600)
                 (result/f"test-{phase}.log").write_text(test.stdout+test.stderr)
                 if test.returncode:raise RuntimeError(f"{phase} checks failed; see {result}/test-{phase}.log")
                 report=json.loads(test.stdout.strip())
@@ -152,7 +153,7 @@ def run(args):
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind",choices=("goatcore","vanilla"),required=True)
-    parser.add_argument("--suite",choices=("stairs","placement","pickup","complex"),default="stairs")
+    parser.add_argument("--suite",choices=("stairs","placement","pickup","complex","hinged"),default="stairs")
     parser.add_argument("--port",type=int,required=True)
     parser.add_argument("--server-binary",type=Path,default=ROOT/"mc_server")
     parser.add_argument("--vanilla-root",type=Path,default=Path("/opt/goatcore/vanilla-2611"))
@@ -166,6 +167,7 @@ if __name__=="__main__":
     parser.add_argument("--level-type",default="minecraft:flat",choices=("minecraft:flat","minecraft:normal"))
     parser.add_argument("--level-seed",type=int,default=0)
     parser.add_argument("--complex-dense",action="store_true")
+    parser.add_argument("--hinged-core-materials",action="store_true",help="six material families for secondary storage regressions")
     parser.add_argument("--anvil-save-mode",choices=("immediate","batched","async"),default="immediate")
     parser.add_argument("--region-boundaries",action="store_true",help="placement suite: region boundary scenarios")
     parser.add_argument("--verify-only",action="store_true",help="verify a supplied saved snapshot without editing the copied world")

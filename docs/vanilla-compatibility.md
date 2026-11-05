@@ -6435,3 +6435,344 @@ générateur Python, pics tick+fast, garanties physiques du RAID, absence de tra
 chunks/joueurs/items) sont identifiées sans lancer un nouveau lot de stockage.
 **Le projet peut reprendre la phase 2A portes/trappes dans une mission distincte.**
 Cette fonctionnalité n'est pas commencée dans G2.
+
+# Phase 2A — Portes et trappes
+
+## Périmètre et référence
+
+Départ : `92dff9c7c55dddc392a52630855083425d67748c` (G2).
+Ce lot reprend le gameplay ; aucun codec, moteur SQLite, ordonnanceur S4,
+convertisseur ou mode de stockage par défaut n'est remplacé. La phase 2 reste ouverte.
+
+La référence est le serveur officiel **Java 26.1.1, protocole 775, DataVersion 4788**.
+Le JAR intérieur a l'empreinte SHA-256
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+`javap -c -p` a servi à examiner DoorBlock, TrapDoorBlock, BlockItem,
+BlockPlaceContext et ServerPlayerGameMode. L'outil Java
+`tools/audit_hinged_blocks.java`, exécuté sur les classes et bibliothèques de
+cette version exacte, extrait les familles, items, sons, indicateurs de support
+et volumes. Il vérifie aussi l'égalité des volumes de sélection et collision.
+Les IDs ne viennent pas d'une ancienne version ni d'une liste manuelle.
+
+Le registre contient **21 portes et 21 trappes**, soit **2 688 états** : douze
+matériaux bois (dont bambou, pale oak, crimson et warped), fer et huit variantes
+cuivre (quatre degrés d'oxydation, cirés ou non). Toutes sont manipulables à la
+main sauf le fer. Le tableau généré distingue les familles par les classes et
+BlockSetType officiels ; les suffixes des noms ne définissent pas cette politique.
+
+## Architecture et propriété
+
+- `hinged_blocks.c` : règles pures, placement, charnières, voisin vertical,
+  métadonnées officielles et volumes locaux.
+- `hinged_world.c` : adaptation aux chunks READY, validation, mutations,
+  interaction et retrait d'une paire. Appels sur le tick autoritaire uniquement.
+- `mc_chunk_set_column_pair` : prépare seulement les une ou deux sections de la
+  colonne concernée. Une erreur d'allocation ou de génération laisse les deux
+  anciens blocs intacts. Les caches sont invalidés et les générations dirty
+  avancent après préparation réussie. Les snapshots en cours restent indépendants.
+- `mc_world_set_block_pair` : vérifie les deux positions, réserve les notifications,
+  publie les deux moitiés avant les mises à jour de voisinage. Les voisins ne
+  voient pas une moitié provisoire. Il ne s'agit pas d'une transaction disque
+  globale avec les inventaires ou les joueurs.
+- Le voisinage vertical des portes complète le voisinage des escaliers existant.
+  Une perte de support ou de contrepartie retire la porte ; un événement de loot
+  de moitié inférieure est consommé une seule fois par le tick réseau. La file
+  réserve aussi la capacité nécessaire à une cascade verticale avant récursion.
+- Le handler conserve décodage, portée, séquence, inventaire, resynchronisation et
+  délégation ; ses anciennes branches de placement spécifiques sont retirées.
+  La taille de `play.c` diminue dans ce lot.
+
+Aucun worker gameplay n'est ajouté. Les connexions sont consultées sous le verrou
+existant pour la validation de placement ; les envois utilisent les snapshots de
+connexions à durée de vie contrôlée existants. Les sauvegardes utilisent les mêmes
+requêtes dirty, captures immuables, acquittements de génération et drainage S4.
+
+## Règles implémentées
+
+### Portes
+
+`facing`, `half`, `hinge`, `open`, `powered` suivent les états officiels.
+La porte regarde dans la direction horizontale du joueur. L'arrondi de yaw est
+celui de Vanilla, y compris les limites à 45 degrés et les angles négatifs.
+Le support est un bloc dont la face supérieure est sturdy selon le JAR, pas un
+simple bloc non-air. Les dalles et escaliers supérieurs peuvent convenir ; les
+inférieurs ne constituent pas une surface complète. La cellule supérieure doit
+être remplaçable ; une porte ne démarre pas à Y=319.
+
+Le vote de charnière utilise les volumes pleins à gauche/droite sur les deux
+hauteurs, les portes inférieures adjacentes, puis le point exact de clic. Une
+porte adjacente ouverte compte aussi. Les matériaux voisins peuvent différer.
+Une double porte ne s'ouvre pas automatiquement ensemble.
+
+L'obstruction par les joueurs utilise l'épaisseur réelle de la moitié inférieure,
+comme `BlockItem.canPlace` ; aucun veto supplémentaire de collision de la moitié
+supérieure n'est inventé. Les deux joueurs connectés sont pris en compte. La
+mutation des deux blocs est préparée avant consommation d'un unique item.
+
+Une interaction sur l'une ou l'autre moitié d'une porte manipulable bascule
+`open` sur les deux moitiés. Les autres propriétés sont conservées. Les sons
+open/close proviennent du registre officiel et sont envoyés aux observateurs
+proches, source BLOCKS, volume 1, pitch dans [0,9 ; 1[, à la position du clic.
+L'acteur utilise le son prédit par son client. Une séquence acceptée rejouée ne
+rebascule pas l'état ; le paquet de main secondaire est acquitté sans doubler
+l'interaction principale. Le fer ne s'ouvre pas à la main.
+
+### Trappes
+
+`facing`, `half`, `open`, `powered`, `waterlogged` sont conservés. Une pose
+latérale sur une cellule distincte regarde selon la face cliquée et utilise
+`hitY > 0.5` pour la moitié haute. Lors d'un remplacement de la cellule cliquée
+ou d'un clic vertical, elle regarde à l'opposé du joueur ; la face UP donne
+bottom, les autres top. La suppression de l'ancien support ne détruit pas la
+trappe. Elle peut rester au-dessus du vide.
+
+Une source d'eau produit `waterlogged=true`. L'ouverture/fermeture préserve cette
+propriété. La casse d'une trappe waterlogged restitue l'état source d'eau. Cela
+n'implémente pas la propagation, les scheduled ticks d'eau ou les écoulements.
+Le fer conserve le refus d'ouverture manuelle ; les variantes cuivre sont
+manipulables à la main dans les scénarios non alimentés.
+
+### Destruction et loot
+
+La destruction normale d'une porte vérifie la paire et la retire en une mutation
+préparée. Le loot est résolu une seule fois avec la moitié inférieure, même si
+la moitié supérieure a été minée. Le test Survival utilise l'outil correct.
+Creative retire les deux moitiés sans drop ; cette correction est limitée aux
+familles de ce lot et ne change pas les autres blocs historiques. La perte de
+support produit un unique item de porte. Les trappes utilisent les tables de loot
+existantes et les conditions d'outil existantes.
+
+L'état orphelin ou incohérent n'est pas arbitrairement reconstruit pendant une
+interaction. La mutation est refusée et corrigée côté client. La réparation
+générale de mondes incohérents n'est pas l'objet de ce lot.
+
+## Géométrie et limites de simulation
+
+Les volumes d'épaisseur **3/16** sont calculés selon facing/open/hinge pour les
+portes et facing/open/half pour les trappes. Les 2 688 références sont dans
+`tests/fixtures/vanilla-26.1.1-hinged-shapes.tsv`. Les tests C comparent toutes les
+bornes et l'intersection, pas uniquement l'apparence du client.
+
+Cette géométrie sert au contrôle d'obstruction des placements. La physique
+serveur générale des joueurs et des items au sol possède encore des chemins
+historiques de collision cubique ; ce lot ne valide pas tous les mouvements,
+rebonds, traversées, poses accroupies/spéciales ou interactions d'entités avec ces
+volumes. **La phase 2C n'est pas terminée.** La distribution aléatoire des drops,
+leur vitesse initiale et la temporalité générale de ramassage ne sont pas
+qualifiées comme identiques à Vanilla par ces tests d'item/count.
+
+Aucun moteur Redstone n'existe encore. Les propriétés powered sont préservées
+lors des interactions ; les placements adjacents à un bloc signal source sont
+refusés conservativement. Ce refus est une protection, pas une parité Vanilla.
+La propagation indirecte, les changements de puissance après placement, les
+conducteurs, boutons, plaques et circuits restent non simulés. Aucune conformité
+Redstone n'est annoncée. Les indicateurs générés avec EmptyBlockGetter ne sont
+pas une API de solidité contextuelle pour tous les futurs blocs.
+
+L'oxydation/cuivrage dynamique, le cirage et le retrait à la hache ne sont pas
+implémentés. L'interaction outil/honeycomb sur les familles cuivre est refusée
+explicitement, avec conservation des états et de l'inventaire. Les autres règles
+S3B de protection des block entities et données opaques restent inchangées.
+
+## Reproduction et preuves
+
+Les essais Minecraft se déroulent uniquement sur `10.0.4.66`, dans des stages
+isolés `/opt/goatcore/phase2a-stage.*`, avec ports temporaires distincts. CPU 8–11,
+`nice -n 10`, `ionice -c 2 -n 7` ; aucune modification des services principaux.
+Les essais C sans serveur et les sanitizers ciblés peuvent être locaux.
+
+Le harnais `run_block_checks.py --suite hinged` exécute les mêmes paquets 775 sur
+GoatCore et Vanilla. Les états réussis sont d'abord capturés par **deux clients**,
+puis contrôlés par une requête autoritaire QA ou `execute if block` côté officiel.
+La référence ne réutilise pas l'algorithme C pour inventer les charnières. Les
+inventaires sont contrôlés via les slots puis une reconnexion complète. Chaque
+redémarrage utilise le même monde sauvegardé. Les barrières de sauvegarde et les
+ACK de séquence réseau conservent leur contrat G2 : un ACK gameplay ne prouve pas
+à lui seul la durabilité disque.
+
+`check_hinged_async.py` bloque le véritable worker de test avant le COMMIT du
+snapshot A fermé, puis ouvre les deux familles sur le tick, libère A, draine B,
+redémarre avec le binaire normal et décode indépendamment le stockage SQLite.
+Les hooks existent exclusivement dans `mc_server_g2_fault`.
+
+`profile_hinged.py` reprend les traces continues, le suivi CPU/RSS, les mesures
+write/fsync, le drainage, le décodage indépendant des états sauvegardés et la
+vérification par une nouvelle instance du harnais `profile_tick.py`. Chaque cycle
+confirme pose, ouverture, fermeture et destruction avec état ET séquence ACK ;
+des portes/trappes ouvertes supplémentaires sont conservées pour le redémarrage.
+Cette charge Creative ne produit pas les items des anciens benchmarks de pierre :
+elles ne permettent pas de revendiquer un gain de TPS par rapport à G2.
+## Audit, non-régression et résultats de charge
+
+Avant ce lot, le registre, les conversions d'IDs, les blocs ordinaires, bûches,
+dalles/fusion, escaliers, caches et trois stockages étaient déjà présents et sont
+réutilisés. Les portes/trappes disposaient seulement de branches de placement
+partielles dans `play.c` : orientation générique, charnière forcée et écritures
+séparées des deux moitiés. Leur présence ne constituait pas une validation Vanilla.
+Le test historique d'orientation a été corrigé selon les règles officielles, sans
+retirer son assertion. Les nouvelles interactions et mutations préparées sont
+centralisées dans les modules gameplay dédiés.
+
+La campagne distante `make -B -j2 precommit-check GOATWORLD_G1_CHECK=1`, avec
+`GOATCORE_SOURCE_EXPORT=1`, réussit : **31 suites C**, smoke, réseau multi-epoll,
+login, générateurs, migration, G1 et huit méthodes de panne/corruption G2.
+Le contrôle de Git/hygiène a lieu localement avant export ; l'export ne contient
+pas de dépôt Git. Un premier lancement avait omis cette variable d'export et
+échoué au contrôle d'hygiène, avant les tests ; le lancement corrigé est celui
+retenu. Le nouveau test C atteint ensuite **14 477 assertions**, avec les
+2 688 volumes, les 21 loots de portes, les erreurs d'allocation, le passage entre
+sections, les générations obsolètes, la cascade verticale et les trois stockages.
+
+Les suites ciblées **ASan+UBSan et TSan passent localement**, sans lancement de
+serveur Minecraft local : GoatWorld intégré, G1/codec, S4, stockage natif,
+escaliers, NBT, portes/trappes, roundtrip/handlers, inventaires/combat et huit
+méthodes d'injection. SQLite est lui-même instrumenté. Les tests C réseau
+utilisent leurs adaptateurs habituels ; cela ne constitue pas un test TSan de
+chaque chemin du serveur réseau réel ni une preuve absolue d'absence de races.
+`check_goatworld_sanitizers.py` conserve cette sélection reproductible.
+
+Les tests Minecraft sur GoatWorld conservent les **192 observations d'escaliers**
+égales à une nouvelle référence Vanilla, les blocs pleins/bûches/dalles/fusion,
+les coordonnées négatives et frontières de régions, les refus, le multijoueur,
+les consommations Survival et le ramassage de **100 items** après reconnexion
+et deux redémarrages. Le corpus complexe conserve exactement les types/valeurs
+NBT des **sept block entities** (coffre, four froid, panneau, bannière, shulker,
+tonneau, pot décoré). Une première invocation du seed utilisait le mauvais
+exécutable de test ; l'outil existant `mc_native_bench --seed` a été utilisé pour
+la campagne corrigée, sans créer de convertisseur.
+
+### Xeon, stockage distant et charge réelle
+
+Quinze essais, trois répétitions par taille, **200 cycles par bot**, quatre actions
+par cycle et une pause de 50 ms entre cycles. Tous utilisent le même monde
+GoatWorld de référence copié, le même binaire, view-distance/simulation-distance
+10 et les mêmes limites CPU/I/O. Aucun serveur Vanilla ou autre campagne
+fonctionnelle ne tourne pendant cette période mesurée. Les pages du système de
+fichiers ne sont pas vidées ; ce ne sont pas des lectures à froid démontrées.
+
+**211 200 actions proposées, reçues et confirmées** : 52 800 poses, 105 600
+interactions et 52 800 destructions. Zéro manque/erreur. Les compteurs de réception
+viennent des traces des handlers, pas uniquement des paquets envoyés. Les
+sentinelles supplémentaires de fin ne sont pas comptées dans ces actions actives.
+Elles sont décodées indépendamment sur disque et interrogées après redémarrage.
+
+Médianes des trois répétitions, sauf maxima et compteurs cumulés :
+
+| Bots | TPS observés | MSPT P50 / P95 / P99 fixes (ms) | P99 tick + fast (ms) | Maximum tick + fast (ms) | Dépassements 50 ms tick + fast | Actions confirmées |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 20,009 | 0,102 / 0,256 / 0,374 | 3,485 | 350,747 | 1 | 2 400 |
+| 2 | 19,995 | 0,119 / 0,274 / 0,408 | 4,951 | 22,631 | 0 | 4 800 |
+| 10 | 19,985 | 0,208 / 1,020 / 1,267 | 7,289 | 194,142 | 2 | 24 000 |
+| 25 | 19,992 | 0,415 / 1,328 / 2,589 | 19,619 | 101,111 | 1 | 60 000 |
+| 50 | 19,961 | 0,730 / 2,228 / 3,226 | 22,654 | 145,397 | 4 | 120 000 |
+
+Les durées actives médianes sont respectivement **12,678 / 16,218 / 30,123 /
+32,846 / 54,906 s**. Les durées du processus principal jusqu'à l'arrêt et la
+sauvegarde durable sont **25,766 / 34,953 / 94,184 / 182,697 / 346,980 s** :
+le streaming initial de 441 chunks à chaque bot représente un coût réel important,
+séparé de la charge active. Le temps de la vérification indépendante et du
+redémarrage figure séparément dans les résultats. Le maximum RSS serveur observé
+à 50 bots est **49 196 Kio** ; aucune file illimitée n'est ajoutée.
+
+Les P99 de latence d'une action complète, médianes par taille, sont **42,021 /
+42,483 / 51,430 / 56,701 / 113,664 ms**. Les octets demandés par write/pwrite sur
+les fichiers du monde, initialization et shutdown inclus, totalisent par groupe
+les trois répétitions : **2 250 191 / 4 595 055 / 7 714 144 / 10 039 058 /
+21 891 837**. Ce compteur n'est pas une mesure d'écritures physiques du RAID.
+CPU, mémoire, write/fsync, durées des phases et traces continues sont conservés
+dans les résultats bruts ; aucune fenêtre de ticks choisie n'est substituée à
+la phase active complète.
+
+Aucun tick fixe de la phase active ne dépasse 50 ms, **mais les passes entre
+ces ticks en dépassent**. Les ignorer masquerait les pauses et contredirait le
+TPS observé. Le débit peut légèrement dépasser 20 dans une fenêtre finie à cause
+du comptage des débuts de ticks aux frontières. **20 TPS constants ne sont pas
+démontrés.** Les synchronisations du worker atteignent aussi des latences élevées
+sans bloquer nécessairement le tick ; leur somme de temps mural ne peut pas être
+assimilée au temps CPU ou aux pauses du tick. Ce lot ne prétend pas attribuer
+chaque outlier ni améliorer le stockage. Aucun gain sur G2 n'est revendiqué :
+le travail Creative, les drops et les notifications ne sont pas identiques.
+
+### Limites d'interaction et pilotes de test
+
+Les scénarios utilisent la main principale. Le paquet lié de main secondaire
+est acquitté sans une deuxième transition ; l'utilisation autonome de cette main
+et les cas de secondary-use avec un objet uniquement en main secondaire restent
+non qualifiés. Les game events destinés aux systèmes absents (capteurs, IA, etc.)
+ne sont pas implémentés par l'émission du son. Les loots sont qualifiés avec outil
+approprié, sans revendiquer tous les cas de mauvais outil, enchantements,
+explosions ou temporalité exacte de minage.
+
+Les pilotes ont révélé plusieurs erreurs de harnais, conservées dans les bruts :
+option taskset incorrecte avant lancement, écho de position manquant après
+/tp, comptage de mobs dans les spawns d'items, clic d'un bloc de support absent
+qui visait réellement une autre cellule, attente d'un renvoi de slot inchangé
+non requis par Vanilla, slot de ramassage écrasé par la préparation Creative,
+outil non empilable préparé avec une quantité invalide et attente temporelle de
+changement de mode/outil insuffisante. Le contrôle final attend le mode appliqué,
+utilise des piles d'outils de un, interroge `SelectedItem.id` sur Vanilla et
+contrôle l'inventaire après reconnexion. Le durcissement général historique des
+piles Creative n'est pas modifié dans ce lot.
+
+Un pilote de redémarrage effaçait lui-même sa première sentinelle en nettoyant
+un carré 3×3 autour de la suivante, en diagonale sur une frontière. Le disque
+reflétait cet effacement ; ce n'était pas une perte de génération SQLite. Le
+nettoyage de ces sentinelles est maintenant strictement local à leur position.
+Aucun échec de ces pilotes n'est présenté comme une qualification réussie.
+
+## Matrice finale de conformité du lot
+
+**335 scénarios différentiels identiques**, **499 états comparés**, **42 familles**.
+Le nom, l'ID réseau, toutes les propriétés pertinentes, les positions et les
+résultats d'inventaire/drop couverts correspondent. Sept états sauvegardés,
+dont une trappe waterlogged et deux portes complètes ouvertes, sont retrouvés
+sur Vanilla et GoatWorld après **deux redémarrages** successifs et reconnexion.
+Les loots ramassés sont également contrôlés dans les inventaires persistés.
+
+| Comportement | Implémentation | Validation / limite |
+|---|---|---|
+| 21 portes + 21 trappes | Métadonnées officielles, tous les états du registre | Pose Survival, deux interactions, deux observateurs et casse Creative pour chaque famille |
+| Direction des portes | Yaw serveur, quatre directions, limites d'arrondi | Identique à Vanilla dans les scénarios de yaw testés |
+| Charnières, double porte | Vote obstacles sur deux hauteurs, clic exact, porte adjacente ouverte/fermée | Quatre directions, côtés, obstacles pleins/partiels, matériaux voisins différents ; aucune ouverture couplée inventée |
+| Deux moitiés et consommation | Préparation et publication atomiques au tick, un item | Refus sans demi-porte ni consommation, allocation interrompue et frontière de section C |
+| Support des portes | Face supérieure sturdy officielle, perte de support et de contrepartie | Pierre, dalles/escaliers haut/bas, vide, Y=318/319, support détruit |
+| Placement des trappes | Face, point de clic, remplacement et moitié | Six faces, seuil 0,5, cellules remplaçables, conservation sans support |
+| Interactions | Main principale, portes deux moitiés, open seul modifié | Bois/cuivre oui, fer non ; utilisation Survival avec un bloc tenu sans consommation |
+| Sons | Registre exact, source/position/volume/pitch et observateurs | Validés pour les familles manipulables ; systèmes de game events absents non simulés |
+| Anti-double application | Séquence acceptée retenue, offhand lié sans nouvelle transition | Test GoatCore avec rejeu et deux joueurs interagissant de manière rapprochée ; aucune revendication de parité de paquets forgés |
+| Destruction et items | Une résolution pour la paire, Creative sans drop | Neuf cas Survival bois/fer/cuivre avec outil correct, les deux moitiés des portes, un item de support détruit |
+| Volumes | 3/16, facing/open/hinge/half | 2 688 volumes officiels identiques ; obstruction de pose par soi/autre joueur ; physique générale partielle |
+| Eau | Source waterlogged, propriétés conservées, source restituée à la casse | Cellule scellée, ouverture/fermeture et redémarrage ; écoulements et scheduled ticks absents |
+| Redstone | Propriété conservée, refus conservateur à proximité immédiate de sources | Pas de calcul de circuit ou propagation ; hors conformité annoncée |
+| Outils/cuivre | Interactions dangereuses refusées, variantes conservées | Oxydation, cirage/retrait et tous les outils restent hors périmètre |
+| GoatWorld SQLite async | Chemin G2/S4 inchangé, générations dirty | Matrice complète, 15 charges, 7 états après deux redémarrages ; A fermé/B ouvert réellement testés |
+| `.bin` / Anvil async | Backends inchangés | **191 scénarios**, six familles bois/fer/cuivre, sept états après deux redémarrages pour chacun ; pas de nouvelle qualification d'un monde Anvil complet |
+| Escaliers / données opaques | Réutilisation sans nouvelle règle de gameplay | 192 observations Vanilla conservées ; sept BE exactes et protections S3B conservées |
+
+Les fixtures officielles sont `vanilla-26.1.1-hinged.json` (observations) et
+`vanilla-26.1.1-hinged-shapes.tsv` (géométrie). Le manifeste
+`vanilla-26.1.1-hinged-validation.json` contient les résultats, les répétitions,
+les empreintes, les métadonnées d'environnement et les hashes des résultats bruts
+ignorés sous `tests/stress/results/doors/`. Aucun monde complet n'est versionné.
+
+Binaire normal final réellement testé, SHA-256 :
+`1f68c20c02e7faa29ac4d49d8cf2bd0e93263ebd11ed7411b3638e40a609e601`.
+Les deux builds normaux isolés sont identiques. Les quinze fichiers source/en-tête
+runtime modifiés ou ajoutés correspondent exactement aux entrées du build distant.
+
+25565 reste **actif, PID 147, sans redémarrage**, 25587 **inactif**, avec les mêmes
+empreintes de binaire principal et configurations. Aucun déploiement, aucune
+migration, aucun changement des permissions ou de l'authentification. Les instances
+temporaires sont arrêtées. `.bin` reste le défaut, GoatWorld/Anvil async restent
+explicitement expérimentaux, S2 reste séparé et désactivé.
+
+À la demande complémentaire du propriétaire, la politique de push a été changée
+et les auteurs historiques normalisés, avec sauvegarde et réécriture protégée
+explicitement autorisées : voir `git-attribution-audit.md` et sa table de hashes.
+Le HEAD initial G2 cité ci-dessus devient `a83e2b580733e1579099071da69e635aa526ec7c`
+à arbre identique ; cela ne change pas les empreintes des binaires mesurés.
+
+La prochaine intervention peut poursuivre la **phase 2A : torches, blocs attachés
+et règles de support**, puis compléter la physique de la phase 2C. Les limites
+Redstone, fluides, minage avancé et interactions secondaires ci-dessus restent
+explicites. **Ni la phase 2 ni la phase 2C ne sont déclarées terminées.**
