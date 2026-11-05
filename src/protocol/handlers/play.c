@@ -18,6 +18,8 @@
 #include "mc_block_neighbors.h"
 #include "mc_hinged_blocks.h"
 #include "mc_hinged_world.h"
+#include "mc_attached_blocks.h"
+#include "mc_attached_world.h"
 #include "mc_block_state.h"
 #include "generated_block_ids.h"
 #include "mc_container_store.h"
@@ -886,6 +888,7 @@ static int send_sync_position(mc_conn_t *c, double x, double y, double z, float 
     c->y = y;
     c->z = z;
     c->yaw = yaw;
+    c->placement_head_yaw = yaw;
     c->pitch = pitch;
     c->has_pos = true;
     reset_fall_tracking(c);
@@ -2698,7 +2701,7 @@ static bool aabb_intersects_strict(double a_min_x, double a_min_y, double a_min_
 static bool placed_block_intersects_player(const mc_conn_t *c, const mc_world_ids_t *ids, int32_t block_x, int32_t block_y, int32_t block_z,
                                            int32_t state_id) {
     if (!c || !c->has_pos) return false;
-    if (!block_state_has_player_blocking_collision(ids, state_id)) return false;
+    if (!mc_attached_family(state_id) && !block_state_has_player_blocking_collision(ids, state_id)) return false;
 
     double player_min_x = c->x - PLAYER_COLLISION_HALF_WIDTH;
     double player_max_x = c->x + PLAYER_COLLISION_HALF_WIDTH;
@@ -2707,11 +2710,11 @@ static bool placed_block_intersects_player(const mc_conn_t *c, const mc_world_id
     double player_min_z = c->z - PLAYER_COLLISION_HALF_WIDTH;
     double player_max_z = c->z + PLAYER_COLLISION_HALF_WIDTH;
 
-    if(mc_hinged_family(state_id)){
+    if(mc_hinged_family(state_id)||mc_attached_family(state_id)){
         if(c->server)return net_server_hinged_intersects_players(c->server,block_x,block_y,block_z,state_id);
         double min[]={player_min_x-block_x,player_min_y-block_y,player_min_z-block_z};
         double max[]={player_max_x-block_x,player_max_y-block_y,player_max_z-block_z};
-        return mc_hinged_intersects(state_id,min,max);
+        return mc_attached_family(state_id)?mc_attached_intersects(state_id,min,max):mc_hinged_intersects(state_id,min,max);
     }
     if (mc_stairs_is_state(state_id))
         return mc_stairs_intersects(state_id, player_min_x - block_x, player_min_y - block_y, player_min_z - block_z,
@@ -3258,6 +3261,7 @@ static void respawn_player_state_reset(mc_conn_t *c, double spawn_x, double spaw
     c->y = spawn_y;
     c->z = spawn_z;
     c->yaw = spawn_yaw;
+    c->placement_head_yaw = spawn_yaw;
     c->pitch = spawn_pitch;
     c->has_pos = true;
     c->on_ground = false;
@@ -3525,7 +3529,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
         int32_t loot_state=state_id;
         int hinged_break=mc_hinged_destroy(world,x,y,z,state_id,&loot_state);
         if(hinged_break<0)return resync_hinged_action(c,x,y-(mc_hinged_property(state_id,"half","upper")?1:0),z,2,seq);
-        bool harvest=allow_default_drop&&!(mc_hinged_family(state_id)&&c->gamemode==GAMEMODE_CREATIVE);
+        bool harvest=allow_default_drop&&c->gamemode!=GAMEMODE_CREATIVE;
         bool have_drop = mc_block_drop_resolve_default(loot_state, harvest, x, y, z, now_ms, &drop);
         int64_t break_drop_us = break_perf ? mc_now_us() - break_start_us : 0;
         if (debug_items_enabled() || debug_broadcast_enabled()) {
@@ -3541,7 +3545,7 @@ static int break_block_authoritative(mc_conn_t *c, mc_world_t *world, const mc_w
         (void)mc_world_remove_block_entity(world, x, y, z);
         int32_t replacement = ids->air;
         const mc_hinged_family_t *broken_family = mc_hinged_family(state_id);
-        if (broken_family && broken_family->kind == 2 && mc_hinged_property(state_id, "waterlogged", "true"))
+        if (((broken_family && broken_family->kind == 2) || mc_attached_family(state_id)) && mc_hinged_property(state_id, "waterlogged", "true"))
             replacement = (int32_t)mc_global_state_id_from_key("minecraft:water[level=0]", (uint32_t)ids->air);
         if (!hinged_break && mc_world_set_block(world, x, y, z, replacement) != 0) return -1;
         int64_t break_set_us = break_perf ? mc_now_us() - break_start_us - break_drop_us : 0;
@@ -7726,6 +7730,9 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
                            x+(double)cx-px,(float)(y+(double)cy-py),z+(double)cz-pz,
                            replacing_clicked,&normalized_state_id))
                         return resync_hinged_action(c,px,py,pz,mc_door_is_state(mapped_state_id)?2:1,seq);
+                    if(mc_attached_family(mapped_state_id)&&
+                       mc_attached_prepare(world,px,py,pz,mapped_state_id,c->placement_head_yaw,c->pitch,face,replacing_clicked,&normalized_state_id))
+                        return resync_hinged_action(c,px,py,pz,1,seq);
                     for (int level = 0; level < 16; level++) {
                         if (target_state_id != ids->water_level[level]) continue;
                         int32_t wet = mc_block_placement_in_water(normalized_state_id, level);
@@ -7862,6 +7869,10 @@ int proto_play_handle(mc_conn_t *c, const mc_frame_t *frame, int64_t now_ms) {
 int proto_play_tick(mc_conn_t *c, int64_t now_ms) {
     if (!c || c->state != MC_STATE_PLAY) return 0;
     if (!c->play_init_sent) return 0;
+
+    /* Vanilla Player.aiStep: head yaw catches up at the authoritative tick,
+     * not while handling the preceding movement packet. */
+    c->placement_head_yaw = c->yaw;
 
     /* Block-change ACKs are intentionally deferred to the tick so client-side
      * prediction is acknowledged only after this tick's authoritative updates

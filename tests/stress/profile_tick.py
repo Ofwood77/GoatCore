@@ -342,7 +342,9 @@ async def one(args,binary,label,bots,result,template=None,prepare_only=False,bac
     runtime=result/'runtime';runtime.mkdir();world=runtime/'world'
     if template:shutil.copytree(template,world)
     (runtime/'assets').symlink_to(ROOT/'assets')
-    (runtime/'server.config').write_text(f'online-mode=false\noffline-skins=false\nview-distance=10\nsimulation-distance=10\nlevel-seed=0\nchunk-storage={backend}\n')
+    view_distance=getattr(args,'view_distance',10)
+    assert 2<=view_distance<=32
+    (runtime/'server.config').write_text(f'online-mode=false\noffline-skins=false\nview-distance={view_distance}\nsimulation-distance={view_distance}\nlevel-seed=0\nchunk-storage={backend}\n')
     if save_mode!='immediate':
         with (runtime/'server.config').open('a') as config:config.write(f'anvil-save-mode={save_mode}\n')
     with socket.socket() as sock:

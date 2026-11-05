@@ -136,6 +136,8 @@ struct mc_conn {
     double z;
     float yaw;
     float pitch;
+    /* Player.aiStep latches body yaw; nearest-look placement reads head yaw. */
+    float placement_head_yaw;
     bool has_pos;
     bool on_ground;
     double motion_x;

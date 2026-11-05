@@ -167,8 +167,11 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [217] = {-100, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_UNBREAKABLE}, /* minecraft:command_block */
     [219] = {60, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:composter */
     [226] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:copper_door */
+    [229] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:copper_lantern */
     [230] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:copper_ore */
+    [231] = {0, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_INSTANT}, /* minecraft:copper_torch */
     [232] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:copper_trapdoor */
+    [233] = {0, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_INSTANT}, /* minecraft:copper_wall_torch */
     [235] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:cracked_deepslate_bricks */
     [236] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:cracked_deepslate_tiles */
     [237] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:cracked_nether_bricks */
@@ -294,6 +297,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [383] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_copper_chain */
     [385] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_copper_door */
     [387] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_copper_grate */
+    [388] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_copper_lantern */
     [389] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_copper_trapdoor */
     [390] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_cut_copper */
     [391] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:exposed_cut_copper_slab */
@@ -371,6 +375,8 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [495] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:jungle_wall_hanging_sign */
     [496] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:jungle_wall_sign */
     [497] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:jungle_wood */
+    [500] = {40, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:ladder */
+    [501] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:lantern */
     [502] = {500, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:lapis_block */
     [503] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:lapis_ore */
     [505] = {0, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_INSTANT}, /* minecraft:large_fern */
@@ -498,6 +504,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [673] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_copper_chain */
     [675] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_copper_door */
     [677] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_copper_grate */
+    [678] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_copper_lantern */
     [679] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_copper_trapdoor */
     [680] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_cut_copper */
     [681] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:oxidized_cut_copper_slab */
@@ -660,6 +667,9 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [923] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:smooth_stone_slab */
     [925] = {10, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:snow */
     [926] = {20, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:snow_block */
+    [929] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:soul_lantern */
+    [932] = {0, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_INSTANT}, /* minecraft:soul_torch */
+    [933] = {0, MC_BLOCK_HARDNESS_FLAG_PRESENT | MC_BLOCK_HARDNESS_FLAG_INSTANT}, /* minecraft:soul_wall_torch */
     [934] = {500, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:spawner */
     [937] = {50, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:spruce_button */
     [938] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:spruce_door */
@@ -757,6 +767,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [1058] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_copper_chain */
     [1060] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_copper_door */
     [1062] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_copper_grate */
+    [1063] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_copper_lantern */
     [1064] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_copper_trapdoor */
     [1065] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_cut_copper */
     [1066] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_cut_copper_slab */
@@ -768,6 +779,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [1072] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_copper_chain */
     [1074] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_copper_door */
     [1076] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_copper_grate */
+    [1077] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_copper_lantern */
     [1078] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_copper_trapdoor */
     [1079] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_cut_copper */
     [1080] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_exposed_cut_copper_slab */
@@ -779,6 +791,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [1088] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_copper_chain */
     [1090] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_copper_door */
     [1092] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_copper_grate */
+    [1093] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_copper_lantern */
     [1094] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_copper_trapdoor */
     [1095] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_cut_copper */
     [1096] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_oxidized_cut_copper_slab */
@@ -790,6 +803,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [1103] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_copper_chain */
     [1105] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_copper_door */
     [1107] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_copper_grate */
+    [1108] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_copper_lantern */
     [1109] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_copper_trapdoor */
     [1110] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_cut_copper */
     [1111] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:waxed_weathered_cut_copper_slab */
@@ -801,6 +815,7 @@ static const mc_block_hardness_entry_t mc_block_hardness_table[MC_BLOCK_HARDNESS
     [1118] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_copper_chain */
     [1120] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_copper_door */
     [1122] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_copper_grate */
+    [1123] = {350, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_copper_lantern */
     [1124] = {200, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_copper_trapdoor */
     [1125] = {300, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_cut_copper */
     [1126] = {150, MC_BLOCK_HARDNESS_FLAG_PRESENT}, /* minecraft:weathered_cut_copper_slab */

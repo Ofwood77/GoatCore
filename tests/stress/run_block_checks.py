@@ -116,17 +116,19 @@ def run(args):
                     except ConnectionRefusedError:
                         if time.monotonic()>deadline:raise TimeoutError("server readiness")
                         time.sleep(.1)
-                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py", "complex":"test_complex_storage.py", "hinged":"test_hinged_placement.py"}[args.suite]
+                scenario={"stairs":"test_stair_placement.py", "placement":"test_block_placement.py", "pickup":"test_pickup_save.py", "complex":"test_complex_storage.py", "hinged":"test_hinged_placement.py", "attached":"test_attached_placement.py"}[args.suite]
                 cmd=[sys.executable,str(ROOT/"tests/stress"/scenario),
                      "--port",str(args.port),"--snapshot",str(result/"snapshot.json")]
                 if args.kind=="vanilla":cmd.append("--vanilla")
                 if args.complex_dense and args.suite=="complex":cmd.append("--dense")
+                if args.attached_ladder_traps and args.suite=="attached":cmd.append("--ladder-traps-only")
+                if args.attached_harvest_only and args.suite=="attached":cmd.append("--harvest-only")
                 if args.hinged_core_materials and args.suite=="hinged":cmd.append("--core-materials")
                 if args.blocks_only and args.suite=="placement":cmd.append("--blocks-only")
                 if args.region_boundaries and args.suite=="placement":cmd.append("--region-boundaries")
                 if args.suite=="pickup":cmd.extend(["--drop-count",str(args.pickup_count)])
                 if phase!="edit":cmd.append("--verify")
-                test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=900 if args.suite=="hinged" else 600)
+                test=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=900 if args.suite in ("hinged","attached") else 600)
                 (result/f"test-{phase}.log").write_text(test.stdout+test.stderr)
                 if test.returncode:raise RuntimeError(f"{phase} checks failed; see {result}/test-{phase}.log")
                 report=json.loads(test.stdout.strip())
@@ -144,7 +146,7 @@ def run(args):
             if args.fsync_probe and args.kind=="goatcore" and not (result/f"fsync-{phase}.csv").is_file():
                 raise RuntimeError("fsync probe did not produce a trace")
     metadata={"chunk_storage":args.chunk_storage if args.kind=="goatcore" else None,"world_template":str(args.world_template) if args.world_template else None,"anvil_save_mode":args.anvil_save_mode,"kind":args.kind,"suite":args.suite,"port":args.port,"status":"passed","verify_restarts":args.verify_restarts}
-    metadata.update(shutdown_timeout_s=args.shutdown_timeout,shutdown_s=shutdown_times)
+    metadata.update(attached_ladder_traps=args.attached_ladder_traps,attached_harvest_only=args.attached_harvest_only,shutdown_timeout_s=args.shutdown_timeout,shutdown_s=shutdown_times)
     if args.kind=="goatcore":metadata["binary_sha256"]=hashlib.sha256(args.server_binary.read_bytes()).hexdigest()
     (result/"metadata.json").write_text(json.dumps(metadata,indent=2))
     print(json.dumps({**metadata,"results":str(result)}))
@@ -152,8 +154,10 @@ def run(args):
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--attached-ladder-traps",action="store_true")
+    parser.add_argument("--attached-harvest-only",action="store_true")
     parser.add_argument("--kind",choices=("goatcore","vanilla"),required=True)
-    parser.add_argument("--suite",choices=("stairs","placement","pickup","complex","hinged"),default="stairs")
+    parser.add_argument("--suite",choices=("stairs","placement","pickup","complex","hinged","attached"),default="stairs")
     parser.add_argument("--port",type=int,required=True)
     parser.add_argument("--server-binary",type=Path,default=ROOT/"mc_server")
     parser.add_argument("--vanilla-root",type=Path,default=Path("/opt/goatcore/vanilla-2611"))

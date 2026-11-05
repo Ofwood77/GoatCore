@@ -14,6 +14,7 @@
 #include "mc_world.h"
 #include "mc_block_neighbors.h"
 #include "mc_hinged_blocks.h"
+#include "mc_attached_blocks.h"
 #include "mc_block_state.h"
 
 #include "generated_registries.h"
@@ -94,6 +95,10 @@ typedef struct mc_chunk_done {
     struct mc_chunk_done *next;
 } mc_chunk_done_t;
 
+#define NEIGHBOR_STACK_LIMIT 1024
+#define NEIGHBOR_DEFER_LIMIT 4096
+typedef struct {int32_t x,y,z;unsigned next;} mc_neighbor_frame_t;
+
 /* World-owned runtime. The hash map tracks chunk lifecycle, chunk_list is the
  * stable iteration order for save/evict/tick passes, and updates is the
  * per-tick queue consumed by the networking layer. */
@@ -126,6 +131,13 @@ struct mc_world {
     size_t updates_cap;
     mc_environment_drop_t *environment_drops;
     size_t environment_drops_len,environment_drops_cap;
+
+    /* Tick-owned local update stack, shared by doors and attached blocks. */
+    mc_neighbor_frame_t neighbor_stack[NEIGHBOR_STACK_LIMIT];
+    size_t neighbor_depth;
+    bool neighbor_draining;
+    mc_block_update_t deferred_neighbors[NEIGHBOR_DEFER_LIMIT];
+    size_t deferred_neighbors_len,deferred_neighbors_head;
 
     int worker_count;
     pthread_t workers[MAX_WORKERS];
@@ -937,6 +949,7 @@ mc_world_t *mc_world_create(const char *world_path, int64_t level_seed) {
 }
 
 static void reconcile_chunk_neighbors(mc_world_t *w, mc_chunk_t *chunk);
+static int drain_supported_neighbors(mc_world_t *w);
 
 int mc_world_worker_count(const mc_world_t *w) {
     return w ? w->worker_count : 0;
@@ -1177,6 +1190,7 @@ int mc_world_destroy_checked(mc_world_t *w) {
 
     chunk_map_free(&w->chunks);
     free(w->chunk_list);
+    if(w->neighbor_depth){log_error("shutdown contains incomplete support updates");storage_rc=-1;}
     free(w->updates);
     free(w->environment_drops);
     free(w->jobs);
@@ -1290,33 +1304,108 @@ static int reconcile_block(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     e->chunk->dirty = true;
     return updates_push(w, (mc_block_update_t){x, y, z, next});
 }
+static int reconcile_supported_neighbors(mc_world_t *w,int32_t x,int32_t y,int32_t z);
 static int reconcile_local(mc_world_t *w, int32_t x, int32_t y, int32_t z) {
     static const int directions[5][2] = {{0,0},{0,-1},{1,0},{0,1},{-1,0}};
-    for (size_t i = 0; i < 5; i++)
-        if (reconcile_block(w, x + directions[i][0], y, z + directions[i][1]) != 0) return -1;
+    mc_block_update_t changed[5];size_t count=0;
+    for(size_t i=0;i<5;i++){
+        int nx=x+directions[i][0],nz=z+directions[i][1];int32_t before,after;
+        bool known=neighbor_read(w,nx,y,nz,&before)==0;
+        if(reconcile_block(w,nx,y,nz))return -1;
+        if(known&&!neighbor_read(w,nx,y,nz,&after)&&before!=after)
+            changed[count++]=(mc_block_update_t){nx,y,nz,after};
+    }
+    /* A neighboring stair may lose a full side when its shape changes. Its
+     * dependents need the same notifications as an explicitly changed block. */
+    for(size_t i=0;i<count;i++)if(reconcile_supported_neighbors(w,changed[i].x,y,changed[i].z))return -1;
     return 0;
 }
-static int reconcile_door_neighbors(mc_world_t *w,int32_t x,int32_t y,int32_t z){
-    for(int dy=-1;dy<=1;dy+=2){
-        int32_t state,next;bool drop=false;
-        if(neighbor_read(w,x,y+dy,z,&state)||!mc_door_is_state(state))continue;
-        int rc=mc_door_neighbor_change(neighbor_read,w,x,y+dy,z,state,y,&next,&drop);
-        if(rc==1)continue;
-        if(rc)return -1;
-        if(next==state||!mc_world_storage_action_allowed(w,x,y+dy,z))continue;
-        /* Reserve a complete vertical cascade before recursion. Reserving only
-         * one slot here lets nested removals consume it before we unwind. */
-        if(drop&&w->environment_drops_cap-w->environment_drops_len<MC_WORLD_HEIGHT){
-            if(w->environment_drops_len>SIZE_MAX-MC_WORLD_HEIGHT)return -1;
-            size_t cap=w->environment_drops_len+MC_WORLD_HEIGHT;
-            if(cap>SIZE_MAX/sizeof(*w->environment_drops))return -1;
-            void *p=realloc(w->environment_drops,cap*sizeof(*w->environment_drops));if(!p)return -1;
-            w->environment_drops=p;w->environment_drops_cap=cap;
-        }
-        if(mc_world_set_block(w,x,y+dy,z,next))return -1;
-        if(drop)w->environment_drops[w->environment_drops_len++]=(mc_environment_drop_t){x,y+dy,z,state};
+/* Missing chunks are not air. Retain the source notification and retry when
+ * a chunk is integrated; bounded/deduplicated, with an explicit overflow error. */
+static int defer_neighbors(mc_world_t *w,int32_t x,int32_t y,int32_t z){
+    for(size_t i=0;i<w->deferred_neighbors_len;i++){
+        const mc_block_update_t *p=&w->deferred_neighbors[(w->deferred_neighbors_head+i)%NEIGHBOR_DEFER_LIMIT];if(p->x==x&&p->y==y&&p->z==z)return 0;
     }
-    return 0;
+    if(w->deferred_neighbors_len==NEIGHBOR_DEFER_LIMIT){errno=ENOBUFS;log_error("deferred neighbor capacity exhausted; blocks preserved");return -1;}
+    size_t slot=(w->deferred_neighbors_head+w->deferred_neighbors_len++)%NEIGHBOR_DEFER_LIMIT;
+    w->deferred_neighbors[slot]=(mc_block_update_t){x,y,z,0};return 0;
+}
+static int reserve_environment_drop(mc_world_t *w){
+    if(w->environment_drops_len<w->environment_drops_cap)return 0;
+    size_t cap=w->environment_drops_cap?w->environment_drops_cap*2:64;
+    if(cap<=w->environment_drops_len||cap>SIZE_MAX/sizeof(*w->environment_drops))return -1;
+    void *p=realloc(w->environment_drops,cap*sizeof(*w->environment_drops));if(!p)return -1;
+    w->environment_drops=p;w->environment_drops_cap=cap;return 0;
+}
+static int drain_supported_neighbors(mc_world_t *w){
+    /* Vanilla UPDATE_SHAPE_ORDER. Children are processed before the next face,
+     * without C recursion. No new worker or independent update scheduler. */
+    static const int direction[]={4,5,2,3,0,1};
+    static const int step[6][3]={{0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}};
+    if(w->neighbor_draining||!w->neighbor_depth)return 0;
+    mc_neighbor_frame_t origin=w->neighbor_stack[w->neighbor_depth-1];
+    int32_t x=origin.x,z=origin.z;
+    w->neighbor_draining=true;int result=0;unsigned work=0,removed=0;
+    mc_save_clock_t span=mc_save_profile_begin();
+    while(w->neighbor_depth){
+        mc_neighbor_frame_t *frame=&w->neighbor_stack[w->neighbor_depth-1];
+        if(frame->next==6){w->neighbor_depth--;continue;}
+        if(++work>65536){result=-1;errno=ELOOP;log_error("neighbor work budget exhausted; pending updates retained");break;}
+        int d=direction[frame->next++];int sx=frame->x,sy=frame->y,sz=frame->z;
+        int nx=sx+step[d][0],ny=sy+step[d][1],nz=sz+step[d][2];
+        int32_t state,next;int rc=neighbor_read(w,nx,ny,nz,&state);bool drop=false;
+        if(rc==1){if(defer_neighbors(w,sx,sy,sz))result=-1;continue;}
+        if(rc){result=-1;continue;}
+        next=state;
+        if(mc_door_is_state(state)&&d<2)
+            rc=mc_door_neighbor_change(neighbor_read,w,nx,ny,nz,state,sy,&next,&drop);
+        else if(mc_attached_support_direction(state)==(d^1)){
+            bool valid=true;rc=mc_attached_survives(neighbor_read,w,nx,ny,nz,state,&valid);
+            if(!rc&&!valid){
+                /* Block.updateOrDestroy routes AIR shape results through
+                 * Level.destroyBlock, which restores the old fluid state. */
+                next=mc_hinged_property(state,"waterlogged","true")?w->ids.water_level[0]:w->ids.air;drop=true;
+            }
+        }else continue;
+        if(rc==1){if(defer_neighbors(w,sx,sy,sz))result=-1;continue;}
+        if(rc){result=-1;continue;}
+        if(next==state)continue;
+        if(!mc_world_storage_action_allowed(w,nx,ny,nz)){
+            if(errno==EAGAIN&&defer_neighbors(w,sx,sy,sz))result=-1;
+            continue; /* Preserve opaque/native storage guards. */
+        }
+        if(w->neighbor_depth==NEIGHBOR_STACK_LIMIT||(drop&&reserve_environment_drop(w))){
+            frame->next--;result=-1;break;
+        }
+        if(mc_world_set_block(w,nx,ny,nz,next)){frame->next--;result=-1;break;}
+        /* Set-block only enqueues its child; no drop can consume this slot
+         * until the current iteration has recorded the event. */
+        if(drop){w->environment_drops[w->environment_drops_len++]=(mc_environment_drop_t){nx,ny,nz,state};removed++;}
+        int32_t cx,cz;int lx,lz;
+        if(!coords_to_chunk(nx,nz,&cx,&cz,&lx,&lz)){
+            mc_chunk_entry_t *e=chunk_map_get(&w->chunks,chunk_key(cx,cz));
+            if(e&&e->chunk)e->chunk->save_requested=true;
+        }
+    }
+    w->neighbor_draining=false;
+    mc_save_profile_end("support_neighbors",x,z,span,work,result);
+    if(removed)mc_save_profile_end("support_removed",x,z,mc_save_profile_begin(),removed,0);
+    return result;
+}
+static int reconcile_supported_neighbors(mc_world_t *w,int32_t x,int32_t y,int32_t z){
+    if(w->neighbor_depth==NEIGHBOR_STACK_LIMIT){errno=ENOBUFS;return -1;}
+    w->neighbor_stack[w->neighbor_depth++]=(mc_neighbor_frame_t){x,y,z,0};
+    return drain_supported_neighbors(w);
+}
+static void retry_deferred_neighbors(mc_world_t *w){
+    /* A single pass: entries still waiting are appended to the following pass.
+     * No support load or SQLite query is made by the support predicates. */
+    size_t count=w->deferred_neighbors_len;
+    for(size_t i=0;i<count;i++){
+        mc_block_update_t p=w->deferred_neighbors[w->deferred_neighbors_head];
+        w->deferred_neighbors_head=(w->deferred_neighbors_head+1)%NEIGHBOR_DEFER_LIMIT;w->deferred_neighbors_len--;
+        if(reconcile_supported_neighbors(w,p.x,p.y,p.z))log_error("deferred neighbor update failed");
+    }
 }
 const mc_environment_drop_t *mc_world_environment_drops(const mc_world_t *w,size_t *len){
     *len=w?w->environment_drops_len:0;return w?w->environment_drops:NULL;
@@ -1327,7 +1416,7 @@ void mc_world_consume_environment_drops(mc_world_t *w,size_t count){
     if(w->environment_drops_len)memmove(w->environment_drops,w->environment_drops+count,w->environment_drops_len*sizeof(*w->environment_drops));
 }
 int mc_world_set_block_pair(mc_world_t *w,int32_t x,int32_t y,int32_t z,int32_t lower,int32_t upper){
-    if(!w||y< -64||y>=319||!mc_block_state_desc(lower)||!mc_block_state_desc(upper)||
+    if(!w||w->neighbor_depth>NEIGHBOR_STACK_LIMIT-2||y< -64||y>=319||!mc_block_state_desc(lower)||!mc_block_state_desc(upper)||
        !mc_world_storage_action_allowed(w,x,y,z)||!mc_world_storage_action_allowed(w,x,y+1,z))return -1;
     if(mc_storage_is_native(w->storage)&&(mc_native_state_sensitive((uint32_t)lower)||mc_native_state_sensitive((uint32_t)upper)))return -1;
     int32_t cx,cz;int lx,lz;if(coords_to_chunk(x,z,&cx,&cz,&lx,&lz))return -1;
@@ -1343,32 +1432,42 @@ int mc_world_set_block_pair(mc_world_t *w,int32_t x,int32_t y,int32_t z,int32_t 
     (void)updates_push(w,(mc_block_update_t){x,y,z,lower});
     (void)updates_push(w,(mc_block_update_t){x,y+1,z,upper});
     /* Both halves already exist before any neighbor can observe them. */
-    if(reconcile_door_neighbors(w,x,y,z)||reconcile_door_neighbors(w,x,y+1,z))
+    if(reconcile_supported_neighbors(w,x,y,z)||reconcile_supported_neighbors(w,x,y+1,z))
         log_error("door neighbor reconciliation failed after paired mutation");
     return 0;
 }
 /* Reconcile loaded stairs when either side of a chunk boundary becomes READY.
- * Palette filtering avoids scanning flat-world sections that have no stairs. */
-static void reconcile_loaded_stairs(mc_world_t *w, mc_chunk_t *chunk) {
+ * Palette filtering avoids scanning sections without relevant block families. */
+static void reconcile_loaded_neighbors(mc_world_t *w, mc_chunk_t *chunk) {
     if (!chunk) return;
     for (int s = 0; s < MC_WORLD_SECTION_COUNT; s++) {
         mc_paletted_container_t *sec = &chunk->sections[s];
-        bool possible = sec->is_direct || mc_stairs_is_state((int32_t)sec->uniform_state);
-        for (unsigned i = 0; !possible && i < sec->palette_len; i++) possible = mc_stairs_is_state((int32_t)sec->palette[i]);
+        bool possible = sec->is_direct || (mc_stairs_is_state((int32_t)sec->uniform_state)||mc_attached_family((int32_t)sec->uniform_state));
+        for (unsigned i = 0; !possible && i < sec->palette_len; i++) possible = mc_stairs_is_state((int32_t)sec->palette[i])||mc_attached_family((int32_t)sec->palette[i]);
         if (!possible) continue;
         for (int y = 0; y < 16; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
             int wy = MC_WORLD_MIN_Y + s * 16 + y;
-            if (!mc_stairs_is_state((int32_t)mc_chunk_get_block(chunk, x, wy, z))) continue;
-            if (reconcile_local(w, chunk->cx * 16 + x, wy, chunk->cz * 16 + z) != 0)
-                log_error("stair neighbor reconciliation failed");
+            int32_t state=(int32_t)mc_chunk_get_block(chunk,x,wy,z);
+            int wx=chunk->cx*16+x,wz=chunk->cz*16+z;
+            if(mc_stairs_is_state(state)){
+                if(reconcile_local(w,wx,wy,wz))log_error("stair neighbor reconciliation failed");
+            }else{
+                int d=mc_attached_support_direction(state);if(d<0)continue;
+                static const int step[6][3]={{0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}};
+                bool valid=true;int rc=mc_attached_survives(neighbor_read,w,wx,wy,wz,state,&valid);
+                int sx=wx+step[d][0],sy=wy+step[d][1],sz=wz+step[d][2];
+                if(rc==1){if(defer_neighbors(w,sx,sy,sz))log_error("loaded support update could not be retained");}
+                else if(rc||(!valid&&reconcile_supported_neighbors(w,sx,sy,sz)))log_error("loaded support reconciliation failed");
+            }
         }
     }
 }
 static void reconcile_chunk_neighbors(mc_world_t *w, mc_chunk_t *chunk) {
+    retry_deferred_neighbors(w);
     static const int directions[5][2] = {{0,0},{0,-1},{1,0},{0,1},{-1,0}};
     for (size_t i = 0; i < 5; i++) {
         mc_chunk_entry_t *e = chunk_map_get(&w->chunks, chunk_key(chunk->cx + directions[i][0], chunk->cz + directions[i][1]));
-        if (e && e->state == CHUNK_SLOT_READY) reconcile_loaded_stairs(w, e->chunk);
+        if (e && e->state == CHUNK_SLOT_READY) reconcile_loaded_neighbors(w, e->chunk);
     }
 }
 
@@ -1412,7 +1511,7 @@ bool mc_world_storage_action_allowed(mc_world_t *w, int32_t x, int32_t y, int32_
     return true;
 }
 int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t state_id) {
-    if (!w) return -1;
+    if (!w || w->neighbor_depth>=NEIGHBOR_STACK_LIMIT) return -1;
     if (y < MC_WORLD_MIN_Y || y >= MC_WORLD_MIN_Y + MC_WORLD_HEIGHT) return -1;
     state_id = mc_world_normalize_container_state_id(state_id);
     if(mc_storage_is_native(w->storage) && (mc_native_state_sensitive((uint32_t)state_id) || !mc_world_storage_action_allowed(w,x,y,z))) {errno=EOPNOTSUPP;return -1;}
@@ -1427,6 +1526,13 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
         mc_chunk_t *chunk = e->chunk;
         int32_t old = (int32_t)mc_chunk_get_block(chunk, lx, y, lz);
         if (old == state_id) return 0;
+        /* Reserve notifications before a support cascade mutates anything. */
+        if(w->updates_len==w->updates_cap){
+            size_t cap=w->updates_cap?w->updates_cap*2:256;
+            if(cap<=w->updates_len||cap>SIZE_MAX/sizeof(*w->updates))return -1;
+            void *p=realloc(w->updates,cap*sizeof(*w->updates));if(!p)return -1;
+            w->updates=p;w->updates_cap=cap;
+        }
         /* For READY chunks, mutate memory first and record a broadcast update
          * from that final state. Network code should never need to re-derive
          * what changed by re-reading the chunk later in the tick. */
@@ -1441,7 +1547,7 @@ int mc_world_set_block(mc_world_t *w, int32_t x, int32_t y, int32_t z, int32_t s
         }
         if (updates_push(w, (mc_block_update_t){x, y, z, state_id}) != 0) return -1;
         if((mc_stairs_is_state(old)||mc_stairs_is_state(state_id))&&reconcile_local(w,x,y,z))return -1;
-        return reconcile_door_neighbors(w,x,y,z);
+        return reconcile_supported_neighbors(w,x,y,z);
     }
 
     if (!e) {
@@ -1534,6 +1640,7 @@ void mc_world_tick_profiled(mc_world_t *w, int64_t now_ms, mc_world_tick_stats_t
     if (stats) memset(stats, 0, sizeof(*stats));
     if (!w) return;
     w->tick_count++;
+    if(w->neighbor_depth&&drain_supported_neighbors(w))log_error("pending support update failed; retained for retry");
     if(w->save_io)(void)save_ack(w,mc_save_io_take(w->save_io,false),stats);
     if (stats) {
         stats->flush_count = w->flush_count;

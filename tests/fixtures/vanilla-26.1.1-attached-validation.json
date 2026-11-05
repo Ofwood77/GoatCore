@@ -1,0 +1,3981 @@
+{
+  "status": "passed",
+  "initial_head": "d866b409209e7a34c84161098800b84e225ad010",
+  "server_sha256": "3f09ae210cbd5382c93553c1fd692b968e206453c8e28b13d0c99deb0ca94bc1",
+  "new_differential_cases": 310,
+  "unique_observed_state_ids": 37,
+  "official_block_states": 63,
+  "official_shape_sets": 126,
+  "official_aabbs": 191,
+  "support_predicate_states": 29873,
+  "c_suites": 32,
+  "attached_checks": 547016,
+  "hinged_cases": 335,
+  "stairs_observations": 192,
+  "block_entities": {
+    "status": "passed",
+    "stairs_observations": 192,
+    "block_entities": [
+      "minecraft:chest",
+      "minecraft:furnace",
+      "minecraft:sign",
+      "minecraft:banner",
+      "minecraft:shulker_box",
+      "minecraft:barrel",
+      "minecraft:decorated_pot"
+    ],
+    "nbt_types_values_exact": true,
+    "seed_nbt_sha256": "d765c23679ca9b23d646f6713b5e84b9a9007c6494671882d5692e506ea27ae7",
+    "server_sha256": "3f09ae210cbd5382c93553c1fd692b968e206453c8e28b13d0c99deb0ca94bc1",
+    "new_worlds": true,
+    "automatic_conversion": false
+  },
+  "old_snapshot_gates": {
+    "async-loss": {
+      "status": "passed",
+      "old_snapshot": "attachments present",
+      "new_snapshot": "attachments absent",
+      "writer_gate": "sql-before-commit",
+      "two_observers": true,
+      "normal_restart": true,
+      "independent_sqlite_nbt": true,
+      "states": [
+        {
+          "point": [
+            -8,
+            200,
+            24
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -8,
+            199,
+            24
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -6,
+            200,
+            24
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -6,
+            199,
+            24
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -8,
+            200,
+            26
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -9,
+            200,
+            26
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -6,
+            200,
+            26
+          ],
+          "state": "minecraft:air"
+        },
+        {
+          "point": [
+            -7,
+            200,
+            26
+          ],
+          "state": "minecraft:air"
+        }
+      ]
+    },
+    "async-hinged": {
+      "status": "passed",
+      "old_snapshot": "closed",
+      "new_snapshot": "open",
+      "writer_gate": "sql-before-commit",
+      "two_observers": true,
+      "normal_restart": true,
+      "independent_sqlite_nbt": true,
+      "states": [
+        {
+          "point": [
+            -8,
+            200,
+            24
+          ],
+          "state": "minecraft:oak_door[facing=south,half=lower,hinge=left,open=true,powered=false]"
+        },
+        {
+          "point": [
+            -6,
+            200,
+            24
+          ],
+          "state": "minecraft:oak_trapdoor[facing=north,half=bottom,open=true,powered=false,waterlogged=false]"
+        },
+        {
+          "point": [
+            -8,
+            201,
+            24
+          ],
+          "state": "minecraft:oak_door[facing=south,half=upper,hinge=left,open=true,powered=false]"
+        }
+      ]
+    }
+  },
+  "regeneration": {
+    "status": "passed",
+    "outputs": [
+      {
+        "path": "src/generated/generated_attached_data.h",
+        "sha256": "31da0a1ea198eb2597460baf1a184b00335de9243e240177c0ff3336ac0e833e"
+      },
+      {
+        "path": "tests/fixtures/vanilla-26.1.1-attached.tsv",
+        "sha256": "319b648467916cb9d92d5b4ce8bfe07fcc4db8d7ef2d77cac918044241fe4367"
+      },
+      {
+        "path": "src/generated/generated_block_hardness.c",
+        "sha256": "c6c1871202d39cb1845e322cdc03e377622b0ab4b97a9c964f4fd74f1e78a798"
+      },
+      {
+        "path": "src/generated/generated_block_hardness.h",
+        "sha256": "be43a723c99a406c572d10efaaed3d41dcb6d1574bcbacfdd0cf8d1cf66a628c"
+      },
+      {
+        "path": "src/generated/generated_mining_data.c",
+        "sha256": "102e5d140bc124be8519d5c9737833421241f5a822f6a13f5154071733535896"
+      },
+      {
+        "path": "src/generated/generated_mining_data.h",
+        "sha256": "6436baff12db1f9426e1ab4107e012922a85635db43fd9e82d74a97e79124acf"
+      }
+    ]
+  },
+  "sanitizers": {
+    "asan": {
+      "statuses": {
+        "test_goatworld_storage": 0,
+        "test_goatworld": 0,
+        "test_save_pipeline": 0,
+        "test_native_storage": 0,
+        "test_stairs": 0,
+        "test_nbt": 0,
+        "test_hinged_blocks": 0,
+        "test_attached_blocks": 0,
+        "test_anvil_roundtrip": 0,
+        "test_pvp": 0,
+        "crash": 0
+      },
+      "sha256": {
+        "test_goatworld_storage": "d27305d582f80446aa1740c81c86c8180e4c2619b4b1adfd2134e3ca1160fe1c",
+        "test_goatworld_storage_fault": "ec0903c591bb96a2c36f3e4e29689e12d146da535e0c79c5b5df490ba255955a",
+        "test_goatworld": "4cf0f020dc2e1329d753498cb8a9c44c25833c0e4e49835038a9490bcb61b884",
+        "test_save_pipeline": "3b7f46279613cf94af14c2646c5182ff2d3cfd7234d316de3735e56e0acf6563",
+        "test_native_storage": "16440338a378abb2c9f4ff6ce537774cd15ab89f0b92955af60a816d9b495f66",
+        "test_stairs": "7953f5993a28e27f0fda44e44f29a0565181e4ae67dfee0c418e650c3d116445",
+        "test_nbt": "1eb4078c9322b45fa2fb6b5e00fc8810c40ca655020c4ec53c6c438439f16ba9",
+        "test_hinged_blocks": "6ff6a5690412df6278aa4c10488c00d5b642be82d6028ae086a797fa25d3fc43",
+        "test_attached_blocks": "84e5d7d29f701dea44946d18a2ed05d02926c021e737ed7c1c38d0698c650f02",
+        "test_anvil_roundtrip": "737659284b4b6c4e0bbf10d2da7416f57db472b30a3a7be74176777516957683",
+        "test_pvp": "e3576da6e925269243069dbfe8e564ee84d02daaf671e567140d445c91e14db4"
+      },
+      "flags": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie",
+      "sqlite_instrumented": true
+    },
+    "tsan": {
+      "statuses": {
+        "test_goatworld_storage": 0,
+        "test_goatworld": 0,
+        "test_save_pipeline": 0,
+        "test_native_storage": 0,
+        "test_stairs": 0,
+        "test_nbt": 0,
+        "test_hinged_blocks": 0,
+        "test_attached_blocks": 0,
+        "test_anvil_roundtrip": 0,
+        "test_pvp": 0,
+        "crash": 0
+      },
+      "sha256": {
+        "test_goatworld_storage": "55fe5363229a57e8dba7560e8788045aa8648b4b0d3b731e10ab27b92d390736",
+        "test_goatworld_storage_fault": "6bd9465c7b0b1edbbd9d2aa83d7b6deb3dd85ec3426733ce20c16bbe849caab6",
+        "test_goatworld": "e3fd5119bd9a9bedc3104b6839903f376eb78253b9804484f3f1a3e0f463c5db",
+        "test_save_pipeline": "5311f72ff94d315fff142e351074a4eaca2ef78d5cea66c78214e9512b1cb2c2",
+        "test_native_storage": "cc6e449c276a78769f01da507880ba7dcb7f0a00a056b0f20ef3103026dd26e9",
+        "test_stairs": "752b60aa93b1b40ccc3ca27209141141818ac490023714b16dc6773b9fc387bc",
+        "test_nbt": "15957fdb8fb7c166e046f1297af7a93ab4a53dc1c72e2d0dc450ce1691ee957b",
+        "test_hinged_blocks": "7d0d2036c12a319942a433e73069e99ff08956c8d37bd6fb3dc83d656441d03c",
+        "test_attached_blocks": "3441556dd440e99f4cea1fe601cbaf3cf7ade459f93747e32b2bf9740bef74b0",
+        "test_anvil_roundtrip": "7acada37545ef54825287db643a76efd5a2304767daa433dfaa09aed76a3f601",
+        "test_pvp": "0ebd331280f4c93940fe5f798cef3cd2356e484100997775da200c1fcce00ada"
+      },
+      "flags": "-fsanitize=thread -fno-omit-frame-pointer -fno-pie -no-pie",
+      "sqlite_instrumented": true
+    }
+  },
+  "final_water_sanitizers": {
+    "asan": {
+      "returncode": 0,
+      "binary_sha256": "ed68b5e512db24624c05e792b68a2859e28cb856546cedcabb9d2fee6d251218",
+      "sqlite_instrumented": true,
+      "sqlite_sha256": "4ca9509efca3a9cbefbe05b1df46cc3424316d07e7d8a02457d107027b0b6a0f",
+      "flags": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie"
+    },
+    "tsan": {
+      "returncode": 0,
+      "binary_sha256": "10c1f5c6b109f24ea302d408940697adbff03373e2da2f719121bea15394ca8f",
+      "sqlite_instrumented": true,
+      "sqlite_sha256": "dd462657ab59db7382489e477ef1c578c0627e03745625eb04344d0f626dc5ff",
+      "flags": "-fsanitize=thread -fno-omit-frame-pointer -fno-pie -no-pie"
+    }
+  },
+  "hardware": {
+    "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           46 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  16\nOn-line CPU(s) list:                     0-11\nOff-line CPU(s) list:                    12-15\nVendor ID:                               GenuineIntel\nModel name:                              Intel(R) Xeon(R) CPU E5-2637 v2 @ 3.50GHz\nCPU family:                              6\nModel:                                   62\nThread(s) per core:                      2\nCore(s) per socket:                      4\nSocket(s):                               2\nStepping:                                4\nCPU(s) scaling MHz:                      36%\nCPU max MHz:                             3800.0000\nCPU min MHz:                             1200.0000\nBogoMIPS:                                6982.88\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm cpuid_fault epb pti intel_ppin ssbd ibrs ibpb stibp tpr_shadow flexpriority ept vpid fsgsbase smep erms xsaveopt dtherm ida arat pln pts vnmi md_clear flush_l1d\nVirtualization:                          VT-x\nL1d cache:                               256 KiB (8 instances)\nL1i cache:                               256 KiB (8 instances)\nL2 cache:                                2 MiB (8 instances)\nL3 cache:                                30 MiB (2 instances)\nNUMA node(s):                            2\nNUMA node0 CPU(s):                       0-3,8-11\nNUMA node1 CPU(s):                       4-7,12-15\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             KVM: Mitigation: Split huge pages\nVulnerability L1tf:                      Mitigation; PTE Inversion; VMX conditional cache flushes, SMT vulnerable\nVulnerability Mds:                       Mitigation; Clear CPU buffers; SMT vulnerable\nVulnerability Meltdown:                  Mitigation; PTI\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Not affected\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP conditional; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Mitigation; IBPB before exit to userspace\n",
+    "mount": "TARGET SOURCE                            FSTYPE OPTIONS\n/      /dev/mapper/LVM4-vm--125--disk--0 ext4   rw,relatime,stripe=32\n",
+    "disks": "NAME   TYPE ROTA   SIZE FSTYPE MOUNTPOINTS\nsda    disk    1 136.7G        \n\u251c\u2500sda1 part    1  1007K        \n\u251c\u2500sda2 part    1     1G        \n\u2514\u2500sda3 part    1 135.7G        \nsdb    disk    1   1.4T        \nsr0    rom     0  1024M        \n",
+    "space": "Filesystem                        1M-blocks   Used Available Use% Mounted on\n/dev/mapper/LVM4-vm--125--disk--0    63944M 15271M    45380M  26% /\n",
+    "memory": "               total        used        free      shared  buff/cache   available\nMem:           60576          46       56045           0        4483       60529\nSwap:           8191           0        8191\n",
+    "cpu_affinity": "8-11",
+    "nice": 10,
+    "io_class": 2,
+    "io_priority": 7,
+    "no_other_staging_servers": true
+  },
+  "performance": [
+    {
+      "bots": 1,
+      "repetition": 1,
+      "active": {
+        "duration_s": 5.171717,
+        "tps": 20.109375667694113,
+        "p50_ms": 0.147,
+        "p95_ms": 0.304,
+        "p99_ms": 0.99,
+        "max_ms": 59.537,
+        "over_50ms": 1,
+        "busy_max_ms": 82.934,
+        "busy_over_50ms": 29,
+        "tick_and_fast_ms": {
+          "0.5": 33.328,
+          "0.95": 68.29,
+          "0.99": 78.42699999999999
+        },
+        "costs_s": {
+          "tasks_us": 0.061874,
+          "fast_us": 2.802983,
+          "world_us": 0.006318,
+          "proto_us": 0.000219,
+          "items_us": 0.006141,
+          "remote_us": 3e-05,
+          "updates_us": 0.000581,
+          "evict_us": 4.5e-05,
+          "handlers_us": 2.863083,
+          "flush_us": 0.0,
+          "world_save_us": 0.001815,
+          "integrate_us": 6.7e-05,
+          "items_lock_us": 1.1e-05,
+          "furnace_lock_us": 1.3e-05
+        },
+        "fsync": {
+          "calls": 232,
+          "wall_s": 5.060116,
+          "cpu_s": 0.026745,
+          "max_ms": 64.598,
+          "errors": 0
+        },
+        "process_cpu_percent": 10.10776699009499,
+        "client_cpu_percent": 3.840951456236099,
+        "storage": {
+          "support_neighbors": {
+            "calls": 90,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 720,
+            "cpu_s": 0.000894,
+            "wall_s": 0.0008910000000000007,
+            "p50_ms": 0.008,
+            "p95_ms": 0.014,
+            "p99_ms": 0.029,
+            "max_ms": 0.029
+          },
+          "support_removed": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 30,
+            "cpu_s": 6e-05,
+            "wall_s": 5.800000000000004e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          },
+          "handler_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.004716,
+            "wall_s": 0.0047009999999999994,
+            "p50_ms": 0.077,
+            "p95_ms": 0.117,
+            "p99_ms": 0.144,
+            "max_ms": 0.144
+          },
+          "handler_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 0.002102,
+            "wall_s": 0.0022419999999999996,
+            "p50_ms": 0.063,
+            "p95_ms": 0.153,
+            "p99_ms": 0.194,
+            "max_ms": 0.194
+          },
+          "enqueue_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.000163,
+            "wall_s": 2.8912189999999995,
+            "p50_ms": 45.544,
+            "p95_ms": 73.508,
+            "p99_ms": 83.583,
+            "max_ms": 83.583
+          },
+          "enqueue_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 0.000109,
+            "wall_s": 0.018941000000000003,
+            "p50_ms": 0.619,
+            "p95_ms": 1.054,
+            "p99_ms": 1.066,
+            "max_ms": 1.066
+          },
+          "save_snapshot": {
+            "calls": 57,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 996726,
+            "cpu_s": 0.000602,
+            "wall_s": 0.0006100000000000003,
+            "p50_ms": 0.01,
+            "p95_ms": 0.015,
+            "p99_ms": 0.026,
+            "max_ms": 0.026
+          },
+          "sqlite_commit": {
+            "calls": 56,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.026483,
+            "wall_s": 1.8585470000000004,
+            "p50_ms": 34.241,
+            "p95_ms": 58.913,
+            "p99_ms": 61.857,
+            "max_ms": 61.857
+          },
+          "sqlite_transaction": {
+            "calls": 56,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 500601,
+            "cpu_s": 0.053365,
+            "wall_s": 2.864626,
+            "p50_ms": 51.011,
+            "p95_ms": 83.35,
+            "p99_ms": 91.791,
+            "max_ms": 91.791
+          },
+          "save_backpressure": {
+            "calls": 40,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 7.9e-05,
+            "wall_s": 8.000000000000006e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 120,
+            "wall_s": 2.496590000000001,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 56,
+            "wall_s": 1.6686209999999995,
+            "errors": 0
+          },
+          "other": {
+            "calls": 56,
+            "wall_s": 0.8949050000000005,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 90,
+      "observed_drop_entities": 30,
+      "total_including_shutdown_s": 13.541675284010125,
+      "after_active_until_shutdown_s": 2.293113,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 2,
+        "seconds": 0.26217504299711436
+      },
+      "process": {
+        "pid": 40781,
+        "vmhwm_kb": 30680,
+        "user_s": 1.094233,
+        "system_s": 0.152158,
+        "world_write_calls": 195,
+        "world_write_bytes": 286197,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 325,
+        "fdatasync_calls": 0,
+        "rchar": 685791,
+        "wchar": 483958,
+        "syscr": 728,
+        "syscw": 1001,
+        "read_bytes": 0,
+        "write_bytes": 962560,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 195,
+        "requested_bytes": 286197,
+        "completed_bytes": 286197,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 65,
+        "pwrite_calls": 130
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.004114,
+        "wall_s": 0.06411700000000001,
+        "p50_ms": 64.117,
+        "p95_ms": 64.117,
+        "p99_ms": 64.117,
+        "max_ms": 64.117
+      }
+    },
+    {
+      "bots": 1,
+      "repetition": 2,
+      "active": {
+        "duration_s": 5.607196,
+        "tps": 19.97433298211798,
+        "p50_ms": 0.11,
+        "p95_ms": 0.317,
+        "p99_ms": 0.358,
+        "max_ms": 0.384,
+        "over_50ms": 0,
+        "busy_max_ms": 96.092,
+        "busy_over_50ms": 30,
+        "tick_and_fast_ms": {
+          "0.5": 0.325,
+          "0.95": 80.689,
+          "0.99": 93.53
+        },
+        "costs_s": {
+          "tasks_us": 0.002191,
+          "fast_us": 3.079377,
+          "world_us": 0.005332,
+          "proto_us": 0.000204,
+          "items_us": 0.004183,
+          "remote_us": 3.4e-05,
+          "updates_us": 0.000933,
+          "evict_us": 3.7e-05,
+          "handlers_us": 3.073435,
+          "flush_us": 0.0,
+          "world_save_us": 0.001594,
+          "integrate_us": 4.6e-05,
+          "items_lock_us": 1.3e-05,
+          "furnace_lock_us": 1.3e-05
+        },
+        "fsync": {
+          "calls": 236,
+          "wall_s": 5.504471,
+          "cpu_s": 0.024674,
+          "max_ms": 56.109,
+          "errors": 0
+        },
+        "process_cpu_percent": 8.638980144498888,
+        "client_cpu_percent": 3.308545587254897,
+        "storage": {
+          "support_neighbors": {
+            "calls": 90,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 720,
+            "cpu_s": 0.000785,
+            "wall_s": 0.0008350000000000007,
+            "p50_ms": 0.008,
+            "p95_ms": 0.015,
+            "p99_ms": 0.029,
+            "max_ms": 0.029
+          },
+          "support_removed": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 30,
+            "cpu_s": 5.3e-05,
+            "wall_s": 5.800000000000004e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.007,
+            "max_ms": 0.007
+          },
+          "handler_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.004579,
+            "wall_s": 0.004568000000000001,
+            "p50_ms": 0.077,
+            "p95_ms": 0.108,
+            "p99_ms": 0.128,
+            "max_ms": 0.128
+          },
+          "handler_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 0.001929,
+            "wall_s": 0.0021060000000000002,
+            "p50_ms": 0.064,
+            "p95_ms": 0.121,
+            "p99_ms": 0.237,
+            "max_ms": 0.237
+          },
+          "enqueue_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.000153,
+            "wall_s": 3.0975119999999996,
+            "p50_ms": 48.727,
+            "p95_ms": 81.24,
+            "p99_ms": 96.603,
+            "max_ms": 96.603
+          },
+          "enqueue_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 9.2e-05,
+            "wall_s": 0.019043,
+            "p50_ms": 0.675,
+            "p95_ms": 1.064,
+            "p99_ms": 1.177,
+            "max_ms": 1.177
+          },
+          "save_snapshot": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1014606,
+            "cpu_s": 0.000555,
+            "wall_s": 0.0005820000000000004,
+            "p50_ms": 0.009,
+            "p95_ms": 0.017,
+            "p99_ms": 0.03,
+            "max_ms": 0.03
+          },
+          "sqlite_commit": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.024618,
+            "wall_s": 2.1284289999999997,
+            "p50_ms": 36.072,
+            "p95_ms": 57.738,
+            "p99_ms": 62.321,
+            "max_ms": 62.321
+          },
+          "sqlite_transaction": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 518843,
+            "cpu_s": 0.049848,
+            "wall_s": 3.1346030000000007,
+            "p50_ms": 53.5,
+            "p95_ms": 80.707,
+            "p99_ms": 85.556,
+            "max_ms": 85.556
+          },
+          "save_backpressure": {
+            "calls": 46,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 8.3e-05,
+            "wall_s": 8.700000000000004e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.007,
+            "max_ms": 0.007
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 120,
+            "wall_s": 2.721527999999999,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 58,
+            "wall_s": 1.878221,
+            "errors": 0
+          },
+          "other": {
+            "calls": 58,
+            "wall_s": 0.9047220000000002,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 90,
+      "observed_drop_entities": 30,
+      "total_including_shutdown_s": 14.14612260001013,
+      "after_active_until_shutdown_s": 2.301659,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 2,
+        "seconds": 0.3236672259954503
+      },
+      "process": {
+        "pid": 40795,
+        "vmhwm_kb": 30792,
+        "user_s": 1.060929,
+        "system_s": 0.146724,
+        "world_write_calls": 197,
+        "world_write_bytes": 290317,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 327,
+        "fdatasync_calls": 0,
+        "rchar": 685943,
+        "wchar": 489515,
+        "syscr": 766,
+        "syscw": 1026,
+        "read_bytes": 0,
+        "write_bytes": 970752,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 197,
+        "requested_bytes": 290317,
+        "completed_bytes": 290317,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 65,
+        "pwrite_calls": 132
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.004178,
+        "wall_s": 0.05004,
+        "p50_ms": 50.04,
+        "p95_ms": 50.04,
+        "p99_ms": 50.04,
+        "max_ms": 50.04
+      }
+    },
+    {
+      "bots": 1,
+      "repetition": 3,
+      "active": {
+        "duration_s": 5.084389,
+        "tps": 19.864727108803045,
+        "p50_ms": 0.131,
+        "p95_ms": 0.326,
+        "p99_ms": 0.836,
+        "max_ms": 0.843,
+        "over_50ms": 0,
+        "busy_max_ms": 80.278,
+        "busy_over_50ms": 28,
+        "tick_and_fast_ms": {
+          "0.5": 31.988,
+          "0.95": 62.92,
+          "0.99": 73.702
+        },
+        "costs_s": {
+          "tasks_us": 0.002016,
+          "fast_us": 2.780912,
+          "world_us": 0.005299,
+          "proto_us": 0.000185,
+          "items_us": 0.006946,
+          "remote_us": 2.5e-05,
+          "updates_us": 0.000431,
+          "evict_us": 4.7e-05,
+          "handlers_us": 2.780938,
+          "flush_us": 0.0,
+          "world_save_us": 0.001669,
+          "integrate_us": 4.4e-05,
+          "items_lock_us": 9e-06,
+          "furnace_lock_us": 1.7e-05
+        },
+        "fsync": {
+          "calls": 236,
+          "wall_s": 4.996489,
+          "cpu_s": 0.026799,
+          "max_ms": 54.787,
+          "errors": 0
+        },
+        "process_cpu_percent": 10.52461139896373,
+        "client_cpu_percent": 4.04792746113989,
+        "storage": {
+          "support_neighbors": {
+            "calls": 90,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 720,
+            "cpu_s": 0.000835,
+            "wall_s": 0.0008550000000000006,
+            "p50_ms": 0.007,
+            "p95_ms": 0.014,
+            "p99_ms": 0.031,
+            "max_ms": 0.031
+          },
+          "support_removed": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 30,
+            "cpu_s": 5.6e-05,
+            "wall_s": 5.400000000000003e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          },
+          "handler_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.004522,
+            "wall_s": 0.004510999999999999,
+            "p50_ms": 0.076,
+            "p95_ms": 0.107,
+            "p99_ms": 0.133,
+            "max_ms": 0.133
+          },
+          "handler_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 0.002247,
+            "wall_s": 0.002372,
+            "p50_ms": 0.064,
+            "p95_ms": 0.141,
+            "p99_ms": 0.201,
+            "max_ms": 0.201
+          },
+          "enqueue_place": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.000159,
+            "wall_s": 2.8120649999999996,
+            "p50_ms": 45.943,
+            "p95_ms": 63.663,
+            "p99_ms": 79.964,
+            "max_ms": 79.964
+          },
+          "enqueue_break": {
+            "calls": 30,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 330,
+            "cpu_s": 0.000105,
+            "wall_s": 0.016769000000000003,
+            "p50_ms": 0.556,
+            "p95_ms": 0.992,
+            "p99_ms": 1.033,
+            "max_ms": 1.033
+          },
+          "save_snapshot": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1014531,
+            "cpu_s": 0.000579,
+            "wall_s": 0.0005880000000000003,
+            "p50_ms": 0.009,
+            "p95_ms": 0.016,
+            "p99_ms": 0.028,
+            "max_ms": 0.028
+          },
+          "sqlite_commit": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.026717,
+            "wall_s": 1.914828,
+            "p50_ms": 32.652,
+            "p95_ms": 48.816,
+            "p99_ms": 55.783,
+            "max_ms": 55.783
+          },
+          "sqlite_transaction": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 518768,
+            "cpu_s": 0.053878,
+            "wall_s": 2.8650150000000005,
+            "p50_ms": 50.379,
+            "p95_ms": 72.314,
+            "p99_ms": 75.829,
+            "max_ms": 75.829
+          },
+          "save_backpressure": {
+            "calls": 38,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 7.1e-05,
+            "wall_s": 7.200000000000006e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 120,
+            "wall_s": 2.481787,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 58,
+            "wall_s": 1.6769680000000007,
+            "errors": 0
+          },
+          "other": {
+            "calls": 58,
+            "wall_s": 0.8377340000000001,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 90,
+      "observed_drop_entities": 30,
+      "total_including_shutdown_s": 13.567953334000777,
+      "after_active_until_shutdown_s": 2.253939,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 2,
+        "seconds": 0.3372589299979154
+      },
+      "process": {
+        "pid": 40808,
+        "vmhwm_kb": 30976,
+        "user_s": 1.189046,
+        "system_s": 0.153817,
+        "world_write_calls": 199,
+        "world_write_bytes": 294437,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 329,
+        "fdatasync_calls": 0,
+        "rchar": 685815,
+        "wchar": 489137,
+        "syscr": 734,
+        "syscw": 1015,
+        "read_bytes": 0,
+        "write_bytes": 974848,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 199,
+        "requested_bytes": 294437,
+        "completed_bytes": 294437,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 65,
+        "pwrite_calls": 134
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.004465,
+        "wall_s": 0.098658,
+        "p50_ms": 98.658,
+        "p95_ms": 98.658,
+        "p99_ms": 98.658,
+        "max_ms": 98.658
+      }
+    },
+    {
+      "bots": 2,
+      "repetition": 1,
+      "active": {
+        "duration_s": 7.707882,
+        "tps": 18.68217494767045,
+        "p50_ms": 0.266,
+        "p95_ms": 63.431,
+        "p99_ms": 87.873,
+        "max_ms": 89.489,
+        "over_50ms": 16,
+        "busy_max_ms": 139.18,
+        "busy_over_50ms": 49,
+        "tick_and_fast_ms": {
+          "0.5": 33.005,
+          "0.95": 106.15100000000001,
+          "0.99": 131.276
+        },
+        "costs_s": {
+          "tasks_us": 2.732703,
+          "fast_us": 2.796206,
+          "world_us": 0.009089,
+          "proto_us": 0.00031,
+          "items_us": 0.017632,
+          "remote_us": 0.002296,
+          "updates_us": 0.002014,
+          "evict_us": 8.6e-05,
+          "handlers_us": 5.524717,
+          "flush_us": 0.0,
+          "world_save_us": 0.003523,
+          "integrate_us": 6.4e-05,
+          "items_lock_us": 1.9e-05,
+          "furnace_lock_us": 1.9e-05
+        },
+        "fsync": {
+          "calls": 387,
+          "wall_s": 8.566436,
+          "cpu_s": 0.04383,
+          "max_ms": 66.639,
+          "errors": 0
+        },
+        "process_cpu_percent": 15.74666868954306,
+        "client_cpu_percent": 5.203247045240327,
+        "storage": {
+          "support_neighbors": {
+            "calls": 180,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1440,
+            "cpu_s": 0.001704,
+            "wall_s": 0.001741999999999996,
+            "p50_ms": 0.008,
+            "p95_ms": 0.015,
+            "p99_ms": 0.024,
+            "max_ms": 0.031
+          },
+          "support_removed": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 60,
+            "cpu_s": 0.000107,
+            "wall_s": 0.00011900000000000009,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          },
+          "handler_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.010168,
+            "wall_s": 0.010129000000000003,
+            "p50_ms": 0.083,
+            "p95_ms": 0.128,
+            "p99_ms": 0.152,
+            "max_ms": 0.171
+          },
+          "handler_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.003511,
+            "wall_s": 0.0036199999999999987,
+            "p50_ms": 0.052,
+            "p95_ms": 0.109,
+            "p99_ms": 0.131,
+            "max_ms": 0.131
+          },
+          "enqueue_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.000365,
+            "wall_s": 8.264940000000003,
+            "p50_ms": 69.56,
+            "p95_ms": 106.164,
+            "p99_ms": 129.916,
+            "max_ms": 148.094
+          },
+          "enqueue_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.000155,
+            "wall_s": 1.4937949999999995,
+            "p50_ms": 1.374,
+            "p95_ms": 62.603,
+            "p99_ms": 89.037,
+            "max_ms": 89.037
+          },
+          "save_snapshot": {
+            "calls": 141,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 2467807,
+            "cpu_s": 0.001411,
+            "wall_s": 0.0014369999999999988,
+            "p50_ms": 0.01,
+            "p95_ms": 0.016,
+            "p99_ms": 0.029,
+            "max_ms": 0.03
+          },
+          "sqlite_commit": {
+            "calls": 74,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.039784,
+            "wall_s": 2.5604560000000007,
+            "p50_ms": 32.894,
+            "p95_ms": 61.472,
+            "p99_ms": 74.729,
+            "max_ms": 74.729
+          },
+          "sqlite_transaction": {
+            "calls": 74,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1261686,
+            "cpu_s": 0.085101,
+            "wall_s": 4.015870000000001,
+            "p50_ms": 53.461,
+            "p95_ms": 86.597,
+            "p99_ms": 100.12,
+            "max_ms": 100.12
+          },
+          "save_backpressure": {
+            "calls": 68,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.000125,
+            "wall_s": 0.00015100000000000012,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.018,
+            "max_ms": 0.018
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 240,
+            "wall_s": 5.073834999999999,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 74,
+            "wall_s": 2.337840999999999,
+            "errors": 0
+          },
+          "other": {
+            "calls": 73,
+            "wall_s": 1.15476,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 180,
+      "observed_drop_entities": 60,
+      "total_including_shutdown_s": 16.78580540799885,
+      "after_active_until_shutdown_s": 2.432312,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 4,
+        "seconds": 0.32482622799579985
+      },
+      "process": {
+        "pid": 40821,
+        "vmhwm_kb": 31420,
+        "user_s": 1.608094,
+        "system_s": 0.217817,
+        "world_write_calls": 437,
+        "world_write_bytes": 687670,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 493,
+        "fdatasync_calls": 0,
+        "rchar": 738203,
+        "wchar": 1046005,
+        "syscr": 1439,
+        "syscw": 2381,
+        "read_bytes": 0,
+        "write_bytes": 1822720,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 437,
+        "requested_bytes": 687670,
+        "completed_bytes": 687670,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 130,
+        "pwrite_calls": 307
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.004252,
+        "wall_s": 0.048641,
+        "p50_ms": 48.641,
+        "p95_ms": 48.641,
+        "p99_ms": 48.641,
+        "max_ms": 48.641
+      }
+    },
+    {
+      "bots": 2,
+      "repetition": 2,
+      "active": {
+        "duration_s": 8.454089,
+        "tps": 16.32346193658477,
+        "p50_ms": 0.275,
+        "p95_ms": 66.583,
+        "p99_ms": 115.761,
+        "max_ms": 314.273,
+        "over_50ms": 19,
+        "busy_max_ms": 314.273,
+        "busy_over_50ms": 52,
+        "tick_and_fast_ms": {
+          "0.5": 31.375,
+          "0.95": 144.309,
+          "0.99": 221.344
+        },
+        "costs_s": {
+          "tasks_us": 2.929031,
+          "fast_us": 3.406599,
+          "world_us": 0.008322,
+          "proto_us": 0.000317,
+          "items_us": 0.012326,
+          "remote_us": 0.003733,
+          "updates_us": 0.006532,
+          "evict_us": 8.1e-05,
+          "handlers_us": 6.328117,
+          "flush_us": 0.0,
+          "world_save_us": 0.003244,
+          "integrate_us": 6.7e-05,
+          "items_lock_us": 2.1e-05,
+          "furnace_lock_us": 2.4e-05
+        },
+        "fsync": {
+          "calls": 374,
+          "wall_s": 9.50578,
+          "cpu_s": 0.042084,
+          "max_ms": 271.141,
+          "errors": 0
+        },
+        "process_cpu_percent": 13.492431797923476,
+        "client_cpu_percent": 4.703783562578826,
+        "storage": {
+          "support_neighbors": {
+            "calls": 180,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1440,
+            "cpu_s": 0.001701,
+            "wall_s": 0.0017399999999999963,
+            "p50_ms": 0.008,
+            "p95_ms": 0.014,
+            "p99_ms": 0.034,
+            "max_ms": 0.039
+          },
+          "support_removed": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 60,
+            "cpu_s": 0.000111,
+            "wall_s": 0.00011400000000000007,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          },
+          "handler_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.01017,
+            "wall_s": 0.010192000000000001,
+            "p50_ms": 0.083,
+            "p95_ms": 0.122,
+            "p99_ms": 0.134,
+            "max_ms": 0.148
+          },
+          "handler_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.003662,
+            "wall_s": 0.0039109999999999995,
+            "p50_ms": 0.061,
+            "p95_ms": 0.123,
+            "p99_ms": 0.153,
+            "max_ms": 0.153
+          },
+          "enqueue_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.000364,
+            "wall_s": 9.51465,
+            "p50_ms": 67.854,
+            "p95_ms": 162.547,
+            "p99_ms": 368.563,
+            "max_ms": 457.788
+          },
+          "enqueue_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.000154,
+            "wall_s": 1.6304509999999997,
+            "p50_ms": 1.12,
+            "p95_ms": 69.11,
+            "p99_ms": 179.087,
+            "max_ms": 179.087
+          },
+          "save_snapshot": {
+            "calls": 131,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 2292472,
+            "cpu_s": 0.001289,
+            "wall_s": 0.0014299999999999981,
+            "p50_ms": 0.009,
+            "p95_ms": 0.015,
+            "p99_ms": 0.027,
+            "max_ms": 0.147
+          },
+          "sqlite_commit": {
+            "calls": 67,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.036395,
+            "wall_s": 2.7852880000000004,
+            "p50_ms": 34.998,
+            "p95_ms": 84.949,
+            "p99_ms": 277.359,
+            "max_ms": 277.359
+          },
+          "sqlite_transaction": {
+            "calls": 67,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1172191,
+            "cpu_s": 0.078148,
+            "wall_s": 4.286760999999999,
+            "p50_ms": 55.461,
+            "p95_ms": 136.63,
+            "p99_ms": 310.968,
+            "max_ms": 310.968
+          },
+          "save_backpressure": {
+            "calls": 70,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.000141,
+            "wall_s": 0.0001630000000000001,
+            "p50_ms": 0.002,
+            "p95_ms": 0.004,
+            "p99_ms": 0.014,
+            "max_ms": 0.014
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 240,
+            "wall_s": 5.733660000000003,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 67,
+            "wall_s": 2.5151669999999995,
+            "errors": 0
+          },
+          "other": {
+            "calls": 67,
+            "wall_s": 1.2569529999999998,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 180,
+      "observed_drop_entities": 60,
+      "total_including_shutdown_s": 17.607785786007298,
+      "after_active_until_shutdown_s": 2.462406,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 4,
+        "seconds": 0.2234349439968355
+      },
+      "process": {
+        "pid": 40834,
+        "vmhwm_kb": 31412,
+        "user_s": 1.76085,
+        "system_s": 0.236,
+        "world_write_calls": 417,
+        "world_write_bytes": 646470,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 479,
+        "fdatasync_calls": 0,
+        "rchar": 738203,
+        "wchar": 994472,
+        "syscr": 1444,
+        "syscw": 2323,
+        "read_bytes": 0,
+        "write_bytes": 1740800,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 417,
+        "requested_bytes": 646470,
+        "completed_bytes": 646470,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 130,
+        "pwrite_calls": 287
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.0045,
+        "wall_s": 0.052628999999999995,
+        "p50_ms": 52.629,
+        "p95_ms": 52.629,
+        "p99_ms": 52.629,
+        "max_ms": 52.629
+      }
+    },
+    {
+      "bots": 2,
+      "repetition": 3,
+      "active": {
+        "duration_s": 7.499256,
+        "tps": 19.60194451289568,
+        "p50_ms": 0.298,
+        "p95_ms": 53.554,
+        "p99_ms": 60.557,
+        "max_ms": 65.964,
+        "over_50ms": 11,
+        "busy_max_ms": 140.53,
+        "busy_over_50ms": 45,
+        "tick_and_fast_ms": {
+          "0.5": 32.001,
+          "0.95": 105.271,
+          "0.99": 127.725
+        },
+        "costs_s": {
+          "tasks_us": 2.635341,
+          "fast_us": 2.677949,
+          "world_us": 0.008838,
+          "proto_us": 0.00035,
+          "items_us": 0.011465,
+          "remote_us": 0.002078,
+          "updates_us": 0.002631,
+          "evict_us": 8.3e-05,
+          "handlers_us": 5.30915,
+          "flush_us": 0.0,
+          "world_save_us": 0.003294,
+          "integrate_us": 7e-05,
+          "items_lock_us": 1.8e-05,
+          "furnace_lock_us": 1.6e-05
+        },
+        "fsync": {
+          "calls": 390,
+          "wall_s": 8.27133,
+          "cpu_s": 0.044069,
+          "max_ms": 66.915,
+          "errors": 0
+        },
+        "process_cpu_percent": 16.02528982489974,
+        "client_cpu_percent": 5.3417632749665875,
+        "storage": {
+          "support_neighbors": {
+            "calls": 180,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1440,
+            "cpu_s": 0.001704,
+            "wall_s": 0.0017629999999999966,
+            "p50_ms": 0.008,
+            "p95_ms": 0.014,
+            "p99_ms": 0.026,
+            "max_ms": 0.039
+          },
+          "support_removed": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 60,
+            "cpu_s": 0.000108,
+            "wall_s": 0.00010900000000000007,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          },
+          "handler_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.010574,
+            "wall_s": 0.010530000000000003,
+            "p50_ms": 0.084,
+            "p95_ms": 0.144,
+            "p99_ms": 0.192,
+            "max_ms": 0.235
+          },
+          "handler_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.003474,
+            "wall_s": 0.004671000000000001,
+            "p50_ms": 0.052,
+            "p95_ms": 0.124,
+            "p99_ms": 1.134,
+            "max_ms": 1.134
+          },
+          "enqueue_place": {
+            "calls": 120,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3000,
+            "cpu_s": 0.000359,
+            "wall_s": 8.167497000000001,
+            "p50_ms": 70.61,
+            "p95_ms": 98.38,
+            "p99_ms": 110.287,
+            "max_ms": 115.297
+          },
+          "enqueue_break": {
+            "calls": 60,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 660,
+            "cpu_s": 0.000169,
+            "wall_s": 1.3837810000000004,
+            "p50_ms": 1.087,
+            "p95_ms": 55.507,
+            "p99_ms": 68.843,
+            "max_ms": 68.843
+          },
+          "save_snapshot": {
+            "calls": 144,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 2520377,
+            "cpu_s": 0.001365,
+            "wall_s": 0.0014119999999999994,
+            "p50_ms": 0.009,
+            "p95_ms": 0.015,
+            "p99_ms": 0.019,
+            "max_ms": 0.022
+          },
+          "sqlite_commit": {
+            "calls": 75,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.039884,
+            "wall_s": 2.5380160000000007,
+            "p50_ms": 33.259,
+            "p95_ms": 55.226,
+            "p99_ms": 73.287,
+            "max_ms": 73.287
+          },
+          "sqlite_transaction": {
+            "calls": 75,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1288504,
+            "cpu_s": 0.084718,
+            "wall_s": 3.952362,
+            "p50_ms": 53.524,
+            "p95_ms": 77.32,
+            "p99_ms": 96.856,
+            "max_ms": 96.856
+          },
+          "save_backpressure": {
+            "calls": 71,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.000131,
+            "wall_s": 0.0001450000000000001,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 240,
+            "wall_s": 4.7956970000000005,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 75,
+            "wall_s": 2.3334870000000003,
+            "errors": 0
+          },
+          "other": {
+            "calls": 75,
+            "wall_s": 1.1421459999999999,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 180,
+      "observed_drop_entities": 60,
+      "total_including_shutdown_s": 16.528423162992112,
+      "after_active_until_shutdown_s": 2.389183,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 4,
+        "seconds": 0.27602454100269824
+      },
+      "process": {
+        "pid": 40847,
+        "vmhwm_kb": 31176,
+        "user_s": 1.724018,
+        "system_s": 0.255485,
+        "world_write_calls": 443,
+        "world_write_bytes": 700030,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 495,
+        "fdatasync_calls": 0,
+        "rchar": 738339,
+        "wchar": 1060435,
+        "syscr": 1477,
+        "syscw": 2432,
+        "read_bytes": 0,
+        "write_bytes": 1839104,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 443,
+        "requested_bytes": 700030,
+        "completed_bytes": 700030,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 130,
+        "pwrite_calls": 313
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.005176,
+        "wall_s": 0.051896,
+        "p50_ms": 51.896,
+        "p95_ms": 51.896,
+        "p99_ms": 51.896,
+        "max_ms": 51.896
+      }
+    },
+    {
+      "bots": 10,
+      "repetition": 1,
+      "active": {
+        "duration_s": 26.462837,
+        "tps": 3.476573581283065,
+        "p50_ms": 31.44,
+        "p95_ms": 381.69,
+        "p99_ms": 1601.936,
+        "max_ms": 1601.936,
+        "over_50ms": 33,
+        "busy_max_ms": 1634.512,
+        "busy_over_50ms": 59,
+        "tick_and_fast_ms": {
+          "0.5": 353.28999999999996,
+          "0.95": 667.046,
+          "0.99": 1634.512
+        },
+        "costs_s": {
+          "tasks_us": 11.900632,
+          "fast_us": 12.302717,
+          "world_us": 0.028767,
+          "proto_us": 0.000631,
+          "items_us": 0.113931,
+          "remote_us": 0.014288,
+          "updates_us": 0.015562,
+          "evict_us": 0.000361,
+          "handlers_us": 24.176842,
+          "flush_us": 0.0,
+          "world_save_us": 0.005944,
+          "integrate_us": 5.3e-05,
+          "items_lock_us": 9e-06,
+          "furnace_lock_us": 1e-05
+        },
+        "fsync": {
+          "calls": 1322,
+          "wall_s": 26.438075,
+          "cpu_s": 0.112763,
+          "max_ms": 483.103,
+          "errors": 0
+        },
+        "process_cpu_percent": 11.22256312348209,
+        "client_cpu_percent": 8.206976433838946,
+        "storage": {
+          "support_neighbors": {
+            "calls": 900,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 7200,
+            "cpu_s": 0.006843,
+            "wall_s": 0.007098999999999938,
+            "p50_ms": 0.007,
+            "p95_ms": 0.014,
+            "p99_ms": 0.022,
+            "max_ms": 0.04
+          },
+          "support_removed": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 300,
+            "cpu_s": 0.000452,
+            "wall_s": 0.00045600000000000035,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.004
+          },
+          "handler_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.051207,
+            "wall_s": 0.05475699999999993,
+            "p50_ms": 0.076,
+            "p95_ms": 0.155,
+            "p99_ms": 0.439,
+            "max_ms": 0.958
+          },
+          "handler_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.011566,
+            "wall_s": 0.013615999999999998,
+            "p50_ms": 0.036,
+            "p95_ms": 0.083,
+            "p99_ms": 0.146,
+            "max_ms": 0.77
+          },
+          "enqueue_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.00154,
+            "wall_s": 188.99819699999995,
+            "p50_ms": 343.794,
+            "p95_ms": 438.149,
+            "p99_ms": 1516.07,
+            "max_ms": 1711.318
+          },
+          "enqueue_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.000486,
+            "wall_s": 51.14742800000005,
+            "p50_ms": 168.581,
+            "p95_ms": 353.436,
+            "p99_ms": 374.97,
+            "max_ms": 442.353
+          },
+          "save_snapshot": {
+            "calls": 356,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6247244,
+            "cpu_s": 0.003396,
+            "wall_s": 0.0034999999999999775,
+            "p50_ms": 0.009,
+            "p95_ms": 0.017,
+            "p99_ms": 0.028,
+            "max_ms": 0.093
+          },
+          "sqlite_commit": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.039681,
+            "wall_s": 2.317091,
+            "p50_ms": 37.143,
+            "p95_ms": 56.556,
+            "p99_ms": 69.736,
+            "max_ms": 69.736
+          },
+          "sqlite_transaction": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3204328,
+            "cpu_s": 0.099652,
+            "wall_s": 3.543322,
+            "p50_ms": 56.806,
+            "p95_ms": 88.678,
+            "p99_ms": 94.359,
+            "max_ms": 94.359
+          },
+          "save_backpressure": {
+            "calls": 31,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 4.9e-05,
+            "wall_s": 5.500000000000003e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 1200,
+            "wall_s": 23.35630999999998,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 61,
+            "wall_s": 2.088297,
+            "errors": 0
+          },
+          "other": {
+            "calls": 61,
+            "wall_s": 0.993468,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 900,
+      "observed_drop_entities": 300,
+      "total_including_shutdown_s": 41.483350727008656,
+      "after_active_until_shutdown_s": 3.674547,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 20,
+        "seconds": 0.38642528699710965
+      },
+      "process": {
+        "pid": 40860,
+        "vmhwm_kb": 33060,
+        "user_s": 4.054194,
+        "system_s": 0.826396,
+        "world_write_calls": 1439,
+        "world_write_bytes": 1968099,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 1543,
+        "fdatasync_calls": 0,
+        "rchar": 1604316,
+        "wchar": 3157722,
+        "syscr": 7849,
+        "syscw": 22477,
+        "read_bytes": 0,
+        "write_bytes": 5894144,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 1439,
+        "requested_bytes": 1968099,
+        "completed_bytes": 1968099,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 650,
+        "pwrite_calls": 789
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.002521,
+        "wall_s": 0.171617,
+        "p50_ms": 171.617,
+        "p95_ms": 171.617,
+        "p99_ms": 171.617,
+        "max_ms": 171.617
+      }
+    },
+    {
+      "bots": 10,
+      "repetition": 2,
+      "active": {
+        "duration_s": 25.70812,
+        "tps": 3.500839423497323,
+        "p50_ms": 40.628,
+        "p95_ms": 356.001,
+        "p99_ms": 709.494,
+        "max_ms": 709.494,
+        "over_50ms": 36,
+        "busy_max_ms": 742.2900000000001,
+        "busy_over_50ms": 60,
+        "tick_and_fast_ms": {
+          "0.5": 354.07500000000005,
+          "0.95": 457.221,
+          "0.99": 742.2900000000001
+        },
+        "costs_s": {
+          "tasks_us": 11.214594,
+          "fast_us": 12.092365,
+          "world_us": 0.012183,
+          "proto_us": 0.000662,
+          "items_us": 0.134347,
+          "remote_us": 0.016619,
+          "updates_us": 0.012666,
+          "evict_us": 0.000285,
+          "handlers_us": 23.280304,
+          "flush_us": 0.0,
+          "world_save_us": 0.006288,
+          "integrate_us": 6.4e-05,
+          "items_lock_us": 1.3e-05,
+          "furnace_lock_us": 1e-05
+        },
+        "fsync": {
+          "calls": 1322,
+          "wall_s": 25.347834,
+          "cpu_s": 0.129475,
+          "max_ms": 267.332,
+          "errors": 0
+        },
+        "process_cpu_percent": 13.94660685771648,
+        "client_cpu_percent": 9.995726728051753,
+        "storage": {
+          "support_neighbors": {
+            "calls": 900,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 7200,
+            "cpu_s": 0.008033,
+            "wall_s": 0.008285999999999932,
+            "p50_ms": 0.007,
+            "p95_ms": 0.016,
+            "p99_ms": 0.026,
+            "max_ms": 0.044
+          },
+          "support_removed": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 300,
+            "cpu_s": 0.000525,
+            "wall_s": 0.0005660000000000004,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.01
+          },
+          "handler_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.057458,
+            "wall_s": 0.05750000000000005,
+            "p50_ms": 0.102,
+            "p95_ms": 0.154,
+            "p99_ms": 0.193,
+            "max_ms": 0.3
+          },
+          "handler_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.014202,
+            "wall_s": 0.014958000000000004,
+            "p50_ms": 0.041,
+            "p95_ms": 0.095,
+            "p99_ms": 0.133,
+            "max_ms": 0.187
+          },
+          "enqueue_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.001807,
+            "wall_s": 180.46855699999983,
+            "p50_ms": 345.777,
+            "p95_ms": 469.68,
+            "p99_ms": 598.208,
+            "max_ms": 743.722
+          },
+          "enqueue_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.000602,
+            "wall_s": 51.058323,
+            "p50_ms": 167.215,
+            "p95_ms": 346.509,
+            "p99_ms": 425.805,
+            "max_ms": 529.541
+          },
+          "save_snapshot": {
+            "calls": 361,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6321532,
+            "cpu_s": 0.003668,
+            "wall_s": 0.003682999999999981,
+            "p50_ms": 0.01,
+            "p95_ms": 0.014,
+            "p99_ms": 0.021,
+            "max_ms": 0.033
+          },
+          "sqlite_commit": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.046597,
+            "wall_s": 2.267231,
+            "p50_ms": 36.92,
+            "p95_ms": 59.888,
+            "p99_ms": 66.632,
+            "max_ms": 66.632
+          },
+          "sqlite_transaction": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3235511,
+            "cpu_s": 0.115938,
+            "wall_s": 3.5800569999999996,
+            "p50_ms": 58.504,
+            "p95_ms": 88.221,
+            "p99_ms": 122.934,
+            "max_ms": 122.934
+          },
+          "save_backpressure": {
+            "calls": 29,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 5.3e-05,
+            "wall_s": 6.1000000000000026e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 1200,
+            "wall_s": 22.348175999999984,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 61,
+            "wall_s": 1.9715589999999994,
+            "errors": 0
+          },
+          "other": {
+            "calls": 61,
+            "wall_s": 1.028099,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 900,
+      "observed_drop_entities": 300,
+      "total_including_shutdown_s": 40.962312125993776,
+      "after_active_until_shutdown_s": 3.70196,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 20,
+        "seconds": 0.5140249670075718
+      },
+      "process": {
+        "pid": 40873,
+        "vmhwm_kb": 33368,
+        "user_s": 4.156592,
+        "system_s": 0.899953,
+        "world_write_calls": 1449,
+        "world_write_bytes": 1988699,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 1543,
+        "fdatasync_calls": 0,
+        "rchar": 1604868,
+        "wchar": 3199917,
+        "syscr": 7940,
+        "syscw": 24457,
+        "read_bytes": 0,
+        "write_bytes": 5918720,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 1449,
+        "requested_bytes": 1988699,
+        "completed_bytes": 1988699,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 650,
+        "pwrite_calls": 799
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.005414,
+        "wall_s": 0.066371,
+        "p50_ms": 66.371,
+        "p95_ms": 66.371,
+        "p99_ms": 66.371,
+        "max_ms": 66.371
+      }
+    },
+    {
+      "bots": 10,
+      "repetition": 3,
+      "active": {
+        "duration_s": 24.837449,
+        "tps": 3.5832987518162596,
+        "p50_ms": 35.674,
+        "p95_ms": 348.984,
+        "p99_ms": 381.148,
+        "max_ms": 381.148,
+        "over_50ms": 34,
+        "busy_max_ms": 673.7850000000001,
+        "busy_over_50ms": 59,
+        "tick_and_fast_ms": {
+          "0.5": 352.57,
+          "0.95": 436.834,
+          "0.99": 673.7850000000001
+        },
+        "costs_s": {
+          "tasks_us": 10.519614,
+          "fast_us": 12.014074,
+          "world_us": 0.011969,
+          "proto_us": 0.000685,
+          "items_us": 0.138244,
+          "remote_us": 0.015284,
+          "updates_us": 0.012604,
+          "evict_us": 0.000207,
+          "handlers_us": 22.509251,
+          "flush_us": 0.0,
+          "world_save_us": 0.006335,
+          "integrate_us": 5.4e-05,
+          "items_lock_us": 1e-05,
+          "furnace_lock_us": 1.3e-05
+        },
+        "fsync": {
+          "calls": 1322,
+          "wall_s": 24.585291,
+          "cpu_s": 0.126096,
+          "max_ms": 92.313,
+          "errors": 0
+        },
+        "process_cpu_percent": 13.764647203995311,
+        "client_cpu_percent": 9.959127094655434,
+        "storage": {
+          "support_neighbors": {
+            "calls": 900,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 7200,
+            "cpu_s": 0.007928,
+            "wall_s": 0.00813999999999993,
+            "p50_ms": 0.007,
+            "p95_ms": 0.015,
+            "p99_ms": 0.028,
+            "max_ms": 0.048
+          },
+          "support_removed": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 300,
+            "cpu_s": 0.000579,
+            "wall_s": 0.0005530000000000004,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.019
+          },
+          "handler_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.055395,
+            "wall_s": 0.05552800000000001,
+            "p50_ms": 0.1,
+            "p95_ms": 0.146,
+            "p99_ms": 0.185,
+            "max_ms": 0.259
+          },
+          "handler_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.013562,
+            "wall_s": 0.01483400000000001,
+            "p50_ms": 0.037,
+            "p95_ms": 0.092,
+            "p99_ms": 0.169,
+            "max_ms": 0.66
+          },
+          "enqueue_place": {
+            "calls": 600,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 15000,
+            "cpu_s": 0.00172,
+            "wall_s": 175.430023,
+            "p50_ms": 345.815,
+            "p95_ms": 418.302,
+            "p99_ms": 614.794,
+            "max_ms": 634.195
+          },
+          "enqueue_break": {
+            "calls": 300,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3300,
+            "cpu_s": 0.000584,
+            "wall_s": 48.28992499999999,
+            "p50_ms": 155.964,
+            "p95_ms": 329.695,
+            "p99_ms": 395.69,
+            "max_ms": 578.609
+          },
+          "save_snapshot": {
+            "calls": 356,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6236653,
+            "cpu_s": 0.003607,
+            "wall_s": 0.003613999999999982,
+            "p50_ms": 0.009,
+            "p95_ms": 0.016,
+            "p99_ms": 0.021,
+            "max_ms": 0.035
+          },
+          "sqlite_commit": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.04407,
+            "wall_s": 2.1373280000000006,
+            "p50_ms": 34.461,
+            "p95_ms": 56.293,
+            "p99_ms": 62.486,
+            "max_ms": 62.486
+          },
+          "sqlite_transaction": {
+            "calls": 61,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 3193737,
+            "cpu_s": 0.109579,
+            "wall_s": 3.3152949999999985,
+            "p50_ms": 53.068,
+            "p95_ms": 77.381,
+            "p99_ms": 96.913,
+            "max_ms": 96.913
+          },
+          "save_backpressure": {
+            "calls": 28,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 4.9e-05,
+            "wall_s": 5.600000000000003e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.002,
+            "max_ms": 0.002
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 1200,
+            "wall_s": 21.651602000000004,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 61,
+            "wall_s": 1.9499760000000002,
+            "errors": 0
+          },
+          "other": {
+            "calls": 61,
+            "wall_s": 0.9837130000000001,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 900,
+      "observed_drop_entities": 300,
+      "total_including_shutdown_s": 40.00872136399266,
+      "after_active_until_shutdown_s": 3.644256,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 20,
+        "seconds": 0.7552791500056628
+      },
+      "process": {
+        "pid": 40886,
+        "vmhwm_kb": 33140,
+        "user_s": 4.059584,
+        "system_s": 0.984111,
+        "world_write_calls": 1443,
+        "world_write_bytes": 1976339,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 1541,
+        "fdatasync_calls": 0,
+        "rchar": 1502444,
+        "wchar": 3179311,
+        "syscr": 7899,
+        "syscw": 24603,
+        "read_bytes": 0,
+        "write_bytes": 5894144,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 1443,
+        "requested_bytes": 1976339,
+        "completed_bytes": 1976339,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 650,
+        "pwrite_calls": 793
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.005343,
+        "wall_s": 0.06638200000000001,
+        "p50_ms": 66.382,
+        "p95_ms": 66.382,
+        "p99_ms": 66.382,
+        "max_ms": 66.382
+      }
+    },
+    {
+      "bots": 25,
+      "repetition": 1,
+      "active": {
+        "duration_s": 62.330026,
+        "tps": 2.502806592764778,
+        "p50_ms": 7.564,
+        "p95_ms": 877.547,
+        "p99_ms": 1011.456,
+        "max_ms": 1089.076,
+        "over_50ms": 42,
+        "busy_max_ms": 1757.4969999999998,
+        "busy_over_50ms": 59,
+        "tick_and_fast_ms": {
+          "0.5": 7.827,
+          "0.95": 1168.5600000000002,
+          "0.99": 1709.153
+        },
+        "costs_s": {
+          "tasks_us": 26.589032,
+          "fast_us": 29.355696,
+          "world_us": 0.024113,
+          "proto_us": 0.002565,
+          "items_us": 0.801291,
+          "remote_us": 0.173824,
+          "updates_us": 0.120825,
+          "evict_us": 0.000968,
+          "handlers_us": 55.861958,
+          "flush_us": 0.0,
+          "world_save_us": 0.014278,
+          "integrate_us": 9.7e-05,
+          "items_lock_us": 2.6e-05,
+          "furnace_lock_us": 2.4e-05
+        },
+        "fsync": {
+          "calls": 3172,
+          "wall_s": 58.313915,
+          "cpu_s": 0.294392,
+          "max_ms": 284.538,
+          "errors": 0
+        },
+        "process_cpu_percent": 14.91874127769528,
+        "client_cpu_percent": 17.69693529388612,
+        "storage": {
+          "support_neighbors": {
+            "calls": 2250,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 18000,
+            "cpu_s": 0.019205,
+            "wall_s": 0.019687000000000034,
+            "p50_ms": 0.007,
+            "p95_ms": 0.013,
+            "p99_ms": 0.024,
+            "max_ms": 0.054
+          },
+          "support_removed": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 750,
+            "cpu_s": 0.001336,
+            "wall_s": 0.0013479999999999933,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.015
+          },
+          "handler_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.210443,
+            "wall_s": 0.21210699999999974,
+            "p50_ms": 0.146,
+            "p95_ms": 0.222,
+            "p99_ms": 0.288,
+            "max_ms": 0.584
+          },
+          "handler_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.032421,
+            "wall_s": 0.039879999999999936,
+            "p50_ms": 0.036,
+            "p95_ms": 0.079,
+            "p99_ms": 0.111,
+            "max_ms": 3.642
+          },
+          "enqueue_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.004298,
+            "wall_s": 1068.6511230000003,
+            "p50_ms": 858.86,
+            "p95_ms": 1124.055,
+            "p99_ms": 1266.652,
+            "max_ms": 1390.022
+          },
+          "enqueue_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.00139,
+            "wall_s": 327.8605949999997,
+            "p50_ms": 422.542,
+            "p95_ms": 869.425,
+            "p99_ms": 1107.775,
+            "max_ms": 1274.479
+          },
+          "save_snapshot": {
+            "calls": 761,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 13331676,
+            "cpu_s": 0.008618,
+            "wall_s": 0.008597999999999967,
+            "p50_ms": 0.01,
+            "p95_ms": 0.019,
+            "p99_ms": 0.039,
+            "max_ms": 0.062
+          },
+          "sqlite_commit": {
+            "calls": 86,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.062354,
+            "wall_s": 2.959273,
+            "p50_ms": 29.285,
+            "p95_ms": 52.534,
+            "p99_ms": 217.886,
+            "max_ms": 217.886
+          },
+          "sqlite_transaction": {
+            "calls": 86,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6825228,
+            "cpu_s": 0.18318,
+            "wall_s": 4.607825000000001,
+            "p50_ms": 45.102,
+            "p95_ms": 91.647,
+            "p99_ms": 243.686,
+            "max_ms": 243.686
+          },
+          "save_backpressure": {
+            "calls": 54,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.000108,
+            "wall_s": 0.00011100000000000007,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 3000,
+            "wall_s": 54.171008999999856,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 86,
+            "wall_s": 2.7909689999999996,
+            "errors": 0
+          },
+          "other": {
+            "calls": 86,
+            "wall_s": 1.3519369999999997,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 2250,
+      "observed_drop_entities": 750,
+      "total_including_shutdown_s": 89.6852246740018,
+      "after_active_until_shutdown_s": 6.206397,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 50,
+        "seconds": 0.7469992210099008
+      },
+      "process": {
+        "pid": 40899,
+        "vmhwm_kb": 36572,
+        "user_s": 9.597925,
+        "system_s": 3.242542,
+        "world_write_calls": 2834,
+        "world_write_bytes": 3357604,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 3601,
+        "fdatasync_calls": 0,
+        "rchar": 2900008,
+        "wchar": 6836465,
+        "syscr": 35947,
+        "syscw": 161345,
+        "read_bytes": 0,
+        "write_bytes": 12230656,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 2834,
+        "requested_bytes": 3357604,
+        "completed_bytes": 3357604,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 1625,
+        "pwrite_calls": 1209
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.006038,
+        "wall_s": 0.097834,
+        "p50_ms": 97.834,
+        "p95_ms": 97.834,
+        "p99_ms": 97.834,
+        "max_ms": 97.834
+      }
+    },
+    {
+      "bots": 25,
+      "repetition": 2,
+      "active": {
+        "duration_s": 64.30772,
+        "tps": 2.48803720610838,
+        "p50_ms": 7.404,
+        "p95_ms": 913.453,
+        "p99_ms": 984.796,
+        "max_ms": 1303.48,
+        "over_50ms": 42,
+        "busy_max_ms": 2148.245,
+        "busy_over_50ms": 60,
+        "tick_and_fast_ms": {
+          "0.5": 7.7139999999999995,
+          "0.95": 1054.656,
+          "0.99": 1718.2800000000002
+        },
+        "costs_s": {
+          "tasks_us": 26.927773,
+          "fast_us": 30.808882,
+          "world_us": 0.024005,
+          "proto_us": 0.002469,
+          "items_us": 0.794577,
+          "remote_us": 0.172949,
+          "updates_us": 0.129559,
+          "evict_us": 0.000925,
+          "handlers_us": 57.646264,
+          "flush_us": 0.0,
+          "world_save_us": 0.014224,
+          "integrate_us": 9.2e-05,
+          "items_lock_us": 2.5e-05,
+          "furnace_lock_us": 2.5e-05
+        },
+        "fsync": {
+          "calls": 3170,
+          "wall_s": 60.300218,
+          "cpu_s": 0.30554,
+          "max_ms": 286.533,
+          "errors": 0
+        },
+        "process_cpu_percent": 14.554979396661436,
+        "client_cpu_percent": 17.412877711671143,
+        "storage": {
+          "support_neighbors": {
+            "calls": 2250,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 18000,
+            "cpu_s": 0.020352,
+            "wall_s": 0.021225000000000025,
+            "p50_ms": 0.008,
+            "p95_ms": 0.018,
+            "p99_ms": 0.028,
+            "max_ms": 0.186
+          },
+          "support_removed": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 750,
+            "cpu_s": 0.001341,
+            "wall_s": 0.001473999999999992,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.005,
+            "max_ms": 0.025
+          },
+          "handler_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.209911,
+            "wall_s": 0.2107509999999998,
+            "p50_ms": 0.143,
+            "p95_ms": 0.21,
+            "p99_ms": 0.258,
+            "max_ms": 0.556
+          },
+          "handler_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.034607,
+            "wall_s": 0.03546999999999999,
+            "p50_ms": 0.038,
+            "p95_ms": 0.083,
+            "p99_ms": 0.126,
+            "max_ms": 0.344
+          },
+          "enqueue_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.004568,
+            "wall_s": 1106.788976000001,
+            "p50_ms": 864.946,
+            "p95_ms": 1137.351,
+            "p99_ms": 2137.527,
+            "max_ms": 2237.798
+          },
+          "enqueue_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.001551,
+            "wall_s": 334.5077660000003,
+            "p50_ms": 434.638,
+            "p95_ms": 875.614,
+            "p99_ms": 1191.236,
+            "max_ms": 2106.077
+          },
+          "save_snapshot": {
+            "calls": 756,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 13248620,
+            "cpu_s": 0.008531,
+            "wall_s": 0.008706999999999958,
+            "p50_ms": 0.01,
+            "p95_ms": 0.017,
+            "p99_ms": 0.032,
+            "max_ms": 0.254
+          },
+          "sqlite_commit": {
+            "calls": 85,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.062752,
+            "wall_s": 3.250466999999999,
+            "p50_ms": 29.967,
+            "p95_ms": 64.783,
+            "p99_ms": 306.36,
+            "max_ms": 306.36
+          },
+          "sqlite_transaction": {
+            "calls": 85,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6785092,
+            "cpu_s": 0.187455,
+            "wall_s": 5.017694000000001,
+            "p50_ms": 49.568,
+            "p95_ms": 99.478,
+            "p99_ms": 489.22,
+            "max_ms": 489.22
+          },
+          "save_backpressure": {
+            "calls": 56,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.000104,
+            "wall_s": 0.00011600000000000008,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.003,
+            "max_ms": 0.003
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 3000,
+            "wall_s": 55.80216499999984,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 85,
+            "wall_s": 2.9914689999999995,
+            "errors": 0
+          },
+          "other": {
+            "calls": 85,
+            "wall_s": 1.5065839999999997,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 2250,
+      "observed_drop_entities": 750,
+      "total_including_shutdown_s": 90.53145760300686,
+      "after_active_until_shutdown_s": 5.654794,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 50,
+        "seconds": 0.7319774479983607
+      },
+      "process": {
+        "pid": 40913,
+        "vmhwm_kb": 36304,
+        "user_s": 9.581364,
+        "system_s": 3.200226,
+        "world_write_calls": 2826,
+        "world_write_bytes": 3341124,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 3597,
+        "fdatasync_calls": 0,
+        "rchar": 2911728,
+        "wchar": 6847012,
+        "syscr": 36978,
+        "syscw": 164344,
+        "read_bytes": 0,
+        "write_bytes": 12206080,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 2826,
+        "requested_bytes": 3341124,
+        "completed_bytes": 3341124,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 1625,
+        "pwrite_calls": 1201
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.00625,
+        "wall_s": 0.091349,
+        "p50_ms": 91.349,
+        "p95_ms": 91.349,
+        "p99_ms": 91.349,
+        "max_ms": 91.349
+      }
+    },
+    {
+      "bots": 25,
+      "repetition": 3,
+      "active": {
+        "duration_s": 62.192372,
+        "tps": 2.444029631157982,
+        "p50_ms": 7.625,
+        "p95_ms": 908.988,
+        "p99_ms": 1041.415,
+        "max_ms": 1072.963,
+        "over_50ms": 44,
+        "busy_max_ms": 1818.6170000000002,
+        "busy_over_50ms": 59,
+        "tick_and_fast_ms": {
+          "0.5": 7.927,
+          "0.95": 1110.51,
+          "0.99": 1690.534
+        },
+        "costs_s": {
+          "tasks_us": 26.886786,
+          "fast_us": 29.162305,
+          "world_us": 0.023891,
+          "proto_us": 0.002818,
+          "items_us": 0.80097,
+          "remote_us": 0.170846,
+          "updates_us": 0.125125,
+          "evict_us": 0.001049,
+          "handlers_us": 55.968941,
+          "flush_us": 0.0,
+          "world_save_us": 0.014878,
+          "integrate_us": 7.3e-05,
+          "items_lock_us": 2.9e-05,
+          "furnace_lock_us": 2.2e-05
+        },
+        "fsync": {
+          "calls": 3172,
+          "wall_s": 58.427187,
+          "cpu_s": 0.301759,
+          "max_ms": 224.865,
+          "errors": 0
+        },
+        "process_cpu_percent": 15.197536058773174,
+        "client_cpu_percent": 18.050095849232196,
+        "storage": {
+          "support_neighbors": {
+            "calls": 2250,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 18000,
+            "cpu_s": 0.019417,
+            "wall_s": 0.02009800000000003,
+            "p50_ms": 0.007,
+            "p95_ms": 0.014,
+            "p99_ms": 0.023,
+            "max_ms": 0.086
+          },
+          "support_removed": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 750,
+            "cpu_s": 0.001312,
+            "wall_s": 0.0013879999999999945,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.025
+          },
+          "handler_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.215093,
+            "wall_s": 0.21652999999999967,
+            "p50_ms": 0.147,
+            "p95_ms": 0.213,
+            "p99_ms": 0.269,
+            "max_ms": 0.723
+          },
+          "handler_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.032613,
+            "wall_s": 0.035440000000000034,
+            "p50_ms": 0.037,
+            "p95_ms": 0.082,
+            "p99_ms": 0.107,
+            "max_ms": 2.623
+          },
+          "enqueue_place": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 37500,
+            "cpu_s": 0.004469,
+            "wall_s": 1076.6088150000005,
+            "p50_ms": 856.234,
+            "p95_ms": 1110.707,
+            "p99_ms": 1231.156,
+            "max_ms": 1273.963
+          },
+          "enqueue_break": {
+            "calls": 750,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 8250,
+            "cpu_s": 0.001395,
+            "wall_s": 324.02076599999987,
+            "p50_ms": 422.728,
+            "p95_ms": 861.202,
+            "p99_ms": 968.342,
+            "max_ms": 1139.079
+          },
+          "save_snapshot": {
+            "calls": 759,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 13297036,
+            "cpu_s": 0.008144,
+            "wall_s": 0.00818099999999997,
+            "p50_ms": 0.01,
+            "p95_ms": 0.015,
+            "p99_ms": 0.031,
+            "max_ms": 0.054
+          },
+          "sqlite_commit": {
+            "calls": 86,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.061511,
+            "wall_s": 3.155757999999999,
+            "p50_ms": 31.893,
+            "p95_ms": 57.062,
+            "p99_ms": 173.255,
+            "max_ms": 173.255
+          },
+          "sqlite_transaction": {
+            "calls": 86,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 6807756,
+            "cpu_s": 0.181037,
+            "wall_s": 4.846303999999999,
+            "p50_ms": 49.945,
+            "p95_ms": 85.211,
+            "p99_ms": 216.524,
+            "max_ms": 216.524
+          },
+          "save_backpressure": {
+            "calls": 51,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 8.9e-05,
+            "wall_s": 9.900000000000008e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.005,
+            "max_ms": 0.005
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 3000,
+            "wall_s": 54.15921600000004,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 86,
+            "wall_s": 2.8493939999999998,
+            "errors": 0
+          },
+          "other": {
+            "calls": 86,
+            "wall_s": 1.4185770000000004,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 2250,
+      "observed_drop_entities": 750,
+      "total_including_shutdown_s": 88.83968558101333,
+      "after_active_until_shutdown_s": 5.94377,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 50,
+        "seconds": 0.7841635709919501
+      },
+      "process": {
+        "pid": 40926,
+        "vmhwm_kb": 35916,
+        "user_s": 10.501084,
+        "system_s": 3.385244,
+        "world_write_calls": 2824,
+        "world_write_bytes": 3337004,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 3601,
+        "fdatasync_calls": 0,
+        "rchar": 3024968,
+        "wchar": 6924624,
+        "syscr": 39273,
+        "syscw": 174038,
+        "read_bytes": 0,
+        "write_bytes": 12210176,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 2824,
+        "requested_bytes": 3337004,
+        "completed_bytes": 3337004,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 1625,
+        "pwrite_calls": 1199
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.006867,
+        "wall_s": 0.148944,
+        "p50_ms": 148.944,
+        "p95_ms": 148.944,
+        "p99_ms": 148.944,
+        "max_ms": 148.944
+      }
+    },
+    {
+      "bots": 50,
+      "repetition": 1,
+      "active": {
+        "duration_s": 129.429759,
+        "tps": 1.8233828280557953,
+        "p50_ms": 5.193,
+        "p95_ms": 1843.785,
+        "p99_ms": 2183.658,
+        "max_ms": 3367.059,
+        "over_50ms": 52,
+        "busy_max_ms": 3861.556,
+        "busy_over_50ms": 60,
+        "tick_and_fast_ms": {
+          "0.5": 5.342,
+          "0.95": 2246.352,
+          "0.99": 3413.416
+        },
+        "costs_s": {
+          "tasks_us": 57.123776,
+          "fast_us": 60.273085,
+          "world_us": 0.026325,
+          "proto_us": 0.005928,
+          "items_us": 1.5767,
+          "remote_us": 0.798544,
+          "updates_us": 0.492129,
+          "evict_us": 0.002192,
+          "handlers_us": 117.068625,
+          "flush_us": 0.0,
+          "world_save_us": 0.017799,
+          "integrate_us": 8.3e-05,
+          "items_lock_us": 2.4e-05,
+          "furnace_lock_us": 2.6e-05
+        },
+        "fsync": {
+          "calls": 6186,
+          "wall_s": 118.78279,
+          "cpu_s": 0.552929,
+          "max_ms": 489.758,
+          "errors": 0
+        },
+        "process_cpu_percent": 13.62147188777555,
+        "client_cpu_percent": 18.693708434957465,
+        "storage": {
+          "support_neighbors": {
+            "calls": 4500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 36000,
+            "cpu_s": 0.038733,
+            "wall_s": 0.043002000000000505,
+            "p50_ms": 0.008,
+            "p95_ms": 0.015,
+            "p99_ms": 0.026,
+            "max_ms": 1.606
+          },
+          "support_removed": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.002585,
+            "wall_s": 0.0026129999999999235,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.013
+          },
+          "handler_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.473213,
+            "wall_s": 0.47951700000000097,
+            "p50_ms": 0.13,
+            "p95_ms": 0.285,
+            "p99_ms": 0.349,
+            "max_ms": 1.285
+          },
+          "handler_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.064162,
+            "wall_s": 0.07319799999999974,
+            "p50_ms": 0.037,
+            "p95_ms": 0.091,
+            "p99_ms": 0.132,
+            "max_ms": 1.987
+          },
+          "enqueue_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.008721,
+            "wall_s": 4468.324888999999,
+            "p50_ms": 1763.217,
+            "p95_ms": 2352.872,
+            "p99_ms": 3058.079,
+            "max_ms": 3476.779
+          },
+          "enqueue_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.002671,
+            "wall_s": 1403.0160350000003,
+            "p50_ms": 926.932,
+            "p95_ms": 1799.333,
+            "p99_ms": 2150.696,
+            "max_ms": 2590.927
+          },
+          "save_snapshot": {
+            "calls": 1123,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 19710465,
+            "cpu_s": 0.011502,
+            "wall_s": 0.011393999999999928,
+            "p50_ms": 0.01,
+            "p95_ms": 0.015,
+            "p99_ms": 0.027,
+            "max_ms": 0.1
+          },
+          "sqlite_commit": {
+            "calls": 93,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.052621,
+            "wall_s": 3.7132359999999993,
+            "p50_ms": 30.317,
+            "p95_ms": 59.937,
+            "p99_ms": 484.505,
+            "max_ms": 484.505
+          },
+          "sqlite_transaction": {
+            "calls": 93,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 10109597,
+            "cpu_s": 0.190957,
+            "wall_s": 5.528114000000001,
+            "p50_ms": 44.352,
+            "p95_ms": 86.498,
+            "p99_ms": 517.652,
+            "max_ms": 517.652
+          },
+          "save_backpressure": {
+            "calls": 40,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 5.1e-05,
+            "wall_s": 5.500000000000003e-05,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 6000,
+            "wall_s": 113.83087699999959,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 93,
+            "wall_s": 3.5039969999999996,
+            "errors": 0
+          },
+          "other": {
+            "calls": 93,
+            "wall_s": 1.447916,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 4500,
+      "observed_drop_entities": 1500,
+      "total_including_shutdown_s": 177.26242990100582,
+      "after_active_until_shutdown_s": 11.045214,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 100,
+        "seconds": 1.5021304670081008
+      },
+      "process": {
+        "pid": 40939,
+        "vmhwm_kb": 41136,
+        "user_s": 17.757432,
+        "system_s": 8.018846,
+        "world_write_calls": 4633,
+        "world_write_bytes": 4587903,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 6989,
+        "fdatasync_calls": 0,
+        "rchar": 5184405,
+        "wchar": 12454478,
+        "syscr": 114466,
+        "syscw": 482592,
+        "read_bytes": 0,
+        "write_bytes": 21520384,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 4633,
+        "requested_bytes": 4587903,
+        "completed_bytes": 4587903,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 3250,
+        "pwrite_calls": 1383
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.006499,
+        "wall_s": 0.085745,
+        "p50_ms": 85.745,
+        "p95_ms": 85.745,
+        "p99_ms": 85.745,
+        "max_ms": 85.745
+      }
+    },
+    {
+      "bots": 50,
+      "repetition": 2,
+      "active": {
+        "duration_s": 123.923249,
+        "tps": 1.9366825994047332,
+        "p50_ms": 5.315,
+        "p95_ms": 1826.792,
+        "p99_ms": 2018.155,
+        "max_ms": 2086.189,
+        "over_50ms": 54,
+        "busy_max_ms": 3734.3540000000003,
+        "busy_over_50ms": 60,
+        "tick_and_fast_ms": {
+          "0.5": 5.445,
+          "0.95": 2021.171,
+          "0.99": 3668.784
+        },
+        "costs_s": {
+          "tasks_us": 54.531181,
+          "fast_us": 57.157857,
+          "world_us": 0.029046,
+          "proto_us": 0.00621,
+          "items_us": 1.681169,
+          "remote_us": 0.870718,
+          "updates_us": 0.547459,
+          "evict_us": 0.001972,
+          "handlers_us": 111.361269,
+          "flush_us": 0.0,
+          "world_save_us": 0.019659,
+          "integrate_us": 0.0001,
+          "items_lock_us": 1.6e-05,
+          "furnace_lock_us": 3.1e-05
+        },
+        "fsync": {
+          "calls": 6194,
+          "wall_s": 112.684877,
+          "cpu_s": 0.574949,
+          "max_ms": 197.257,
+          "errors": 0
+        },
+        "process_cpu_percent": 15.104163961548926,
+        "client_cpu_percent": 19.731685003866,
+        "storage": {
+          "support_neighbors": {
+            "calls": 4500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 36000,
+            "cpu_s": 0.039032,
+            "wall_s": 0.041942000000000604,
+            "p50_ms": 0.008,
+            "p95_ms": 0.014,
+            "p99_ms": 0.026,
+            "max_ms": 1.263
+          },
+          "support_removed": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.003063,
+            "wall_s": 0.0031589999999998737,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.387
+          },
+          "handler_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.492138,
+            "wall_s": 0.49656100000000125,
+            "p50_ms": 0.147,
+            "p95_ms": 0.289,
+            "p99_ms": 0.354,
+            "max_ms": 1.275
+          },
+          "handler_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.066304,
+            "wall_s": 0.07236699999999972,
+            "p50_ms": 0.037,
+            "p95_ms": 0.094,
+            "p99_ms": 0.141,
+            "max_ms": 1.31
+          },
+          "enqueue_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.009094,
+            "wall_s": 4242.743035,
+            "p50_ms": 1740.815,
+            "p95_ms": 2030.355,
+            "p99_ms": 2247.184,
+            "max_ms": 2293.831
+          },
+          "enqueue_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.002732,
+            "wall_s": 1350.3245359999974,
+            "p50_ms": 891.355,
+            "p95_ms": 1726.887,
+            "p99_ms": 1853.585,
+            "max_ms": 2041.539
+          },
+          "save_snapshot": {
+            "calls": 1118,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 19606649,
+            "cpu_s": 0.011997,
+            "wall_s": 0.011902999999999941,
+            "p50_ms": 0.01,
+            "p95_ms": 0.016,
+            "p99_ms": 0.029,
+            "max_ms": 0.052
+          },
+          "sqlite_commit": {
+            "calls": 97,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.053342,
+            "wall_s": 3.3362410000000007,
+            "p50_ms": 30.726,
+            "p95_ms": 61.1,
+            "p99_ms": 121.518,
+            "max_ms": 121.518
+          },
+          "sqlite_transaction": {
+            "calls": 97,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 10048701,
+            "cpu_s": 0.189818,
+            "wall_s": 5.0951249999999995,
+            "p50_ms": 48.895,
+            "p95_ms": 79.806,
+            "p99_ms": 148.349,
+            "max_ms": 148.349
+          },
+          "save_backpressure": {
+            "calls": 58,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 7.4e-05,
+            "wall_s": 7.700000000000004e-05,
+            "p50_ms": 0.001,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.004
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 6000,
+            "wall_s": 107.99943900000007,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 97,
+            "wall_s": 3.17948,
+            "errors": 0
+          },
+          "other": {
+            "calls": 97,
+            "wall_s": 1.505958,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 4500,
+      "observed_drop_entities": 1500,
+      "total_including_shutdown_s": 171.70818993699504,
+      "after_active_until_shutdown_s": 10.936567,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 100,
+        "seconds": 1.167936177997035
+      },
+      "process": {
+        "pid": 40960,
+        "vmhwm_kb": 41616,
+        "user_s": 19.470726,
+        "system_s": 8.402795,
+        "world_write_calls": 4625,
+        "world_write_bytes": 4571423,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 7011,
+        "fdatasync_calls": 0,
+        "rchar": 5579525,
+        "wchar": 12594982,
+        "syscr": 118810,
+        "syscw": 500265,
+        "read_bytes": 0,
+        "write_bytes": 21561344,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 4625,
+        "requested_bytes": 4571423,
+        "completed_bytes": 4571423,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 3250,
+        "pwrite_calls": 1375
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.006855,
+        "wall_s": 0.085895,
+        "p50_ms": 85.895,
+        "p95_ms": 85.895,
+        "p99_ms": 85.895,
+        "max_ms": 85.895
+      }
+    },
+    {
+      "bots": 50,
+      "repetition": 3,
+      "active": {
+        "duration_s": 130.602038,
+        "tps": 1.8299867571744939,
+        "p50_ms": 5.502,
+        "p95_ms": 1871.624,
+        "p99_ms": 2331.142,
+        "max_ms": 3309.585,
+        "over_50ms": 55,
+        "busy_max_ms": 3829.5440000000003,
+        "busy_over_50ms": 60,
+        "tick_and_fast_ms": {
+          "0.5": 5.505,
+          "0.95": 2143.917,
+          "0.99": 3655.15
+        },
+        "costs_s": {
+          "tasks_us": 58.422995,
+          "fast_us": 60.136403,
+          "world_us": 0.02527,
+          "proto_us": 0.005451,
+          "items_us": 1.567267,
+          "remote_us": 0.770547,
+          "updates_us": 0.462473,
+          "evict_us": 0.001285,
+          "handlers_us": 118.249938,
+          "flush_us": 0.0,
+          "world_save_us": 0.016299,
+          "integrate_us": 8.8e-05,
+          "items_lock_us": 2.5e-05,
+          "furnace_lock_us": 3e-05
+        },
+        "fsync": {
+          "calls": 6186,
+          "wall_s": 119.688832,
+          "cpu_s": 0.521505,
+          "max_ms": 325.919,
+          "errors": 0
+        },
+        "process_cpu_percent": 12.903921827319992,
+        "client_cpu_percent": 17.4943711150876,
+        "storage": {
+          "support_neighbors": {
+            "calls": 4500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 36000,
+            "cpu_s": 0.03547,
+            "wall_s": 0.0371140000000003,
+            "p50_ms": 0.007,
+            "p95_ms": 0.016,
+            "p99_ms": 0.023,
+            "max_ms": 0.189
+          },
+          "support_removed": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 1500,
+            "cpu_s": 0.002427,
+            "wall_s": 0.0026509999999999472,
+            "p50_ms": 0.002,
+            "p95_ms": 0.003,
+            "p99_ms": 0.004,
+            "max_ms": 0.075
+          },
+          "handler_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.439778,
+            "wall_s": 0.44501700000000055,
+            "p50_ms": 0.112,
+            "p95_ms": 0.274,
+            "p99_ms": 0.363,
+            "max_ms": 1.038
+          },
+          "handler_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.061921,
+            "wall_s": 0.0690059999999997,
+            "p50_ms": 0.036,
+            "p95_ms": 0.095,
+            "p99_ms": 0.154,
+            "max_ms": 0.94
+          },
+          "enqueue_place": {
+            "calls": 3000,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 75000,
+            "cpu_s": 0.008221,
+            "wall_s": 4493.194733999998,
+            "p50_ms": 1778.331,
+            "p95_ms": 2356.308,
+            "p99_ms": 2988.42,
+            "max_ms": 3434.088
+          },
+          "enqueue_break": {
+            "calls": 1500,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 16500,
+            "cpu_s": 0.002634,
+            "wall_s": 1431.145842999999,
+            "p50_ms": 944.779,
+            "p95_ms": 1836.881,
+            "p99_ms": 2274.211,
+            "max_ms": 3394.222
+          },
+          "save_snapshot": {
+            "calls": 1117,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 19604761,
+            "cpu_s": 0.01055,
+            "wall_s": 0.010455999999999976,
+            "p50_ms": 0.009,
+            "p95_ms": 0.014,
+            "p99_ms": 0.021,
+            "max_ms": 0.052
+          },
+          "sqlite_commit": {
+            "calls": 93,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 0.051906,
+            "wall_s": 3.1748900000000013,
+            "p50_ms": 31.198,
+            "p95_ms": 59.292,
+            "p99_ms": 125.533,
+            "max_ms": 125.533
+          },
+          "sqlite_transaction": {
+            "calls": 93,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 10055397,
+            "cpu_s": 0.185808,
+            "wall_s": 4.862927999999999,
+            "p50_ms": 48.222,
+            "p95_ms": 80.837,
+            "p99_ms": 181.733,
+            "max_ms": 181.733
+          },
+          "save_backpressure": {
+            "calls": 45,
+            "errors": 0,
+            "absent": 0,
+            "bytes": 0,
+            "cpu_s": 6.4e-05,
+            "wall_s": 6.000000000000004e-05,
+            "p50_ms": 0.001,
+            "p95_ms": 0.002,
+            "p99_ms": 0.002,
+            "max_ms": 0.002
+          }
+        },
+        "fsync_by_path": {
+          "players": {
+            "calls": 6000,
+            "wall_s": 115.23272699999983,
+            "errors": 0
+          },
+          "sqlite": {
+            "calls": 93,
+            "wall_s": 2.9823960000000005,
+            "errors": 0
+          },
+          "other": {
+            "calls": 93,
+            "wall_s": 1.4737089999999997,
+            "errors": 0
+          }
+        }
+      },
+      "received_actions": 4500,
+      "observed_drop_entities": 1500,
+      "total_including_shutdown_s": 178.43482220498845,
+      "after_active_until_shutdown_s": 10.904385,
+      "restart_verification": {
+        "status": "passed",
+        "targets": 100,
+        "seconds": 0.959818556002574
+      },
+      "process": {
+        "pid": 41037,
+        "vmhwm_kb": 41544,
+        "user_s": 17.927153,
+        "system_s": 7.826337,
+        "world_write_calls": 4615,
+        "world_write_bytes": 4550823,
+        "world_write_errors": 0,
+        "write_trace_dropped": 0,
+        "fsync_calls": 6999,
+        "fdatasync_calls": 0,
+        "rchar": 5472445,
+        "wchar": 12403393,
+        "syscr": 109139,
+        "syscw": 479380,
+        "read_bytes": 0,
+        "write_bytes": 21512192,
+        "cancelled_write_bytes": 32768
+      },
+      "writes": {
+        "calls": 4615,
+        "requested_bytes": 4550823,
+        "completed_bytes": 4550823,
+        "errors": 0,
+        "short_writes": 0,
+        "write_calls": 3250,
+        "pwrite_calls": 1365
+      },
+      "shutdown_save": {
+        "calls": 1,
+        "errors": 0,
+        "absent": 0,
+        "bytes": 0,
+        "cpu_s": 0.006878,
+        "wall_s": 0.099922,
+        "p50_ms": 99.922,
+        "p95_ms": 99.922,
+        "p99_ms": 99.922,
+        "max_ms": 99.922
+      }
+    }
+  ],
+  "services_after": {
+    "units": {
+      "goatcore.service": {
+        "MainPID": "147",
+        "NRestarts": "0",
+        "ActiveState": "active",
+        "SubState": "running"
+      },
+      "goatcore-test.service": {
+        "MainPID": "0",
+        "NRestarts": "0",
+        "ActiveState": "inactive",
+        "SubState": "dead"
+      }
+    },
+    "files_sha256": {
+      "/opt/goatcore/app/mc_server": "f840ed3f535d80d8b87293b1ada6fdf88cacd6c681740f1dcfa3b06bd1dc423c",
+      "/opt/goatcore/app/instances/online/server.config": "59a6b486122324c914563879fd8f43b2498695392498bc149858a7b25b423abd",
+      "/opt/goatcore/app/instances/offline/server.config": "5d95cf9989874b72faddfeb39fe1abc7f3a4d545bf34ad98fbd7d3ce757f4517"
+    },
+    "protected_files_unchanged": true,
+    "temporary_server_pids": [],
+    "main_services_not_modified": true
+  },
+  "matched_runtime_sources": {
+    "status": "passed",
+    "files": {
+      "Makefile": "436a219e9855d9ab99e42405fce9eace2281661edb9a06bbf16f588db3d367d7",
+      "src/main.c": "86559df0fa8d9ef043dbef20bc9b6ed0bcae1d0bc3e82159f342ae6ddcff8828",
+      "src/protocol/profile_service.c": "4915c7b24fa85e1c6069a6ffc48966b0e54577c2414e047ba6e73d56858818a1",
+      "src/protocol/framing.c": "356939fc319e92675f1a7b16e13fe1686347d6a15baa89bbcb73c30cd01b750b",
+      "src/protocol/crypto_openssl.c": "97d5c6f6c39592054e6a451e76df2433e56c29cef8db0b735f0fce6d6c2ec283",
+      "src/protocol/auth_service.c": "5095f2df219225d03445366a799f7ad2ec4805b4f382ecb1abf38c382b1bdb37",
+      "src/protocol/profile_json.c": "c2f34590b32763c931c01571791e6d86d47d7fbdf3ed02629e1447d614d3464b",
+      "src/protocol/varint.c": "d6e41f5f48b186821a317b675f403655abd39e208e9d545c0d2c6579a8843962",
+      "src/protocol/profile_wire.c": "11ef1f17453d6fde4dec1cfe7f5637468f93c79238d9b60834405e67185501a1",
+      "src/protocol/offline_uuid.c": "b74e5bec8872fc8ed6e9ec4e91f3384698afda63dfddbeb0980c0f638294d199",
+      "src/protocol/inventory.c": "ac225cbaed60e7698e4ebed5ba600f48537c69a66005d91b5de16f735859a6c3",
+      "src/protocol/crypto_stub.c": "53850d62d029ff6577339e0f0571dc72b87144fd0dc9b05c2ca10137a442433c",
+      "src/protocol/auth_stub.c": "07145f1948f690a64e11efcfe94faa8f63fa745bc46b96f6052b2eb77f047196",
+      "src/net/task_queue.c": "fdfb09e60c752a3058c96a85e2873a1e267144da00db0737ac9a035497bed155",
+      "src/net/buffer.c": "66df7cba45079e1a3d408558a2f0dfecff73851c0a760927e961b0bc6bcd124b",
+      "src/net/server.c": "0d8c313e93f30b7c4d2fa0bbeffac8e8538a98008ead5b357094e63c6d597efd",
+      "src/gameplay/hinged_blocks.c": "0a4e966e457239b8d43582089b81b9ffe62f7277275a0343fd5bf964791a6942",
+      "src/gameplay/crafting.c": "f80116c3a0186befac080c737568e0de566c14e93d864ffc22315a787bb3c6e9",
+      "src/gameplay/block_neighbors.c": "00965cdb3f055598e15765fd8e889b3ae6c141a8e5771011f2f8adcb30e42521",
+      "src/gameplay/block_drops.c": "5c9408ce1a8f054ffe150005e2f69a5b1ba8c4b82cf450160f6fb097bdc6f389",
+      "src/gameplay/furnace.c": "5d450cbc6008d5f6c60bbfeb4f4441f15c5f1c6593a538315bb2dcdd0b91995a",
+      "src/gameplay/attached_blocks.c": "836940818969d9e9bbe8677678d772229571c888bb0da2b47cc6cf76d7c49ce1",
+      "src/gameplay/placement.c": "f659021bcafea919609319d2b6771992e92bf3e4a55a49e69a21a3ed1108151e",
+      "src/gameplay/mining.c": "05c93f02e4654c77fff10cbbcad12a2e48a96a242865622afdd62f21d3b43f61",
+      "src/gameplay/attached_world.c": "8da1bdaf36bfaa6c491132c6fba2370b6df2282859c6da29db03ed604edb3916",
+      "src/gameplay/hinged_world.c": "9c34d7cd478965247bd39e95e2af4d409ffa69002a067fa24c778484193d8f0c",
+      "src/experimental/g1_internal.h": "2b62ad2313ebaba5bc390f14d649016daa3a99ea1a6c49daa72c02d6fd13b592",
+      "src/experimental/goatworld_codec.c": "52f6a1f896ef4817b498c57c91fc8fd79f412525c9e60559c88c546642b073f7",
+      "src/experimental/goatworld_pack.c": "753809416eb3ee6e3c727df8d8edf78f1637d9cbfb8a8eb954cc61454b1a9725",
+      "src/experimental/goatworld.c": "d86fae3961786e65f2a3ca83df482dc09ca26f13d57ec73d7447f3701790c005",
+      "src/experimental/goatworld_sqlite.c": "12f5571498980ea6f9458c9d589b7b902265cc025ad1469698ed49f8e88095fd",
+      "src/util/mc_util.c": "72c62161b2baca3ab54d25faa9d67a2cb8a26f2651c431726f79a5188f37bfd7",
+      "src/util/arena.h": "406c62c29df325f842cfe304018d3002dc185c12bb3becf5c5e828c34a1a7c6b",
+      "src/util/arena.c": "47de144ba25f4c7f14dcacb1f9be4912d68e7219d09d20fb89e94654749273d3",
+      "src/util/setup.c": "848f54e7368b3d618eecb4f7f408c1716d3a30b1eaf17f9eafa8267c7958a36c",
+      "src/util/atomic_file.c": "02f3e5443598e2d1222257868211f17f8a463dd5a6dfd3eb2ef3339c037d6368",
+      "src/generated/generated_cooking_recipes.c": "44a8627a437399798e7291db1c58434eb086b63029394c7f44f27fb658c0c686",
+      "src/generated/generated_item_place.h": "b97dc0cc2330199e56dca0a2adec3a466762350cdfb875803cffbdde7f6c851b",
+      "src/generated/generated_block_loot.h": "1c4edebe1796c8cda432f64d06a990d68c1087e4abdd287c263b15b938929ae5",
+      "src/generated/generated_cooking_recipes.h": "a0fed8943988c1737e02bf8d49329406ebf57d9b23e76ba2afd4aac3a6067d72",
+      "src/generated/generated_block_hardness.c": "c6c1871202d39cb1845e322cdc03e377622b0ab4b97a9c964f4fd74f1e78a798",
+      "src/generated/generated_block_loot.c": "dfd86743a5a85d9c760e6a3fef5f269f9af510b46c05c74be156387865e1e418",
+      "src/generated/generated_minecraft_ids.h": "6b25fa0c9859545fa3c94caad0f33f847d849ac21330a5d40e6f863d40b0ca41",
+      "src/generated/generated_minecraft_ids.c": "277ccae3b315b991052f65ff9a07362480d0b0a8cbd703b4f94d64a3f54dc08d",
+      "src/generated/generated_mining_data.c": "102e5d140bc124be8519d5c9737833421241f5a822f6a13f5154071733535896",
+      "src/generated/generated_item_food.c": "f767ebcf97c8ba881db115a6a13feecb86e8b86290e12504a3cd8df6bd7cad83",
+      "src/generated/generated_block_ids.h": "fe924e250b130c97a98af7f537bd1fbc1d480feeeb45d502c6eaef9097912f90",
+      "src/generated/generated_attached_data.h": "31da0a1ea198eb2597460baf1a184b00335de9243e240177c0ff3336ac0e833e",
+      "src/generated/generated_registries.h": "834849db92b9f29c1a39f719a1de5589b4f71125d75c4e88500a091bafd919ed",
+      "src/generated/generated_crafting_recipes.c": "64e44e87f844f64042f39db645e8b99788f42a636d516e764167d6bc6d8ea057",
+      "src/generated/generated_registries.c": "4f25c38471d5c240bc06ca9b202b398a2649d42e0678a5770f48d51a62b78c02",
+      "src/generated/generated_crafting_recipes.h": "ec35849736e4dd908b877f011e4d4c835447b72d9b59b38e9dec5edb20428b7f",
+      "src/generated/generated_hinged_data.h": "0488905b1bc424fbd2e319e10b4df24d17dc91882c34030fd71c63255fc68480",
+      "src/generated/generated_native_be_blocks.h": "8a1dd8cc6b396d30b6e006555783bdb0f5b0e65932684cc497c2645f8bf0a59d",
+      "src/generated/generated_mining_data.h": "6436baff12db1f9426e1ab4107e012922a85635db43fd9e82d74a97e79124acf",
+      "src/generated/generated_block_hardness.h": "be43a723c99a406c572d10efaaed3d41dcb6d1574bcbacfdd0cf8d1cf66a628c",
+      "src/generated/generated_item_food.h": "0170ac28eac26d9af23f5afa1ef2602ee0ec82cac4e04fbc7b8edd92847ac8ee",
+      "src/generated/generated_block_ids.c": "a767cfe3d451e93460a6d56512f5f2844ca18720ef0c42a2a16d54d7869209d7",
+      "src/generated/generated_item_place.c": "6f7148644fde0d5eade9aefa9b849bd5d1bf7ee7bd40e5024f593064309746ec",
+      "src/world/world_storage.c": "d77b7312f9657045b945d8c83cf4e924b191b601ba68416a78e263bc457e87e4",
+      "src/world/world.c": "bbf86be2f5f16109f3825ebc3d75a6fdc026a1b376fdd1657e262d58f9ae7776",
+      "src/world/block_registry.c": "58b073730f4254069292c1fc14f12894b7d557bfcca8912f450fa42f67973f37",
+      "src/world/goatworld_store.c": "38bff34fd57306a3ebcd3228412f16772db4c750298342e65174d944cdef3145",
+      "src/world/chunk_store.c": "dea1f12ad6f221a1ba3979850fc36eb8fe529a58b3fd1e5981df2d3273850b8c",
+      "src/world/nbt.c": "6e6832cd9d86a1738a06b5eae444a1f47bf6982cce9ab8e48f8ca02117cffa49",
+      "src/world/save_pipeline.c": "640a509db3b5a57ae39eef6b45c5d131e44f73d063f61d838ab961e0cd9a7c26",
+      "src/world/chunk_migration.c": "b53d69f8968a94e5953aabd53cd9aa36f50d23e672a27fbf340db46228ae98ff",
+      "src/world/paletted_container.h": "aae5d8cbe18bab23290e6dbc52275c5fbed0b9b95e7060af31b1903802983070",
+      "src/world/region_storage.c": "e6c3a45b398090727601f4a62eb14eaafd11699f5fae067d631d7bae6b532118",
+      "src/world/player_store.c": "cc727df94dcb5f9181766de33e44a96f47bf6a5d50f3ab98c3bcb11fe4d8de45",
+      "src/world/region_txn.c": "cf2b3e8150e87ac5b7a2fa112182a4af5ce28a4318a8365859445110db45fc2f",
+      "src/world/paletted_container.c": "58ad9fac9f9d57d1eb6fcf6880d87976ae86a5d8a5f279f81ef4f2aa16772bc8",
+      "src/world/block_entity_store.c": "aadf7d0fcdb87efc5773c2cedfbfdcd7932ba509d1c5e864e19a52be8e6f87b5",
+      "src/world/goatworld_store.h": "a1e1d403dd646164af54b467753b45eee1906e264e552bdee27560de29050283",
+      "src/world/block_entity_store.h": "615c14aea24a96838eed0eb9996509c3733e29fab46f7d694be056e19c402103",
+      "src/world/block_state.c": "f73f48f832042a5afbe638ecd9c6c18997ec208c28a3cdb07c3c9081b6382fc7",
+      "src/world/anvil.c": "876e6ac2603b18ca5e11f1d8d1c50ab2e23d86de6475e016727c0f25cfee637f",
+      "src/world/block_registry.h": "6a82abfa672a943076ae6612677cfb8c57437160c7e805dce5bbd140ba4248c2",
+      "src/world/chunk.c": "38e741379e58c1daac106b05bfba4048a44fa373827794cc8649b6168368c4ce",
+      "src/world/container_store.c": "e45b42afa4729663780f1605d5a5f7cec7c2f05ef3d40c09ef142566c37115b7",
+      "src/world/packed.c": "772a489d075f5fb1c04b05a5afe0ddfe0e912db3ce4555ce79116e21a0847789",
+      "src/protocol/handlers/configuration.c": "68f1f823cb2e9ff4b2eefa61c40bc87d164aec28330de48d3eb5ec484f7a31cd",
+      "src/protocol/handlers/login.c": "1e8af8dc1e218b1ce7b01751a4b685ce812cc23ce9bf9ed297c82e8809a17b62",
+      "src/protocol/handlers/status.c": "347ecf7e06be3b1d499d9020657d1ec4d43655ed13ac20f89398daaeebc93e94",
+      "src/protocol/handlers/handshake.c": "4044defc184bea265e479e6ce939e9dda8beab5c336157096adfa283b3255de3",
+      "src/protocol/handlers/play.c": "b2604b707690c123450040d39c2f7e6ccc9bd3925ce3c6e18e29ff7148c09691",
+      "include/mc_block_drops.h": "12f760c7494751871f217ecbb1075cff667bf85eb20ae8310c63099b84f35bc1",
+      "include/mc_world_storage.h": "7bcb4b00e6ca49159179fca5199aedeb661bab2985ee88d5d6506c7f0eb0a016",
+      "include/mc_hinged_blocks.h": "0f2860a0d92372a7a098d89b0f80c5ee760af03c8f3a1a43c80508610d7fb504",
+      "include/mc_goatworld.h": "789a6df779b535fa85de8dea40b1a6713e544b577b8478f45adeb5e773bdda92",
+      "include/mc_hinged_world.h": "32f9c07166eff36dd05e278451cc181ad7b1ef382599633cbb8b18e7ebc69198",
+      "include/mc_inventory.h": "cdcd509c698521586f3ab7368817508d203a08fc84e1f99d472a03d432fab38d",
+      "include/mc_nbt.h": "48054f23156330579333c8347672b9d3c15c8e579a9e45213b5e02217fae3ffc",
+      "include/mc_player_store.h": "15f59ac36b22d4f514a128a24dc1d6a70cd879635c3520b7dd0de9cb92af4309",
+      "include/mc_auth.h": "19ea25a60f749db49876cb5a36af9cf1cf083c64f20501b4ef76b1d69e5819b1",
+      "include/mc_attached_blocks.h": "ec02d6608544e5f3488955c4b7c054df467cc84d585b7a89de6f972c33373639",
+      "include/stb_perlin.h": "f0aeea5c70ab7aacc208708d3be61fa6eccd4066c0c118570257b2613635e283",
+      "include/mc_task_queue.h": "529392077a1a199131a995a4cb0c2f9916a215818bb43c6c31a2353893cb0915",
+      "include/mc_net.h": "8f509c36841322b12042c3e34dca95bafd04114260e2fb5b0e558b7817e27699",
+      "include/mc_packed.h": "ee927b1287750955288993aa51da6a1039cb6b506429b849edc4946eb78ab591",
+      "include/mc_mining.h": "ba160ee31a36490c1b016161bf705bf12fedc319d87474ac02a4d4211fe15bfe",
+      "include/mc_save_pipeline.h": "edf745583e3092c078a21415912795d3b17c875803ca0e1bffa3403e8e514110",
+      "include/mc_chunk.h": "0fa6c43ee913368752b3625260330bd8e97daba1396cfaa0a3c09366f0d4bf6a",
+      "include/mc_setup.h": "220abe5f52b1825bc3118da49e45c438b9e1105fd100663db198e05bba641066",
+      "include/mc_region_txn.h": "1933f348ad3b55c319932dc2f48628ad6d6ae3d979057aee5386cbe291233dd6",
+      "include/mc_chunk_store.h": "f055f8ba0e8e251c2257ebc759fab49fa9603caac701cf3dbc1044aaf5b6aa90",
+      "include/mc_chunk_migration.h": "0ac44db8393e5aa026d871f85bae18e3765db494d999280dcb54020b327ccdbb",
+      "include/mc_attached_world.h": "a668e5eadcc9671dc39d18479e0fa166a162f784777e956d064dcdf1e40c1e9a",
+      "include/mc_block_state.h": "60bc9de7802febdb0c2fea2b82ab450ebbe274bea184b1dd99839d47bcc95146",
+      "include/mc_profile.h": "73d9ce624ce60f8b5fd0a406405b1733d718246afc45aa952f0244760d635faa",
+      "include/mc_atomic_file.h": "46a6419bd1f2d7b2b4e6d38c05fd0c65c34c3ba8028a1439f9e5d0c388dca10f",
+      "include/mc_server.h": "57da95f49f9521cdfa96d631ed0b6aaede2e22ca2aca9f90647dc99b65e685f2",
+      "include/mc_block_neighbors.h": "68036c1f8031c181455a2459b96203b808e927da86125e478eac480fd3f77e21",
+      "include/mc_anvil.h": "ac794e6ffb1bd7bdd7020b8dc14956b4d942a8c1cad9ef05eabb7b44e56bc5e1",
+      "include/mc_util.h": "ab7d65b113cc11462578e40fd9a852959155a2ce20cf41966513f0c0f534a365",
+      "include/mc_container_store.h": "af5fd13dd372556452cce6bab89e0aa616ff02deea405a408dc582396b5a63c5",
+      "include/mc_placement.h": "543dcc6ec2172e481dd397d631265324e4da723904a8836d10914a46f0143f4c",
+      "include/mc_crafting.h": "479eebe2c4f579b222963f276b5966aa603f70f1caf6af6b20001b888d94d5bf",
+      "include/mc_protocol.h": "b888e208af7fe73348455317b1e0f63c4c66a4f93366e0cd04f14e64a0ac5e7e",
+      "include/mc_region_storage.h": "81cf71df01c888a8ba401ad16d144b07e106a764b7f981ae253d91bb76611639",
+      "include/mc_furnace.h": "ac749bf8655f2614c49e993d37022d1cfd2b8c0022d6a3eb7af19a8f7f0dd1a1",
+      "include/mc_world.h": "6a8e3c09322d852b51d62ca5b621c04052f5ab04aff90935668f10550263b685"
+    }
+  },
+  "limitations": [
+    "Not a power-loss simulation",
+    "No complete light/fluid/climbing simulation",
+    "Main hotbar/player saves remain synchronous",
+    "View/simulation distance 2 for load",
+    "Process-requested writes are not physical RAID writes",
+    "No constant 20 TPS claim"
+  ],
+  "evidence_sha256": {
+    "vanilla-final-qualified/metadata.json": "9ec77c425d56713892b24ebfc5fc57d9a3e96a67053921c80582f677a24fd485",
+    "vanilla-final-qualified/report-edit.json": "01d0713479edad1600d119ba78c463f9fffce226713b99ebfdfb3c47ab9d7a00",
+    "vanilla-final-qualified/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "vanilla-final-qualified/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "ladder-water-vanilla/metadata.json": "4cfd78f8ea43c4c193e831bfb4fda2ab9d554cd47d7a21e1279c3a94fae5281c",
+    "ladder-water-vanilla/report-edit.json": "0f1bac89bff93f93b0a47b11e6464b001a06348534929083a4a7c9313b4618a2",
+    "ladder-water-vanilla/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "ladder-water-vanilla/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "goatworld-final-qualified/metadata.json": "8435995e885e5fd3a819c5806bd86143c259206263e366f0af3080a3b538f509",
+    "goatworld-final-qualified/report-edit.json": "01d0713479edad1600d119ba78c463f9fffce226713b99ebfdfb3c47ab9d7a00",
+    "goatworld-final-qualified/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "goatworld-final-qualified/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "bin/metadata.json": "aeeca2c54bad40fb0022d339595ab31983a4d1ae44f8aabcb79dfe2a61c22ae4",
+    "bin/report-edit.json": "01d0713479edad1600d119ba78c463f9fffce226713b99ebfdfb3c47ab9d7a00",
+    "bin/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "bin/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "anvil/metadata.json": "98a5f21183e6389d7687c306a4d6cf881844fbe789ce996922fcac6a06c16316",
+    "anvil/report-edit.json": "01d0713479edad1600d119ba78c463f9fffce226713b99ebfdfb3c47ab9d7a00",
+    "anvil/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "anvil/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "ladder-water-goatworld/metadata.json": "f50f93d133f133ee079b232905f6092f5d536ffc8aa2fcb62e2767da4837fbfe",
+    "ladder-water-goatworld/report-edit.json": "0f1bac89bff93f93b0a47b11e6464b001a06348534929083a4a7c9313b4618a2",
+    "ladder-water-goatworld/report-verify.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "ladder-water-goatworld/report-verify-2.json": "8373286dea10ffe29a738a563332cb0ade27c5b0507f838b832589c9e64c82d7",
+    "hinged/metadata.json": "2d09ac591881dd9fb0d5021ba0476612ba346c3a86518f62f2b6ad462349ab88",
+    "hinged/report-edit.json": "c8ddb301841b67ce16a8e3253c379ec90572b5026e18156a3b9d953bea3b2f60",
+    "hinged/report-verify.json": "ab9f6e017680b2bd10eff4fe34e56c33075cd0a554d240e5d44cad4afb4c6e25",
+    "hinged/report-verify-2.json": "ab9f6e017680b2bd10eff4fe34e56c33075cd0a554d240e5d44cad4afb4c6e25",
+    "nonregression/stairs/metadata.json": "c1a0e1d13c2df533821a06c68992c8a2054cec467451ea6b49ab509ca587cbcb",
+    "nonregression/stairs/report-edit.json": "e02f09eaa16403d1aab9eae03277fddec280252847f44374bb93abee53e971bd",
+    "nonregression/stairs/report-verify.json": "edfcd798c8142e20d525b6f69520e14e7557c8ed2f9b2d0cb8d76e812e76a6a9",
+    "nonregression/stairs/report-verify-2.json": "edfcd798c8142e20d525b6f69520e14e7557c8ed2f9b2d0cb8d76e812e76a6a9",
+    "nonregression/vanilla-stairs/metadata.json": "b17426ef24cb8cdd726b0a26a0304e6d66530840b9849e8fbdb2cce8785b51c4",
+    "nonregression/vanilla-stairs/report-edit.json": "e02f09eaa16403d1aab9eae03277fddec280252847f44374bb93abee53e971bd",
+    "nonregression/vanilla-stairs/report-verify.json": "edfcd798c8142e20d525b6f69520e14e7557c8ed2f9b2d0cb8d76e812e76a6a9",
+    "nonregression/proof.json": "4f676fb5b3e833e1fb76568b26a7c9624b9c6de6e0e8081d310e46a881fa43df",
+    "placement/metadata.json": "ceafc9c592014eecbda7e8f446a24b7055c7e2223cc8422a695acf448c01c760",
+    "placement/report-edit.json": "4e610260381c1794835e5aecf7e2dc0b1741dbe35916ef06027f05af3148f851",
+    "placement/report-verify.json": "6b1f7db1fe5ec166bdb741336540f3bf6f21bad14f1b9319cd2ac66877d2cb39",
+    "placement/report-verify-2.json": "6b1f7db1fe5ec166bdb741336540f3bf6f21bad14f1b9319cd2ac66877d2cb39",
+    "nonregression/placement/metadata.json": "49f11665902fc2de34af7f30c455781cec7c800f1851575dfe9d48d48821d8d2",
+    "nonregression/placement/report-edit.json": "172eda326857696b0e02d7312cee2c3cb4d85af10f2f8c80f4cf53385a5340be",
+    "nonregression/placement/report-verify.json": "35ebd9a227b342e4aa8d63d92c98593f267c3505330673aec0fb8ec69b671a3f",
+    "nonregression/placement/report-verify-2.json": "35ebd9a227b342e4aa8d63d92c98593f267c3505330673aec0fb8ec69b671a3f",
+    "nonregression/pickup/metadata.json": "50e044424503e009722500b634700e6d185e9931405e1bce2be4710468d444c2",
+    "nonregression/pickup/report-edit.json": "552196eb85c624e91f6bc256719532bbeafa88163d487ca130a6afc8444aebe3",
+    "nonregression/pickup/report-verify.json": "fad1a7308c855ce4aa40755dca5e84e6c4c63aa4b6e4c247676e1d886c69a8ba",
+    "nonregression/pickup/report-verify-2.json": "fad1a7308c855ce4aa40755dca5e84e6c4c63aa4b6e4c247676e1d886c69a8ba",
+    "nonregression/complex/metadata.json": "9d55799b9b9fe8a00126352d2e7f9a006fece2d243cef33cce5234daec525617",
+    "nonregression/complex/report-edit.json": "9ce843b8a93482a16bc6e37d5d1c96669dfd8593354493b50b07d2cfa927a89c",
+    "nonregression/complex/report-verify.json": "8b021f51b68c52252caed4c80d8b9d4fb8fa029927de7ba02472296d2e433419",
+    "nonregression/complex/report-verify-2.json": "8b021f51b68c52252caed4c80d8b9d4fb8fa029927de7ba02472296d2e433419",
+    "async-loss/proof.json": "fd3f0ed0832ed1beb1be5ad0b0a56ec8fcf9e166b67ab75b85435e338afa656c",
+    "async-hinged/proof.json": "b5cd1165010dcb988095e7f01e5c8d74848769ac5ce4b865ee3fc8faf1ae85b4",
+    "regeneration.json": "f33838fd18e85e4112596c5970817000e694eb9783ff160801554497f3614a33",
+    "services-after.json": "f80d8446a2ed94bb6badc1d45e64a76e4de74268a7f02a5d6b0ae28fdd160d76",
+    "precommit-final.log": "9c1f8f12d3d1a9aee02f8e031d7486f031d919a8baf328b54452c21289cbecb3",
+    "load-qualified/comparison.json": "ec72a599af9ddbfd03ea41e0a9a9f33e44e3f64fb8b479a6a57dda9c50a2c07e",
+    "hardware.json": "4a8a63e98363cf74fdcce691a5baf51d21936cabc0d2895736be0cb5209579d0"
+  }
+}

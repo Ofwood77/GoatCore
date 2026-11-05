@@ -6776,3 +6776,374 @@ La prochaine intervention peut poursuivre la **phase 2A : torches, blocs attach�
 et règles de support**, puis compléter la physique de la phase 2C. Les limites
 Redstone, fluides, minage avancé et interactions secondaires ci-dessus restent
 explicites. **Ni la phase 2 ni la phase 2C ne sont déclarées terminées.**
+
+# Phase 2B — Supports et blocs attachés
+
+## Référence et architecture
+
+Départ réel : `d866b409209e7a34c84161098800b84e225ad010`, sur `main`.
+L'arbre portes/trappes livré par `053d6058` est conservé. Ce lot ne change ni
+les codecs, ni SQLite, ni S4, ni les valeurs de stockage par défaut. Les serveurs
+Minecraft et les bots sont exécutés uniquement dans les exports temporaires
+sur `10.0.4.66` ; les tests C sans serveur peuvent être locaux.
+
+Référence : JAR intérieur officiel Java 26.1.1, SHA-256
+`3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081`.
+Les classes TorchBlock, BaseTorchBlock, WallTorchBlock, LanternBlock, LadderBlock,
+StandingAndWallBlockItem, BlockPlaceContext, Direction, Player, Block et le
+chemin updateOrDestroy ont été examinés par `javap -c -p`. L'auditeur
+`tools/audit_attached_blocks.java` extrait directement leurs données et les tags
+intégrés au JAR. Il ne lance pas de monde ni de serveur Minecraft.
+
+`attached_blocks.c` centralise les familles, la recherche des directions, la
+préparation des états, les dépendances de support, les formes et la luminance.
+`attached_world.c` adapte cette logique à la lecture stricte des chunks. Les
+handlers gardent la validation du paquet, de l'inventaire, de la destination et
+de l'obstruction ; aucune requête SQLite ne figure dans les prédicats gameplay.
+
+La table contient les prédicats **FULL, CENTER et RIGID pour chacune des six
+faces**, pour les 29 873 états. Ces données sont évaluées contre
+EmptyBlockGetter, comme les caches de formes statiques de la référence. Elles
+ne constituent pas un moteur général de collision contextuelle : les supports
+dépendant d'une block entity ou d'une simulation absente restent soumis aux
+protections S3B et aux limites indiquées ci-dessous. CENTER/DOWN applique le
+tag officiel `unstable_bottom_center`, développé depuis les ressources du JAR,
+y compris ses références aux tags de fence gates.
+
+| Famille officielle | Types | États | Support |
+|---|---:|---:|---|
+| torch, soul_torch, copper_torch | 3 | 3 | CENTER, face supérieure du bloc inférieur |
+| wall_torch, soul_wall_torch, copper_wall_torch | 3 | 12 | FULL, face latérale vers la torche |
+| lantern, soul_lantern et huit variantes cuivre/cirées | 10 | 40 | CENTER en dessous ou au-dessus selon hanging |
+| ladder | 1 | 8 | FULL, face latérale vers l'échelle |
+
+Les items des torches murales viennent du registre, sans inventer un item
+wall_torch. Les huit variantes cuivre des lanternes couvrent quatre degrés
+d'oxydation, cirés ou non. L'oxydation aléatoire n'est pas ajoutée.
+
+## Placement, géométrie et supports
+
+Le placement reproduit l'ordre de Direction.orderedByNearest puis la priorité
+spécifique à la face cliquée lorsque la cellule cliquée n'est pas remplacée.
+La table quantifiée de sinus de Mth est extraite en bits float exacts ; les
+limites d'angles ne sont pas remplacées par une approximation trigonométrique.
+Player.aiStep met à jour le yaw de tête au tick : le nouveau chemin distingue
+ce yaw de celui reçu immédiatement dans un paquet de mouvement. Les
+comparaisons d'orientation alignent explicitement corps et tête par une
+téléportation sans déplacement, après le paquet de rotation. La réception de
+PositionMoveRotation confirme cette préparation dans les deux serveurs. Un ACK
+d'action, immédiatement possible dans GoatCore, n'est pas une barrière de tick.
+
+StandingAndWallBlockItem prépare son candidat mural avant sa recherche d'une
+torche au sol. LanternBlock cherche les deux directions verticales dans
+l'ordre du contexte, sans imposer une lanterne posée. LadderBlock conserve le
+refus de prolonger une échelle en cliquant sa face avant. Une lecture indisponible
+ou erronée n'est jamais transformée en air dans ces décisions.
+
+Les **63 états** possèdent des données séparées de sélection et de collision.
+Les torches ont une sélection non vide et une collision vide. Les torches
+murales nécessitent des demi-unités de voxel ; toutes les boîtes sont donc
+stockées exactement en **1/32**, sans arrondi au voxel. Lanternes posées et
+suspendues et les quatre directions des échelles utilisent leurs formes
+propres. Le contrôle d'obstruction examine les joueurs prêts, hors spectateurs,
+avec le système de volumes partiels existant.
+
+## Propagation locale, drops et sauvegardes
+
+Les portes et les blocs attachés partagent une pile locale, appartenant au tick,
+traitée dans l'ordre officiel WEST, EAST, NORTH, SOUTH, DOWN, UP. Les descendants
+sont traités sans récursion C. La pile est bornée à 1 024 niveaux, avec un budget
+de 65 536 visites ; 4 096 notifications différées au maximum sont conservées
+pour les frontières indisponibles. Les dépassements sont signalés, sans assimiler
+un chunk manquant à de l'air. La file différée est un anneau dédupliqué.
+
+Les sections chargées sont filtrées par palette avant la réconciliation des
+familles pertinentes ; une modification locale ne parcourt pas tous les chunks.
+La modification dérivée de la forme d'un escalier notifie aussi ses dépendants :
+un escalier inner_left qui redevient droit peut faire tomber une torche située
+en diagonale du voisin ayant déclenché le changement.
+
+La suppression réserve l'événement de drop avant de retirer le bloc attaché.
+Une allocation interrompue conserve le bloc, puis la pile peut reprendre au tick
+suivant. Les doublons de notification ne créent pas un deuxième drop. L'événement
+utilise le système environnemental existant et n'est consommé qu'après un spawn
+réussi. Le chunk effectivement modifié reçoit une nouvelle génération dirty et
+une demande de sauvegarde, y compris de l'autre côté d'une frontière.
+
+Les propriétés non concernées restent inchangées. La destruction d'une échelle
+ou d'une lanterne waterlogged, directe ou après perte de support, restitue une
+source d'eau. Dans Vanilla, le résultat AIR d'updateShape passe en effet par
+updateOrDestroy puis destroyBlock ; lire seulement updateShape serait insuffisant.
+Cette restitution n'implémente pas la propagation des fluides.
+
+Les duretés et le besoin d'un outil des 17 familles sont extraits du JAR et
+injectés dans les générateurs existants. Les heuristiques antérieures donnaient
+notamment une dureté de secours aux torches soul/cuivre et aux lanternes.
+La référence 26.1.1 donne 0 aux torches, 0,4 à l'échelle et 3,5 aux lanternes.
+Dans cette version, requiresCorrectToolForDrops est faux pour ces familles ;
+le tag mineable/pickaxe règle une vitesse, pas à lui seul l'autorisation du loot.
+Le drop direct Creative d'un bloc ordinaire de support est également supprimé :
+le drop indirect de son bloc attaché subsiste, sans item de pierre supplémentaire.
+Aucune modification du minage des familles hors lot n'est générée.
+
+GoatWorld utilise le pipeline S4 existant : snapshots indépendants, une file
+bornée, génération durable acquittée après COMMIT et drainage à l'arrêt.
+L'ACK d'action réseau n'est pas un ACK durable. La conservation exacte des
+générations récentes est vérifiée séparément du succès des paquets.
+
+## Vérifications C, erreurs et sanitizers
+
+`make -B precommit-check GOATWORLD_G1_CHECK=1` est exécuté sur l'export distant,
+avec `GOATCORE_SOURCE_EXPORT=1` et un arbre de compilation nettoyé. Il comprend
+32 suites C, les tests réseau/login/multi-epoll, les générateurs disponibles,
+la migration hors ligne et les outils expérimentaux G1/S2 existants. Les jeux
+bruts complets de recettes/composants ne sont pas tous présents dans l'export :
+le contrôle généré signale ce manque ; les tables modifiées de ce lot sont
+régénérées et comparées séparément avec les ressources officielles disponibles.
+
+La suite `test_attached_blocks` réalise **547 016 vérifications** : prédicats,
+63 états, géométrie sélection/collision, luminance, dureté et besoin d'outil,
+247 orientations officielles, erreurs et indisponibilité du lecteur, secteurs
+négatifs et frontières, six dépendants d'un support, changements d'escalier,
+allocation interrompue puis reprise, snapshots obsolètes et redémarrages sur les
+trois stockages. Un chunk absent de la vue READY ne provoque aucune suppression ;
+le chargement ultérieur permet de reprendre la décision sur ses données réelles.
+La suite portes/trappes conserve **14 477 vérifications et 2 688 formes**, dont
+la cascade synthétique de 320 portes et les échecs d'allocation de placement.
+
+Les suites ciblées **ASan+UBSan et TSan** incluent les nouveaux blocs, les
+portes/trappes, les interactions/protocoles C, les générations, le pipeline,
+NBT, les escaliers, Anvil et GoatWorld. Le SQLite privé est lui-même recompilé
+avec le sanitizer. Les huit injections/corruptions G2 sont également rejouées.
+L'absence de diagnostic ne prouve pas l'absence absolue de races ; les
+bibliothèques système externes ne sont pas toutes instrumentées.
+
+## Limites maintenues
+
+- **Éclairage** : niveaux officiels conservés (torches ordinaires/cuivre 14,
+  torches soul 10, lanternes ordinaires/cuivre 15, soul lantern 10). Le réseau
+  utilise encore l'éclairage simplifié du moteur. Aucune propagation lumineuse
+  Vanilla complète n'est revendiquée à la pose ou à la suppression.
+- **Fluides** : source waterlogged, conservation des propriétés et restitution
+  de la source sont couvertes. Les écoulements et scheduled fluid ticks ne sont
+  pas simulés par ce lot.
+- **Échelles** : placement, support, formes, coexistence avec les trappes et
+  persistance sont distingués de l'escalade. La physique serveur de grimpe,
+  vitesses, accroupissement et passage par une trappe ne sont pas qualifiés.
+- **Formes contextuelles** : les prédicats extraits sont statiques. Les formes
+  dépendant du contexte, les connexions de clôtures/murs non recalculées et la
+  physique générale ne deviennent pas conformes par la présence de cette table.
+- **Chargement** : une erreur disque reste journalisée par le stockage. Certaines
+  situations restent non-READY pour le lecteur gameplay, plutôt qu'un code EIO
+  distinct. Dans les deux cas, le support n'est pas assimilé à de l'air et le
+  bloc est préservé. Aucune régénération masquant l'erreur n'est ajoutée.
+- **Pannes et cohérence** : les barrières durables restent celles de G2/S4.
+  Les ACK réseau ne garantissent pas une sauvegarde. Aucune transaction globale
+  entre chunks, joueurs, inventaires et items au sol n'est créée. Une sauvegarde
+  interrompue avant confirmation durable peut perdre ses dernières mutations.
+- **Autres mécaniques** : Redstone, torches Redstone dynamiques, oxydation,
+  cirage/décirage, outils/enchantements avancés, boutons, leviers et autres
+  familles attachées hors périmètre ne sont pas implémentés par ce lot.
+
+`.bin` reste le défaut. Anvil et GoatWorld nécessitent une activation explicite ;
+les essais GoatWorld utilisent des mondes neufs et le mode async existant.
+Aucune migration, aucun nouveau worker gameplay, aucune modification du tick
+à 20 Hz, aucune activation de S2 dans mc_server et aucun déploiement principal.
+
+## Matrice différentielle et persistance exécutées
+
+Les observations officielles sont conservées dans
+`tests/fixtures/vanilla-26.1.1-attached.json` ; la table indépendante des formes,
+supports et orientations est `vanilla-26.1.1-attached.tsv`. Le manifeste
+`vanilla-26.1.1-attached-validation.json` contient les empreintes des preuves,
+les résultats des sanitizers et les 15 mesures individuelles de charge.
+
+| Scénarios | Exécutés | Résultat et portée |
+|---|---:|---|
+| Corpus principal attaché, deux observateurs | 275 par serveur | Égalité exacte Vanilla / GoatWorld / `.bin` / Anvil |
+| Échelles et trappes, eau conservée | 35 par serveur | Égalité exacte Vanilla / GoatWorld ; 16 configurations de trappe, perte de support, deux états waterlogged persistants |
+| Nouveaux cas différentiels distincts | **310** | 37 identifiants d'état distincts observés, à distinguer des 63 états vérifiés en C |
+| Portes/trappes historiques | **335** | Observations identiques à la fixture officielle existante |
+| Escaliers historiques | **192** | Observations identiques à une nouvelle exécution Vanilla officielle |
+| Placement ordinaire, bûches, dalles et fusion | 18 cas, plus frontières | Réussite ; poses, refus et inventaires conservés |
+| Ramassage et reconnexion | 100 objets | Réussite et deux redémarrages |
+| NBT opaque / block entities S3B | 7 catégories | Types et valeurs NBT exacts conservés, interactions dangereuses protégées |
+| Ancien snapshot contenant les attachés, nouveau snapshot sans eux | 4 attachés + 4 supports | Gate réelle `sql-before-commit`, A bloqué pendant B, drainage puis redémarrage : huit positions AIR |
+| Ancien snapshot fermé, nouveau snapshot ouvert | 3 états porte/trappe | Même gate réelle ; état récent ouvert conservé après redémarrage |
+
+Le corpus principal couvre les 14 items plaçables, les quatre orientations,
+16 supports et cinq familles de placement, les alternatives de direction,
+les obstacles joueurs, les frontières positives/négatives et de régions,
+les transitions de support d'escalier, les destructions directes/indirectes et
+les inventaires Survival/Creative. Les deux bots vérifient les changements.
+Les 275 cas incluent six drops indirects, sept drops directs, une lanterne
+avec mauvais outil et un support cassé en Creative : un seul item attaché,
+aucune pierre supplémentaire. Un refus Survival conserve les quatre items.
+
+Chaque exécution principale sur les trois stockages est suivie de **deux
+redémarrages** avec relecture des sentinelles. Le complément de 35 cas conserve
+quatre sentinelles, dont une échelle et une lanterne suspendue waterlogged,
+sur GoatWorld et Vanilla, également après deux redémarrages. La coexistence
+échelle/trappe est validée en données ; elle ne valide pas l'escalade physique.
+Les sept catégories opaques sont coffre, four froid, panneau, bannière,
+shulker box, tonneau et pot décoré. Aucun nouveau gameplay de block entity.
+
+Les pilotes ayant échoué ne sont pas comptés comme conformes : attente fixe
+insuffisante du yaw de tête, ACK impropre à servir de barrière de tick,
+inventaire pollué par des ramassages de scènes précédentes et génération
+Vanilla lointaine dépassant le délai. Le harnais final confirme la préparation
+par PositionMoveRotation, isole les inventaires avant les scènes de loot et
+utilise une copie officielle déjà générée pour la référence. La géométrie
+murale initialement arrondie au 1/16 a été corrigée en 1/32 avant qualification.
+La revue finale corrige aussi les arguments de la recette Makefile du générateur
+de minage ; les six sorties modifiées sont régénérées à l'identique.
+
+## Charge réelle sur le Xeon
+
+15 essais séquentiels : **1, 2, 10, 25 et 50 bots, trois répétitions**, 30 cycles
+par bot. Un cycle pose le support, pose son attaché, puis casse le support.
+Les drops naturels restent actifs. Le harnais confirme les trois actions et
+la disparition indirecte ; les IDs d'entités observés sont dédupliqués entre
+clients. Résultat : **23 760 actions envoyées, reçues et confirmées, zéro
+manquante ; 7 920 suppressions indirectes et exactement 7 920 entités de drop**.
+Cela représente 31 680 mutations de blocs dans la phase active. Les poses
+supplémentaires de validation sont hors de cette quantité de travail.
+
+Chaque essai ajoute des sentinelles finales, draine S4, arrête proprement,
+relit le stockage avec l'oracle indépendant puis démarre une nouvelle instance
+qui confirme ces états. Au total, 528 positions finales sont vérifiées.
+Le temps jusqu'à l'arrêt sauvegardé et celui de la relecture sont enregistrés
+séparément ; un ACK n'est jamais utilisé comme preuve de durabilité.
+
+Matériel observé : Xeon E5-2637 v2, ext4 sur volume LVM du conteneur,
+disques exposés ROTA=1 ; la topologie physique complète du RAID et ses caches
+ne sont pas vérifiables depuis ces observations. Affinité CPU 8–11, nice 10,
+ionice classe 2/priorité 7. Aucun autre serveur temporaire pendant la campagne.
+View-distance et simulation-distance **2**, allées privées équivalentes,
+préparation hors phase active, pause de 50 ms entre cycles. Ce scénario avec
+deux changements de hotbar par cycle diffère de la charge portes précédente :
+ses TPS ne constituent pas une comparaison de régression à travail égal.
+
+Les quantiles du tableau sont les **médianes des quantiles par répétition**,
+et non des quantiles sur des échantillons fusionnés. Le maximum et le nombre
+de dépassements regroupent les trois essais. « Tick + fast » inclut le travail
+entre ticks, que le seul MSPT planifié peut masquer.
+
+| Bots | TPS médians | MSPT P50 / P95 / P99 (ms) | Max tick (ms) | Ticks >50 ms | P99 tick + fast (ms) | Max tick + fast (ms) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 19,974 | 0,131 / 0,317 / 0,836 | 59,537 | 1 | 78,427 | 96,092 |
+| 2 | 18,682 | 0,275 / 63,431 / 87,873 | 314,273 | 46 | 131,276 | 314,273 |
+| 10 | 3,501 | 35,674 / 356,001 / 709,494 | 1 601,936 | 103 | 742,290 | 1 634,512 |
+| 25 | 2,488 | 7,564 / 908,988 / 1 011,456 | 1 303,480 | 128 | 1 709,153 | 2 148,245 |
+| 50 | 1,830 | 5,315 / 1 843,785 / 2 183,658 | 3 367,059 | 161 | 3 655,150 | 3 861,556 |
+
+| Bots | Durée totale médiane jusqu'à arrêt sauvegardé (s) | Après phase active, jusqu'à arrêt (s) | Octets write/pwrite monde, médiane (Mio) | fsync phase active, médiane |
+|---:|---:|---:|---:|---:|
+| 1 | 13,568 | 2,293 | 0,277 | 236 |
+| 2 | 16,786 | 2,432 | 0,656 | 387 |
+| 10 | 40,962 | 3,675 | 1,885 | 1 322 |
+| 25 | 89,685 | 5,944 | 3,186 | 3 172 |
+| 50 | 177,262 | 10,937 | 4,360 | 6 186 |
+
+La durée totale inclut préparation, warmup, périodes idle, actions, sentinelles,
+déconnexion et arrêt. « Après phase active » inclut donc des étapes autres que
+le drainage ; la phase `world_shutdown_save` mesure séparément ce dernier.
+Le probe enregistre les write/pwrite interceptés sous le monde et les fsync ;
+les compteurs `/proc` et les volumes logiques sont aussi conservés. Aucun de
+ces compteurs ne prouve le volume effectivement écrit sur les plateaux HDD.
+Les caches OS ne sont pas vidés et aucune lecture à froid n'est revendiquée.
+
+### Coût dominant confirmé, sans nouvelle optimisation de stockage
+
+Sur les trois essais à 50 bots, les **6 000 fsync de fichiers/répertoires
+joueurs par phase active** représentent respectivement **113,831 / 107,999 /
+115,233 s** d'attente cumulée. Le paquet de sélection de hotbar appelle déjà
+`save_player_data` puis le remplacement durable du joueur. Deux changements
+par cycle entraînent ces synchronisations sur le tick. C'est un coût antérieur
+à ce lot, fortement sollicité par cette charge support + item distinct.
+
+Pour le premier essai, la phase active dure 129,430 s. Les 4 500 drains locaux
+visitent 36 000 faces en **0,043 s murales, 0,039 s CPU**, P99 0,026 ms.
+Les 1 500 suppressions indirectes sont uniques. Les 93 COMMIT SQLite prennent
+3,713 s cumulées sur le worker (P99 484,505 ms), distinctes des sauvegardes
+joueurs synchrones. Les snapshots prennent 0,011 s et la sérialisation SQLite
+6,009 s cumulées ; ces temps sur plusieurs threads ne doivent pas être ajoutés
+comme s'ils étaient séquentiels. L'arrêt sauvegardé propre est mesuré à
+0,086 / 0,086 / 0,100 s pour ces trois essais ; RSS maximale 40,2 à 40,6 Mio.
+Le client consomme environ 19 % d'un CPU lors du premier essai : les traces
+d'attente disque et les files d'actions expliquent ici le débit bien mieux
+qu'une saturation CPU du générateur.
+
+Les champs `bytes` des phases `support_neighbors` et `support_removed` sont
+respectivement des **comptages de faces et de blocs**, pas des octets disque.
+Les longues attentes `enqueue_place/break` mesurent la file avant traitement,
+pas le coût CPU des prédicats de support. La file S4 reste bornée.
+
+**20 TPS constants ne sont pas démontrés**, même à un bot avec ce harnais.
+Aucune optimisation SQLite, aucun déplacement des sauvegardes joueurs, aucune
+suppression de fsync ni réduction silencieuse de travail n'est intégrée ici.
+Une éventuelle correction des sauvegardes hotbar/joueurs doit constituer une
+intervention ciblée avec son propre contrat de durabilité et mesure avant/après.
+
+## Reproduction et empreintes
+
+Utiliser le workflow `scripts/remote-build-stage.sh`, les scripts de tests et
+les emplacements temporaires du dépôt. Aucune commande suivante ne cible les
+services principaux. Exécuter les serveurs et bots exclusivement sur le distant.
+
+1. Sur un export nettoyé : `GOATCORE_SOURCE_EXPORT=1 make -B precommit-check GOATWORLD_G1_CHECK=1`.
+2. Extraire les données avec `tools/audit_attached_blocks.java`, compilé contre
+   le JAR intérieur et les bibliothèques officielles Java 25 ; conserver stdout
+   TSV. `tools/gen_attached_data.py` produit la table C et la fixture TSV.
+3. Utiliser `tests/stress/run_block_checks.py --suite attached --kind goatcore`
+   avec un port libre distinct de 25565/25587, `--chunk-storage goatworld-sqlite-experimental`,
+   `--anvil-save-mode async --view-distance 2 --verify-restarts 2` et une destination
+   absente. Refaire avec `--kind vanilla` sur une copie officielle jetable déjà
+   générée. Ajouter `--attached-ladder-traps` pour le complément de 35 cas.
+4. Répéter le corpus principal pour `.bin` et Anvil. Rejouer `--suite hinged`,
+   puis `check_goatworld_integrated.py` et `check_hinged_async.py` avec et sans
+   `--attached`. Les fixtures sont des copies de tests, jamais des mondes actifs.
+5. `profile_attached.py --binary ./mc_server --template COPIE_JETABLE --result-dir DEST_ABSENTE --bots 1 2 10 25 50 --repetitions 3 --cycles 30 --fsync-probe PROBE_SO --write-trace --save-trace`.
+   Le probe est compilé depuis `tests/stress/profile_fsync.c` ; les limites CPU/I/O
+   ci-dessus doivent être conservées. Aucun LD_PRELOAD sur un service principal.
+6. `check_goatworld_sanitizers.py` couvre les suites ciblées ; aucun serveur local.
+7. Après collecte des résultats sans mondes :
+   `python3 tools/validate_attached_results.py --results RAW --sanitizers SAN --fixture FIXTURE_JSON --manifest MANIFEST_JSON`.
+   Le validateur compare les cas officiels, les stockages, les 15 charges et
+   leurs preuves de redémarrage ; il ne remplace pas les tests de gameplay.
+
+Binaire normal qualifié sur le distant :
+`3f09ae210cbd5382c93553c1fd692b968e206453c8e28b13d0c99deb0ca94bc1`.
+Binaire de test avec gate G2/S4 :
+`606947a495af398cd1282a74291c57e8ce35e309accd1919533fe3cc564ba178`.
+Les hashes des exécutables sanitizés sont dans le manifeste. Les résultats
+bruts restent sous `tests/stress/results/attached/` (ignoré par Git) ; seules
+les observations officielles et le manifeste léger sont versionnés.
+
+La suite suivante de phase 2 peut traiter les autres blocs et la physique
+partielle, dont l'escalade, en conservant ce corpus de supports. Les limites
+d'éclairage, fluides et Redstone restent explicites. Les performances des
+sauvegardes joueurs méritent un correctif distinct avant de revendiquer une
+bonne tenue de cette charge multi-items sur HDD.
+
+Contrôle final en lecture seule : `goatcore.service` actif, PID 147 et zéro
+redémarrage systemd ; `goatcore-test.service` inactif, PID 0. Le binaire partagé
+et les deux configurations ont les mêmes SHA-256 qu'avant les tests. Aucun
+serveur temporaire du chantier ne reste lancé. Aucune modification des mondes
+principaux ni aucun déploiement ne sont effectués. Le commit est publié sur
+`origin/main` par push normal selon l'autorisation permanente donnée ensuite
+par le propriétaire ; aucune réécriture d'historique.
+
+Fichiers du lot (33, sans fichiers personnels ni mondes) :
+
+| Zone | Fichiers |
+|---|---|
+| Interfaces | `include/mc_attached_blocks.h`, `mc_attached_world.h`, `mc_net.h`, `mc_world.h` |
+| Gameplay | `src/gameplay/attached_blocks.c`, `attached_world.c`, `block_neighbors.c`, `block_drops.c` |
+| Monde et réseau | `src/world/world.c`, `src/net/server.c`, `src/protocol/handlers/play.c` |
+| Données générées | `src/generated/generated_attached_data.h`, `generated_block_hardness.c`, `generated_mining_data.c` |
+| Outils | `tools/audit_attached_blocks.java`, `gen_attached_data.py`, `attached_reference.py`, `gen_block_hardness.py`, `gen_mining_data.py`, `validate_attached_results.py` |
+| Tests C | `tests/test_attached_blocks.c`, `test_pvp.c` |
+| Harnais | `tests/stress/test_attached_placement.py`, `profile_attached.py`, `check_hinged_async.py`, `check_goatworld_sanitizers.py`, `profile_tick.py`, `run_block_checks.py` |
+| Observations | `tests/fixtures/vanilla-26.1.1-attached.tsv`, `vanilla-26.1.1-attached.json`, `vanilla-26.1.1-attached-validation.json` |
+| Construction et rapport | `Makefile`, `docs/vanilla-compatibility.md` |

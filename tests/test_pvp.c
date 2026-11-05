@@ -777,7 +777,20 @@ static void test_vanilla_hurt_cooldown(void) {
     test_conn_clear(&c, &player);
 }
 
+static void test_placement_head_yaw_tick(void) {
+    mc_conn_t c;mc_player_data_t player;
+    test_conn_init(&c,&player,34);c.play_init_sent=true;
+    c.yaw=90;c.placement_head_yaw=0;
+    /* A new movement angle does not itself run Player.aiStep. */
+    assert(c.placement_head_yaw==0);
+    assert(proto_play_tick(&c,100)==0);assert(c.placement_head_yaw==90);
+    c.yaw=-135;assert(c.placement_head_yaw==90);
+    assert(proto_play_tick(&c,150)==0);assert(c.placement_head_yaw==-135);
+    test_conn_clear(&c,&player);
+}
+
 int main(void) {
+    test_placement_head_yaw_tick();
     test_serverbound_play_packet_ids();
     test_attack_parse();
     test_pvp_damage_and_gates();

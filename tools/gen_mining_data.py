@@ -4,6 +4,7 @@ import json
 import sys
 import zipfile
 from pathlib import Path
+from attached_reference import load_attached_reference
 
 
 CATEGORY_NONE = 0
@@ -290,6 +291,7 @@ def generate_source(out_c: Path, block_names: list[str], item_ids: dict[str, int
         "",
         "static const mc_mining_block_tool_entry_t mc_mining_block_tool_table[MC_MINING_BLOCK_TOOL_TABLE_SIZE] = {",
     ]
+    attached = load_attached_reference()
     block_entries = 0
     for index, block_name in enumerate(block_names):
         category = block_category_by_name.get(block_name, CATEGORY_NONE)
@@ -301,6 +303,12 @@ def generate_source(out_c: Path, block_names: list[str], item_ids: dict[str, int
             category == CATEGORY_PICKAXE and block_name not in pickaxe_drop_exemptions
         ):
             flags |= FLAG_REQUIRES_CORRECT_TOOL
+        if block_name in attached:
+            # Mineable/pickaxe is a speed tag, not evidence that loot requires
+            # that tool. Exact 26.1.1 state properties override that heuristic.
+            flags &= ~FLAG_REQUIRES_CORRECT_TOOL
+            if attached[block_name][1]:
+                flags |= FLAG_REQUIRES_CORRECT_TOOL
         lines.append(
             f"    [{index}] = {{{category_literal(category)}, {harvest_literal(required_level)}, "
             f"{block_flags_literal(flags)}}}, /* {block_name} */"

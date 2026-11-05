@@ -1,0 +1,3219 @@
+{
+  "version": "26.1.1",
+  "protocol": 775,
+  "data_version": 4788,
+  "official_jar_sha256": "3647564632a2f589be2a87bf544f628e5f67cb3780c86f7fa972ec36892aa081",
+  "blocks_report_sha256": "c4f6aafb57a085df217fcb93533de7c8baa5711ff6eecad07563b28813713cc0",
+  "description": "Official server observations, two observers, two successive clean restarts. No GoatCore rule generates these expectations.",
+  "main": {
+    "status": "passed",
+    "cases": [
+      {
+        "case": "family-torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "creative-break-torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "creative-break-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-soul_torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_torch",
+        "state_id": 7006
+      },
+      {
+        "case": "creative-break-soul_torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-copper_torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_torch",
+        "state_id": 7011
+      },
+      {
+        "case": "creative-break-copper_torch",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "creative-break-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-soul_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20844
+      },
+      {
+        "case": "creative-break-soul_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20848
+      },
+      {
+        "case": "creative-break-copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-exposed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:exposed_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20852
+      },
+      {
+        "case": "creative-break-exposed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-weathered_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:weathered_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20856
+      },
+      {
+        "case": "creative-break-weathered_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:oxidized_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20860
+      },
+      {
+        "case": "creative-break-oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-waxed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:waxed_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20864
+      },
+      {
+        "case": "creative-break-waxed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-waxed_exposed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:waxed_exposed_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20868
+      },
+      {
+        "case": "creative-break-waxed_exposed_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-waxed_weathered_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:waxed_weathered_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20872
+      },
+      {
+        "case": "creative-break-waxed_weathered_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "family-waxed_oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:waxed_oxidized_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20876
+      },
+      {
+        "case": "creative-break-waxed_oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "creative-support-before",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "creative-support-loss",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "loss-torch-floor-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-floor-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=north]",
+        "state_id": 3371
+      },
+      {
+        "case": "loss-torch-floor-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "loss-torch-wall-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "loss-torch-wall-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "loss-torch-wall-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "loss-torch-wall-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-torch-wall-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=north]",
+        "state_id": 3371
+      },
+      {
+        "case": "loss-torch-wall-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "loss-lantern-floor-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-floor-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "loss-lantern-hanging-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-lantern-hanging-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "loss-ladder-wall-stone",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "loss-ladder-wall-dirt",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "loss-ladder-wall-glass",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_slab[type=bottom,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_slab[type=top,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "loss-ladder-wall-oak_slab[type=double,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_stairs[facing=north,half=top,shape=straight,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_trapdoor[facing=north,half=top,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_trapdoor[facing=north,half=bottom,open=false,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_trapdoor[facing=north,half=top,open=true,powered=false,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-oak_fence",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-cobblestone_wall",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-iron_chain[axis=y,waterlogged=false]",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "support-ladder-wall-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "loss-ladder-wall-air",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-torch-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-torch-1",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "faces-torch-2",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=north]",
+        "state_id": 3371
+      },
+      {
+        "case": "faces-torch-3",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=south]",
+        "state_id": 3372
+      },
+      {
+        "case": "faces-torch-4",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=west]",
+        "state_id": 3373
+      },
+      {
+        "case": "faces-torch-5",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "alternatives-torch--135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=south]",
+        "state_id": 3372
+      },
+      {
+        "case": "alternatives-torch--45-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=north]",
+        "state_id": 3371
+      },
+      {
+        "case": "alternatives-torch-45-45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "alternatives-torch-135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=south]",
+        "state_id": 3372
+      },
+      {
+        "case": "alternatives-torch-0-90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "alternatives-torch-0--90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=north]",
+        "state_id": 3371
+      },
+      {
+        "case": "faces-soul_torch-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-soul_torch-1",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_torch",
+        "state_id": 7006
+      },
+      {
+        "case": "faces-soul_torch-2",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=north]",
+        "state_id": 7007
+      },
+      {
+        "case": "faces-soul_torch-3",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=south]",
+        "state_id": 7008
+      },
+      {
+        "case": "faces-soul_torch-4",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=west]",
+        "state_id": 7009
+      },
+      {
+        "case": "faces-soul_torch-5",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=east]",
+        "state_id": 7010
+      },
+      {
+        "case": "alternatives-soul_torch--135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=south]",
+        "state_id": 7008
+      },
+      {
+        "case": "alternatives-soul_torch--45-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=north]",
+        "state_id": 7007
+      },
+      {
+        "case": "alternatives-soul_torch-45-45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_torch",
+        "state_id": 7006
+      },
+      {
+        "case": "alternatives-soul_torch-135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=south]",
+        "state_id": 7008
+      },
+      {
+        "case": "alternatives-soul_torch-0-90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_torch",
+        "state_id": 7006
+      },
+      {
+        "case": "alternatives-soul_torch-0--90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:soul_wall_torch[facing=north]",
+        "state_id": 7007
+      },
+      {
+        "case": "faces-copper_torch-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-copper_torch-1",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_torch",
+        "state_id": 7011
+      },
+      {
+        "case": "faces-copper_torch-2",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=north]",
+        "state_id": 7012
+      },
+      {
+        "case": "faces-copper_torch-3",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=south]",
+        "state_id": 7013
+      },
+      {
+        "case": "faces-copper_torch-4",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=west]",
+        "state_id": 7014
+      },
+      {
+        "case": "faces-copper_torch-5",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=east]",
+        "state_id": 7015
+      },
+      {
+        "case": "alternatives-copper_torch--135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=south]",
+        "state_id": 7013
+      },
+      {
+        "case": "alternatives-copper_torch--45-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=north]",
+        "state_id": 7012
+      },
+      {
+        "case": "alternatives-copper_torch-45-45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_torch",
+        "state_id": 7011
+      },
+      {
+        "case": "alternatives-copper_torch-135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=south]",
+        "state_id": 7013
+      },
+      {
+        "case": "alternatives-copper_torch-0-90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_torch",
+        "state_id": 7011
+      },
+      {
+        "case": "alternatives-copper_torch-0--90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:copper_wall_torch[facing=north]",
+        "state_id": 7012
+      },
+      {
+        "case": "faces-lantern-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "faces-lantern-1",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "faces-lantern-2",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-lantern-3",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-lantern-4",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-lantern-5",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "alternatives-lantern--135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "alternatives-lantern--45-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "alternatives-lantern-45-45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "alternatives-lantern-135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "alternatives-lantern-0-90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "alternatives-lantern-0--90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "faces-ladder-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-ladder-1",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "faces-ladder-2",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "faces-ladder-3",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "faces-ladder-4",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=west,waterlogged=false]",
+        "state_id": 5724
+      },
+      {
+        "case": "faces-ladder-5",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "alternatives-ladder--135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "alternatives-ladder--45-0",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "alternatives-ladder-45-45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "alternatives-ladder-135--45",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "alternatives-ladder-0-90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "alternatives-ladder-0--90",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "stair-derived-support-before",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=west]",
+        "state_id": 3373
+      },
+      {
+        "case": "stair-derived-support-lost",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-front-north",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-front-south",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-front-east",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-front-west",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "obstruction-torch-self",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "obstruction-torch-observer",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "obstruction-lantern-self",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "obstruction-lantern-observer",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "obstruction-ladder-self",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "obstruction-ladder-observer",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "water-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=true]",
+        "state_id": 20839
+      },
+      {
+        "case": "water-break-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:water[level=0]",
+        "state_id": 86
+      },
+      {
+        "case": "water-replace-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=true]",
+        "state_id": 20839
+      },
+      {
+        "case": "water-support-loss-lantern",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:water[level=0]",
+        "state_id": 86
+      },
+      {
+        "case": "water-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=true]",
+        "state_id": 5725
+      },
+      {
+        "case": "water-break-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:water[level=0]",
+        "state_id": 86
+      },
+      {
+        "case": "water-replace-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=true]",
+        "state_id": 5725
+      },
+      {
+        "case": "water-support-loss-ladder",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:water[level=0]",
+        "state_id": 86
+      },
+      {
+        "case": "support-trap-before",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "support-trap-open",
+        "point": [
+          -16,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-place-0",
+        "point": [
+          -16,
+          79,
+          16
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=false]",
+        "state_id": 20838
+      },
+      {
+        "case": "shared-support-place-1",
+        "point": [
+          -16,
+          81,
+          16
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "shared-support-place-2",
+        "point": [
+          -16,
+          80,
+          15
+        ],
+        "state": "minecraft:soul_wall_torch[facing=north]",
+        "state_id": 7007
+      },
+      {
+        "case": "shared-support-place-3",
+        "point": [
+          -16,
+          80,
+          17
+        ],
+        "state": "minecraft:copper_wall_torch[facing=south]",
+        "state_id": 7013
+      },
+      {
+        "case": "shared-support-place-4",
+        "point": [
+          -17,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=west]",
+        "state_id": 3373
+      },
+      {
+        "case": "shared-support-place-5",
+        "point": [
+          -15,
+          80,
+          16
+        ],
+        "state": "minecraft:wall_torch[facing=east]",
+        "state_id": 3374
+      },
+      {
+        "case": "shared-support-loss-0",
+        "point": [
+          -16,
+          79,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-loss-1",
+        "point": [
+          -16,
+          81,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-loss-2",
+        "point": [
+          -16,
+          80,
+          15
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-loss-3",
+        "point": [
+          -16,
+          80,
+          17
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-loss-4",
+        "point": [
+          -17,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "shared-support-loss-5",
+        "point": [
+          -15,
+          80,
+          16
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "drop-place-torch",
+        "point": [
+          -16,
+          80,
+          48
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "drop-loss-torch",
+        "point": [
+          -16,
+          80,
+          48
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 323,
+        "drop_count": 1
+      },
+      {
+        "case": "drop-place-soul_torch",
+        "point": [
+          -16,
+          80,
+          52
+        ],
+        "state": "minecraft:soul_wall_torch[facing=east]",
+        "state_id": 7010
+      },
+      {
+        "case": "drop-loss-soul_torch",
+        "point": [
+          -16,
+          80,
+          52
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 366,
+        "drop_count": 1
+      },
+      {
+        "case": "drop-place-copper_torch",
+        "point": [
+          -16,
+          80,
+          56
+        ],
+        "state": "minecraft:copper_wall_torch[facing=east]",
+        "state_id": 7015
+      },
+      {
+        "case": "drop-loss-copper_torch",
+        "point": [
+          -16,
+          80,
+          56
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 367,
+        "drop_count": 1
+      },
+      {
+        "case": "drop-place-lantern",
+        "point": [
+          -16,
+          80,
+          60
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "drop-loss-lantern",
+        "point": [
+          -16,
+          80,
+          60
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1364,
+        "drop_count": 1
+      },
+      {
+        "case": "drop-place-soul_lantern",
+        "point": [
+          -16,
+          80,
+          64
+        ],
+        "state": "minecraft:soul_lantern[hanging=true,waterlogged=false]",
+        "state_id": 20842
+      },
+      {
+        "case": "drop-loss-soul_lantern",
+        "point": [
+          -16,
+          80,
+          64
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1365,
+        "drop_count": 1
+      },
+      {
+        "case": "drop-place-ladder",
+        "point": [
+          -16,
+          80,
+          68
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "drop-loss-ladder",
+        "point": [
+          -16,
+          80,
+          68
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 336,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-torch",
+        "point": [
+          -16,
+          80,
+          84
+        ],
+        "state": "minecraft:torch",
+        "state_id": 3370
+      },
+      {
+        "case": "direct-break-torch",
+        "point": [
+          -16,
+          80,
+          84
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 323,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-soul_torch",
+        "point": [
+          -16,
+          80,
+          88
+        ],
+        "state": "minecraft:soul_torch",
+        "state_id": 7006
+      },
+      {
+        "case": "direct-break-soul_torch",
+        "point": [
+          -16,
+          80,
+          88
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 366,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-copper_torch",
+        "point": [
+          -16,
+          80,
+          92
+        ],
+        "state": "minecraft:copper_torch",
+        "state_id": 7011
+      },
+      {
+        "case": "direct-break-copper_torch",
+        "point": [
+          -16,
+          80,
+          92
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 367,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-ladder",
+        "point": [
+          -16,
+          80,
+          96
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "direct-break-ladder",
+        "point": [
+          -16,
+          80,
+          96
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 336,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-lantern",
+        "point": [
+          -16,
+          80,
+          100
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "direct-break-lantern",
+        "point": [
+          -16,
+          80,
+          100
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1364,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-soul_lantern",
+        "point": [
+          -16,
+          80,
+          104
+        ],
+        "state": "minecraft:soul_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20844
+      },
+      {
+        "case": "direct-break-soul_lantern",
+        "point": [
+          -16,
+          80,
+          104
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1365,
+        "drop_count": 1
+      },
+      {
+        "case": "direct-place-waxed_oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          108
+        ],
+        "state": "minecraft:waxed_oxidized_copper_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20876
+      },
+      {
+        "case": "direct-break-waxed_oxidized_copper_lantern",
+        "point": [
+          -16,
+          80,
+          108
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1373,
+        "drop_count": 1
+      },
+      {
+        "case": "wrong-tool-lantern-place",
+        "point": [
+          -16,
+          80,
+          116
+        ],
+        "state": "minecraft:lantern[hanging=false,waterlogged=false]",
+        "state_id": 20840
+      },
+      {
+        "case": "wrong-tool-lantern-break",
+        "point": [
+          -16,
+          80,
+          116
+        ],
+        "state": "minecraft:air",
+        "state_id": 0,
+        "drop_item": 1364,
+        "drop_count": 1
+      },
+      {
+        "case": "deny-no-support",
+        "point": [
+          -16,
+          80,
+          128
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "persist-copper_torch",
+        "point": [
+          -513,
+          80,
+          511
+        ],
+        "state": "minecraft:copper_wall_torch[facing=east]",
+        "state_id": 7015
+      },
+      {
+        "case": "persist-waxed_oxidized_copper_lantern",
+        "point": [
+          -512,
+          80,
+          516
+        ],
+        "state": "minecraft:waxed_oxidized_copper_lantern[hanging=true,waterlogged=false]",
+        "state_id": 20874
+      },
+      {
+        "case": "persist-ladder",
+        "point": [
+          511,
+          80,
+          -513
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "persist-soul_lantern",
+        "point": [
+          512,
+          80,
+          -508
+        ],
+        "state": "minecraft:soul_lantern[hanging=false,waterlogged=false]",
+        "state_id": 20844
+      }
+    ],
+    "saved": [
+      {
+        "point": [
+          -513,
+          80,
+          511
+        ],
+        "state": "minecraft:copper_wall_torch[facing=east]"
+      },
+      {
+        "point": [
+          -512,
+          80,
+          516
+        ],
+        "state": "minecraft:waxed_oxidized_copper_lantern[hanging=true,waterlogged=false]"
+      },
+      {
+        "point": [
+          511,
+          80,
+          -513
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]"
+      },
+      {
+        "point": [
+          512,
+          80,
+          -508
+        ],
+        "state": "minecraft:soul_lantern[hanging=false,waterlogged=false]"
+      }
+    ],
+    "families": 17,
+    "two_observers": true
+  },
+  "ladder_trap_water": {
+    "status": "passed",
+    "cases": [
+      {
+        "case": "ladder-trap-north-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "ladder-trap-loss-north-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-north-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "ladder-trap-loss-north-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-north-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "ladder-trap-loss-north-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-north-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=north,waterlogged=false]",
+        "state_id": 5720
+      },
+      {
+        "case": "ladder-trap-loss-north-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-south-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "ladder-trap-loss-south-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-south-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "ladder-trap-loss-south-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-south-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "ladder-trap-loss-south-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-south-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=south,waterlogged=false]",
+        "state_id": 5722
+      },
+      {
+        "case": "ladder-trap-loss-south-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-west-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=west,waterlogged=false]",
+        "state_id": 5724
+      },
+      {
+        "case": "ladder-trap-loss-west-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-west-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=west,waterlogged=false]",
+        "state_id": 5724
+      },
+      {
+        "case": "ladder-trap-loss-west-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-west-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=west,waterlogged=false]",
+        "state_id": 5724
+      },
+      {
+        "case": "ladder-trap-loss-west-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-west-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=west,waterlogged=false]",
+        "state_id": 5724
+      },
+      {
+        "case": "ladder-trap-loss-west-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-east-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "ladder-trap-loss-east-false-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-east-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "ladder-trap-loss-east-false-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-east-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "ladder-trap-loss-east-true-True",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-east-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "ladder-trap-loss-east-true-False",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:air",
+        "state_id": 0
+      },
+      {
+        "case": "ladder-trap-persist",
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]",
+        "state_id": 5726
+      },
+      {
+        "case": "water-persist-ladder",
+        "point": [
+          -512,
+          90,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=true]",
+        "state_id": 5725
+      },
+      {
+        "case": "water-persist-lantern",
+        "point": [
+          -512,
+          90,
+          516
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=true]",
+        "state_id": 20837
+      }
+    ],
+    "saved": [
+      {
+        "point": [
+          -512,
+          80,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=false]"
+      },
+      {
+        "point": [
+          -512,
+          81,
+          512
+        ],
+        "state": "minecraft:oak_trapdoor[facing=west,half=bottom,open=true,powered=false,waterlogged=false]"
+      },
+      {
+        "point": [
+          -512,
+          90,
+          512
+        ],
+        "state": "minecraft:ladder[facing=east,waterlogged=true]"
+      },
+      {
+        "point": [
+          -512,
+          90,
+          516
+        ],
+        "state": "minecraft:lantern[hanging=true,waterlogged=true]"
+      }
+    ],
+    "families": 2,
+    "two_observers": true,
+    "trap_survival_checks": 16
+  }
+}

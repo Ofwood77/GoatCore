@@ -18,6 +18,7 @@
 #include "generated_registries.h"
 #include "mc_block_drops.h"
 #include "mc_hinged_blocks.h"
+#include "mc_attached_blocks.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -1724,7 +1725,7 @@ bool net_server_hinged_intersects_players(mc_server_t *s,int x,int y,int z,int32
         if(atomic_load(&c->state)!=MC_STATE_PLAY||!c->play_ready||!c->has_pos||c->dead||c->gamemode==3)continue;
         double min[]={c->x-.3-x,c->y-y,c->z-.3-z};
         double max[]={c->x+.3-x,c->y+(c->sneaking?1.5:1.8)-y,c->z+.3-z};
-        if(mc_hinged_intersects(state,min,max)){intersects=true;break;}
+        if(mc_attached_family(state)?mc_attached_intersects(state,min,max):mc_hinged_intersects(state,min,max)){intersects=true;break;}
     }
     pthread_mutex_unlock(&s->conns_lock);return intersects;
 }
@@ -1738,7 +1739,7 @@ static void server_spawn_environment_drops(mc_server_t *s){
         if(mc_slot_set_simple(&slot,drop.item_id,drop.count))break;
         int rc=net_server_spawn_item_drop_with_motion(s,e->x+0.5,e->y+0.5,e->z+0.5,0,0,0,&slot,10);
         mc_slot_clear(&slot);
-        if(rc){log_error("environment door drop failed; retained for retry");break;}
+        if(rc){log_error("environment attached block drop failed; retained for retry");break;}
     }
     mc_world_consume_environment_drops(s->world,done);
 }

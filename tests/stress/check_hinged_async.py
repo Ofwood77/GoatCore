@@ -16,7 +16,7 @@ import struct
 import subprocess
 from types import SimpleNamespace
 from test_block_placement import Placer,command,hold,place,observed,report_states
-from protocol import position,varint
+from protocol import position,varint,read_varint
 from test_stair_placement import batch
 from test_player_visibility import close,until
 from test_block_persistence import query_block
@@ -24,6 +24,7 @@ from test_save_durability import ready,saved
 from native_storage_oracle import chunks,sections,section_blocks
 ROOT=Path(__file__).resolve().parents[2]
 BACKEND='goatworld-sqlite-experimental';DOOR=(-8,200,24);TRAP=(-6,200,24)
+ATTACHED=[((-8,200,24),'torch',1),((-6,200,24),'lantern',1),((-8,200,26),'soul_torch',5),((-6,200,26),'ladder',5)]
 
 def free_port():
     with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
@@ -52,38 +53,56 @@ async def run(a):
                 for b in bots:await b.connect();await b.conn.send(44)
                 if first:
                     await batch(actor,[f'setblock {x} 199 {z} stone' for x,z in ((-11,25),(-13,25),(-8,24),(-6,24))])
-                    for b,x in zip(bots,(-10.5,-12.5)):
+                    for b,x in zip(bots,(-9.5,-12.5)):
                         await command(actor,f'tp {b.name} {x} 200 25.5')
                         await until(lambda:b.pos and abs(b.pos[0]-x)<.01,'teleport')
                         await b.conn.send(30,struct.pack('>ddd?',x,200.,25.5,True))
                         await asyncio.wait_for(b.chunk_ready_events[(-1,1)].wait(),30)
-                    for point,item in ((DOOR,'oak_door'),(TRAP,'oak_trapdoor')):
-                        await hold(actor,items['minecraft:'+item]);await place(actor,(point[0],199,point[2]),1,(.5,1.,.5))
-                        value=await query_block(actor,point);assert 'open=false' in names[value]
+                    placements=ATTACHED if a.attached else [(DOOR,'oak_door',1),(TRAP,'oak_trapdoor',1)]
+                    for point,item,face in placements:
+                        support=(point[0]-(face==5),point[1]-(face==1),point[2])
+                        await batch(actor,[f'setblock {support[0]} {support[1]} {support[2]} stone'])
+                        await hold(actor,items['minecraft:'+item]);await place(actor,support,face,(.5,.5,.5))
+                        value=await query_block(actor,point)
+                        assert value!=0
+                        if not a.attached:assert 'open=false' in names[value]
                     await saved(actor);(out/'armed').write_text('after both closed generations durable\n')
                     await command(actor,'setblock -4 200 24 stone')
                     assert (await asyncio.to_thread(select.select,[r],[],[],30))[0] and os.read(r,1)==b'R','old writer not gated'
-                    # Worker owns A with CLOSED blocks; tick is free to mutate B.
-                    await actor.conn.send(56,struct.pack('>h',36)+b'\0')
-                    for point in (DOOR,TRAP):
-                        initial=await query_block(actor,point);opened=states[names[initial].replace('open=false','open=true')]
-                        for b in bots:b.clear_block_events(point)
-                        await place(actor,point,1,(.5,.5,.5));await asyncio.gather(*(observed(b,point,opened) for b in bots))
-                        assert await query_block(actor,point)==opened
-                        expected[point]=opened
-                        # Replayed main-hand sequence and related off-hand use
-                        # must not toggle the accepted transition a second time.
-                        replay=varint(0)+position(*point)+varint(1)+struct.pack('>fff??',.5,.5,.5,False,False)+varint(actor.sequence)
-                        await actor.conn.send(66,replay);await asyncio.sleep(.1)
-                        assert await query_block(actor,point)==opened
-                        actor.sequence+=1
-                        await actor.conn.send(66,varint(1)+position(*point)+varint(1)+struct.pack('>fff??',.5,.5,.5,False,False)+varint(actor.sequence))
-                        await asyncio.sleep(.1);assert await query_block(actor,point)==opened
-                    # Two independent players may interact in the same fast pass.
-                    # Each accepted action toggles once; their final state is open.
-                    await asyncio.gather(*(place(b,DOOR,1,(.5,.5,.5)) for b in bots))
-                    assert await query_block(actor,DOOR)==expected[DOOR]
-                    expected[(DOOR[0],201,DOOR[2])]=states[names[expected[DOOR]].replace('half=lower','half=upper')]
+                    if a.attached:
+                        # A contains all four old attachments. Each support
+                        # destruction below mutates B while the real writer waits.
+                        for point,item,face in ATTACHED:
+                            support=(point[0]-(face==5),point[1]-(face==1),point[2])
+                            for b in bots:b.clear_block_events(point)
+                            actor.sequence+=1
+                            await actor.conn.send(41,varint(0)+position(*support)+varint(1)+varint(actor.sequence))
+                            await until(lambda:any(read_varint(p)[0]==actor.sequence for _,p in actor.events[4]),'support destruction ACK')
+                            await asyncio.gather(*(observed(b,point,0) for b in bots))
+                            assert await query_block(actor,point)==0
+                            expected[point]=0;expected[support]=0
+                    else:
+                        # Worker owns A with CLOSED blocks; tick is free to mutate B.
+                        await actor.conn.send(56,struct.pack('>h',36)+b'\0')
+                        for point in (DOOR,TRAP):
+                            initial=await query_block(actor,point);opened=states[names[initial].replace('open=false','open=true')]
+                            for b in bots:b.clear_block_events(point)
+                            await place(actor,point,1,(.5,.5,.5));await asyncio.gather(*(observed(b,point,opened) for b in bots))
+                            assert await query_block(actor,point)==opened
+                            expected[point]=opened
+                            # Replayed main-hand sequence and related off-hand use
+                            # must not toggle the accepted transition a second time.
+                            replay=varint(0)+position(*point)+varint(1)+struct.pack('>fff??',.5,.5,.5,False,False)+varint(actor.sequence)
+                            await actor.conn.send(66,replay);await asyncio.sleep(.1)
+                            assert await query_block(actor,point)==opened
+                            actor.sequence+=1
+                            await actor.conn.send(66,varint(1)+position(*point)+varint(1)+struct.pack('>fff??',.5,.5,.5,False,False)+varint(actor.sequence))
+                            await asyncio.sleep(.1);assert await query_block(actor,point)==opened
+                        # Two independent players may interact in the same fast pass.
+                        # Each accepted action toggles once; their final state is open.
+                        await asyncio.gather(*(place(b,DOOR,1,(.5,.5,.5)) for b in bots))
+                        assert await query_block(actor,DOOR)==expected[DOOR]
+                        expected[(DOOR[0],201,DOOR[2])]=states[names[expected[DOOR]].replace('half=lower','half=upper')]
                     # Disarm before releasing A so B can commit normally.
                     (out/'armed').unlink();os.write(d,b'G');await saved(actor)
                 else:
@@ -103,9 +122,10 @@ async def run(a):
             x,y,z=point
             if (x//16,z//16)==(cx,cz):actual[point]=section_blocks(sections(root)[y//16])[((y%16)*16+z%16)*16+x%16]
     assert actual=={p:names[v] for p,v in expected.items()}
-    proof=dict(status='passed',old_snapshot='closed',new_snapshot='open',writer_gate='sql-before-commit',two_observers=True,normal_restart=True,independent_sqlite_nbt=True,states=[dict(point=list(p),state=v) for p,v in actual.items()])
+    proof=dict(status='passed',old_snapshot='attachments present' if a.attached else 'closed',new_snapshot='attachments absent' if a.attached else 'open',writer_gate='sql-before-commit',two_observers=True,normal_restart=True,independent_sqlite_nbt=True,states=[dict(point=list(p),state=v) for p,v in actual.items()])
     (out/'proof.json').write_text(json.dumps(proof,indent=2)+'\n');print(json.dumps(proof))
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for name in ('server','fault-server','template','result-dir'):p.add_argument('--'+name,type=Path,required=True)
+    p.add_argument('--attached',action='store_true',help='four support-loss mutations while real snapshot A waits')
     asyncio.run(run(p.parse_args()))

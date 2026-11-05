@@ -13,7 +13,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = ('test_goatworld_storage', 'test_goatworld_storage_fault', 'test_goatworld',
-           'test_save_pipeline', 'test_native_storage', 'test_stairs', 'test_nbt', 'test_hinged_blocks',
+           'test_save_pipeline', 'test_native_storage', 'test_stairs', 'test_nbt', 'test_hinged_blocks', 'test_attached_blocks',
            'test_anvil_roundtrip', 'test_pvp')
 
 

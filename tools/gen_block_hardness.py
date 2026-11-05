@@ -2,6 +2,7 @@
 import json
 import sys
 from pathlib import Path
+from attached_reference import load_attached_reference
 
 
 SCALE = 100
@@ -262,6 +263,9 @@ def main() -> int:
     blocks_json = Path(sys.argv[1])
     out_c = Path(sys.argv[2])
     out_h = Path(sys.argv[3])
+    # Restrict exact official overrides to this lot's 17 families.
+    for name, (hardness, _) in load_attached_reference().items():
+        EXACT[name] = (hardness / SCALE, FLAG_INSTANT if hardness == 0 else 0)
     block_names = load_blocks(blocks_json)
     generate_header(out_h, len(block_names))
     generate_source(out_c, block_names)

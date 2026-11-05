@@ -1,5 +1,6 @@
 #include "mc_block_drops.h"
 #include "mc_hinged_blocks.h"
+#include "mc_attached_blocks.h"
 
 #include "generated_block_loot.h"
 
@@ -27,6 +28,9 @@ bool mc_block_drop_resolve_default(int32_t state_id, bool allow_default_drop, in
         if(out_drop)*out_drop=(mc_block_drop_t){family->item,1};
         return true;
     }
+
+    const mc_attached_family_t *attached=mc_attached_family(state_id);
+    if(attached){if(out_drop)*out_drop=(mc_block_drop_t){attached->item,1};return true;}
 
     const mc_block_loot_entry_t *entry = mc_block_loot_entry_from_state(state_id);
     if (!entry) return false;

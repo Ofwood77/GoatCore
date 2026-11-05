@@ -17,7 +17,7 @@ typedef struct {
     int32_t z;
     int32_t state_id;
 } mc_block_update_t;
-typedef mc_block_update_t mc_environment_drop_t; /* state_id is the removed lower door */
+typedef mc_block_update_t mc_environment_drop_t; /* state_id is the removed block (lower half for doors) */
 
 /* Cached runtime IDs for the handful of blocks that world generation and
  * gameplay touch constantly. */
