@@ -33,6 +33,15 @@ Vérifier les inventaires et états après reconnexion/redémarrage et après le
 interruptions couvertes par le contrat ; un état en RAM n'est pas une preuve de
 durabilité. La cible mémoire 4–100 Go n'autorise aucune approximation gameplay.
 
+## Scalability without semantic shortcuts
+
+Scaling, caching and workload optimizations must preserve authoritative behavior
+and observable ordering. Dropping essential Minecraft simulation to improve TPS
+is not conformance. Keep differential regression corpora during scaling work;
+report absent gameplay and synthetic workload limits. Functional comparisons
+against Vanilla do not establish a direct performance advantage. Publish direct
+TPS comparisons only with genuinely equivalent measured workloads and resources.
+
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers

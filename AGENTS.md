@@ -246,6 +246,37 @@ Distinguer RAM applicative, cache SQLite et cache de pages OS. Tester le profil
 matériel le permet ; signaler les capacités configurées mais non exercées.
 Ne jamais présenter un budget de 100 Go accepté comme 100 Go réellement utilisés.
 
+## Long-term scalability goals
+
+GoatCore must remain efficient for small servers with 4–5 concurrent players.
+Large-population optimizations must not impose idle threads, preallocated caches,
+or global work proportional to a theoretical maximum on small deployments.
+
+The long-term engineering target is 1,000+ concurrent **active Survival players
+in one shared world**, given sufficient CPU, RAM, network and storage. This is
+not a demonstrated capability. Preserve coherent authoritative Vanilla behavior;
+unimplemented entities, Redstone, fluids or physics cannot be claimed compatible.
+
+Scale memory, bounded queues, caches and background I/O with actual workload and
+configured budgets (4–100 GiB and beyond). Prefer local work and appropriate
+indices over unnecessary world/player-wide scans. RAM alone does not establish
+player capacity; measure per-core/NUMA limits and shared-resource contention.
+
+Qualify small populations and progressive 25/50/100/250/500/1,000-player targets
+with reproducible workloads. Distinguish connected/authenticated/world-ready,
+moving, mutating, simulated and receiving players, and confirmed actions.
+Idle connections or synthetic bots do not prove equivalent human Survival load.
+Never advertise 1,000-player support without reproducible evidence.
+
+README.md must always be written in English, with a professional technical tone,
+measured benchmarks, feature statuses, build/run instructions and known limits.
+Distinguish functional Vanilla comparisons from TPS and storage microbenchmarks.
+Avoid unsupported marketing claims and excessive emojis.
+
+Before the next development commit, inspect any active endurance campaign,
+retrieve its metrics and stop obsolete generators. Follow the documented
+campaign control/collection commands; never leave bots on an obsolete version.
+
 ## 11. Règles de développement
 
 - Codex réalise les modifications du code.

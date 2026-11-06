@@ -1,0 +1,2287 @@
+{
+  "status": "qualified observed plateaus; not human-player capacity",
+  "initial_head": "7af270bb37c137ed521c169c5dfebc92a784197b",
+  "binary_sha256": "d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e",
+  "precommit_c_suites": 34,
+  "regressions": {
+    "status": "passed",
+    "server_sha256": "d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e",
+    "attached_cases": 310,
+    "hinged_cases": 335,
+    "stairs_observations": 192,
+    "bin_and_anvil": true,
+    "two_observers": true,
+    "two_clean_restarts": true,
+    "block_reference": "recorded official 26.1.1 fixtures; main attached and stairs also rerun on official server",
+    "integrated": {
+      "status": "passed",
+      "stairs_observations": 192,
+      "block_entities": [
+        "minecraft:chest",
+        "minecraft:furnace",
+        "minecraft:sign",
+        "minecraft:banner",
+        "minecraft:shulker_box",
+        "minecraft:barrel",
+        "minecraft:decorated_pot"
+      ],
+      "nbt_types_values_exact": true,
+      "seed_nbt_sha256": "d765c23679ca9b23d646f6713b5e84b9a9007c6494671882d5692e506ea27ae7",
+      "server_sha256": "d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e",
+      "new_worlds": true,
+      "automatic_conversion": false
+    }
+  },
+  "preflight": {
+    "all_generators_stopped": true,
+    "elapsed_s": 151.94440774299437,
+    "final_target": 5,
+    "qualified_plateaus": [
+      5
+    ],
+    "reason": "manual-stop-file",
+    "restart_counts": {
+      "0": 1
+    },
+    "utc": "2026-11-05T21:41:33Z"
+  },
+  "version_change_probe": {
+    "observed": {
+      "all_generators_stopped": true,
+      "elapsed_s": 7.584200427008909,
+      "final_target": 5,
+      "qualified_plateaus": [],
+      "reason": "published-origin-main-changed",
+      "restart_counts": {},
+      "server_exit": {
+        "returncode": 0,
+        "shutdown_s": 1.0230513520073146,
+        "trace_errors": [],
+        "utc": "2026-11-05T21:43:04Z"
+      },
+      "test_stop_elapsed_s": 1.1189322489954066,
+      "test_stop_returncode": 0,
+      "utc": "2026-11-05T21:43:04Z"
+    },
+    "method": "deliberately mismatched expected SHA; real public API, no Git mutation"
+  },
+  "candidate": {
+    "manifest": {
+      "baseline": {
+        "files": {
+          "/etc/goatcore/server1.setup.conf": "cdfd83d0a3a4fa5be38ad11b6cc7e5fa3eb02865665b711795a9cc253616b47d",
+          "/etc/systemd/system/goatcore.service": "6c528b64968c99abe75f6857a33c157f4b75bfdf59bde652c11038d72741113e",
+          "/opt/goatcore/app/instances/online/server.config": "59a6b486122324c914563879fd8f43b2498695392498bc149858a7b25b423abd",
+          "/opt/goatcore/app/mc_server": "f840ed3f535d80d8b87293b1ada6fdf88cacd6c681740f1dcfa3b06bd1dc423c"
+        },
+        "unit": {
+          "ActiveState": "active",
+          "MainPID": "147",
+          "NRestarts": "0"
+        }
+      },
+      "config": {
+        "admission_interval_s": 1,
+        "binary": "/opt/goatcore/endurance/releases/endurance-paced-20261105/mc_server",
+        "binary_sha256": "d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e",
+        "campaign": "/var/lib/goatcore/endurance/endurance-paced-20261105/metrics",
+        "generator_unit": "goatcore-endurance.service",
+        "limits": {
+          "io_full_avg10": 20,
+          "maximum_wal_mib": 512,
+          "maximum_world_mib": 8192,
+          "memory_full_avg10": 1,
+          "minimum_available_mib": 2048,
+          "minimum_disk_free_mib": 8192,
+          "public_latency_ms": 250
+        },
+        "period_s": 40,
+        "plateau_s": 45,
+        "plateau_timeout_s": 300,
+        "port": 25587,
+        "published_sha": "7af270bb37c137ed521c169c5dfebc92a784197b",
+        "ramp": [
+          5,
+          25,
+          50,
+          100,
+          150,
+          200,
+          250
+        ],
+        "watch_origin": false,
+        "world": "/var/lib/goatcore/endurance/endurance-paced-20261105/runtime/world"
+      },
+      "detection": "next publicly observable origin/main SHA, not local commits",
+      "generator_sha256": "8899e24962d96f1d696ce1648302789c8b3e3ebc039fb9d3cfe12605a7a0621e",
+      "public_baseline_latency_ms": [
+        2.4316470080520958,
+        0.45052099449094385,
+        0.3018400020664558,
+        0.4826799995498732,
+        0.3294620109954849
+      ],
+      "published_commit_start": "7af270bb37c137ed521c169c5dfebc92a784197b",
+      "revision_role": "uncommitted-validation-source-base",
+      "script_hashes": {
+        "endurance_bots.py": "8899e24962d96f1d696ce1648302789c8b3e3ebc039fb9d3cfe12605a7a0621e",
+        "endurance_common.py": "05996cc92b588b2e8973fc22d06f10ee98982d366c1e0afdcb5c84fbb2e0f066",
+        "endurance_control.py": "11c6eac13872d3ba680aa205fc300724c5e5c2e864622dfb799c1107f1613bc6",
+        "endurance_server.py": "0edbb11b89812ed6d837c87445fcc9107aaa4e1326437238055816e1cf5fb583",
+        "profile_tick.py": "d7f43c375338c686fbe9fc055967a1d652076b836f75598a303047703533a0b6",
+        "protocol.py": "1ef0c3ae31c69f95f49fba4d03bb645fb6a6646123f586d8808d3fe0d59d0b07",
+        "stress.py": "7e1b6361030214c6bade85d6405ae956d2d84d3994c1a85226766cf6c72d57b0"
+      },
+      "started_utc": "2026-11-05T22:21:28Z"
+    },
+    "final": {
+      "all_generators_stopped": true,
+      "elapsed_s": 314.6229298469989,
+      "final_target": 150,
+      "qualified_plateaus": [
+        5,
+        25,
+        50,
+        100
+      ],
+      "reason": "test-tps-under-10",
+      "restart_counts": {},
+      "server_exit": {
+        "returncode": 0,
+        "shutdown_s": 4.190421999999671,
+        "trace_errors": [],
+        "utc": "2026-11-05T22:26:43Z"
+      },
+      "test_stop_elapsed_s": 4.277376583006117,
+      "test_stop_returncode": 0,
+      "utc": "2026-11-05T22:26:43Z"
+    },
+    "integrity": {
+      "sqlite_quick_check": "ok",
+      "decoded_verified_chunks": 195,
+      "uncompressed_bytes": 1397029,
+      "chunk_roots_digest": "fc24c84ade462336435d00607a8bda02ecf80e4d5906a8577bbdadb686bc6944",
+      "players_gzip_nbt_readable": true,
+      "players_verified": 150,
+      "all_survival": true,
+      "uuid_types_and_versions_verified": true
+    },
+    "restart": {
+      "status": "passed",
+      "cases": [
+        {
+          "index": 0,
+          "selection_restored": true,
+          "position_restored": true,
+          "inventory_totals_restored": true,
+          "survival": true
+        },
+        {
+          "index": 25,
+          "selection_restored": true,
+          "position_restored": true,
+          "inventory_totals_restored": true,
+          "survival": true
+        },
+        {
+          "index": 50,
+          "selection_restored": true,
+          "position_restored": true,
+          "inventory_totals_restored": true,
+          "survival": true
+        },
+        {
+          "index": 75,
+          "selection_restored": true,
+          "position_restored": true,
+          "inventory_totals_restored": true,
+          "survival": true
+        },
+        {
+          "index": 99,
+          "selection_restored": true,
+          "position_restored": true,
+          "inventory_totals_restored": true,
+          "survival": true
+        }
+      ],
+      "admin_privileged_response": true,
+      "port": 25587
+    }
+  },
+  "observed_plateaus": [
+    {
+      "bots": 5,
+      "utc": "2026-11-05T22:22:16Z",
+      "elapsed_s": 47.90335842499917,
+      "tps": 20.0,
+      "mspt": {
+        "p50_ms": 0.05,
+        "p95_ms": 0.1,
+        "p99_ms": 0.219,
+        "max_ms": 70.646,
+        "over_50ms": 1,
+        "busy_max_ms": 70.646,
+        "busy_over_50ms": 1
+      },
+      "tick_samples": 600,
+      "server_cpu_percent": 4.943611495951027,
+      "generator_workers_cpu_percent": 0.7605556147616964,
+      "server_memory": {
+        "Threads": "7",
+        "VmHWM": "32680 kB",
+        "VmRSS": "32680 kB",
+        "VmSize": "471716 kB",
+        "VmSwap": "0 kB"
+      },
+      "generator_sum_rss_kib": 51456,
+      "counts": {
+        "artificial_replenishments": 5,
+        "breaks_confirmed": 5,
+        "breaks_proposed": 5,
+        "breaks_sent": 5,
+        "connections_succeeded": 5,
+        "cycles": 5,
+        "entity_spawn_packets": 45,
+        "movement_position_checks": 5,
+        "movements_sent": 78,
+        "placements_confirmed": 5,
+        "placements_proposed": 5,
+        "placements_sent": 5
+      },
+      "guard": {
+        "available_mib": 110419,
+        "disk_free_mib": 44602,
+        "io_full_avg10": 0.03,
+        "memory_full_avg10": 0.0,
+        "oom": false,
+        "public_latency_ms": 1.0635010112309828,
+        "public_unchanged": true,
+        "storage_errors": false,
+        "wal_bytes": 226632,
+        "worker_stale": false,
+        "world_bytes": 273985
+      },
+      "cgroups": {
+        "goatcore-endurance.service": {
+          "cpu.stat": "usage_usec 2795780\nuser_usec 2273796\nsystem_usec 521984\nnice_usec 2300000\ncore_sched.force_idle_usec 0\nnr_periods 224\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "66961408",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.peak": "68653056",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        },
+        "goatcore-test.service": {
+          "cpu.stat": "usage_usec 4003801\nuser_usec 3747911\nsystem_usec 255889\nnice_usec 3643000\ncore_sched.force_idle_usec 0\nnr_periods 329\nnr_throttled 6\nthrottled_usec 682896\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "37998592",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "8589934592",
+          "memory.peak": "38297600",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        }
+      },
+      "io": {
+        "cancelled_write_bytes": 0,
+        "rchar": 845980,
+        "read_bytes": 0,
+        "syscr": 1710,
+        "syscw": 1244,
+        "wchar": 537434,
+        "write_bytes": 577536
+      },
+      "saves": {
+        "atomic_directory_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 23,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11940,
+          "wall_us": 11940
+        },
+        "atomic_file_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 145,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11845,
+          "wall_us": 11845
+        },
+        "atomic_rename": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 96,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 96,
+          "wall_us": 96
+        },
+        "cache_invalidate": {
+          "bytes": 55098,
+          "calls": 12,
+          "cpu_us": 51,
+          "errors": 0,
+          "last_cx": -16,
+          "last_cz": 4,
+          "max_wall_us": 8,
+          "wall_us": 57
+        },
+        "enqueue_break": {
+          "bytes": 55,
+          "calls": 5,
+          "cpu_us": 31,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 8977,
+          "wall_us": 11971
+        },
+        "enqueue_place": {
+          "bytes": 125,
+          "calls": 5,
+          "cpu_us": 17,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 916,
+          "wall_us": 3158
+        },
+        "handler_break": {
+          "bytes": 55,
+          "calls": 5,
+          "cpu_us": 307,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 213,
+          "wall_us": 324
+        },
+        "handler_place": {
+          "bytes": 125,
+          "calls": 5,
+          "cpu_us": 6214,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 59414,
+          "wall_us": 217287
+        },
+        "player_file_save": {
+          "bytes": 22358,
+          "calls": 33,
+          "cpu_us": 29006,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 70510,
+          "wall_us": 1362993
+        },
+        "player_hotbar": {
+          "bytes": 5,
+          "calls": 10,
+          "cpu_us": 38,
+          "errors": 0,
+          "last_cx": 6,
+          "last_cz": 1,
+          "max_wall_us": 7,
+          "wall_us": 51
+        },
+        "player_immediate_request": {
+          "bytes": 30,
+          "calls": 30,
+          "cpu_us": 98,
+          "errors": 0,
+          "last_cx": 6,
+          "last_cz": 0,
+          "max_wall_us": 6,
+          "wall_us": 118
+        },
+        "save_backpressure": {
+          "bytes": 0,
+          "calls": 16,
+          "cpu_us": 38,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 5,
+          "wall_us": 43
+        },
+        "save_batch_done": {
+          "bytes": 1093563,
+          "calls": 21,
+          "cpu_us": 163,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 17,
+          "wall_us": 170
+        },
+        "save_batch_submit": {
+          "bytes": 1093563,
+          "calls": 21,
+          "cpu_us": 42,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 4,
+          "wall_us": 46
+        },
+        "save_snapshot": {
+          "bytes": 1093563,
+          "calls": 87,
+          "cpu_us": 1338,
+          "errors": 0,
+          "last_cx": -15,
+          "last_cz": 4,
+          "max_wall_us": 48,
+          "wall_us": 1347
+        },
+        "sqlite_commit": {
+          "bytes": 0,
+          "calls": 21,
+          "cpu_us": 8882,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 51335,
+          "wall_us": 670168
+        },
+        "sqlite_compress": {
+          "bytes": 42618,
+          "calls": 87,
+          "cpu_us": 11588,
+          "errors": 0,
+          "last_cx": -15,
+          "last_cz": 4,
+          "max_wall_us": 2544,
+          "wall_us": 11606
+        },
+        "sqlite_decode": {
+          "bytes": 408720,
+          "calls": 60,
+          "cpu_us": 721073,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 60390,
+          "wall_us": 862318
+        },
+        "sqlite_decompress": {
+          "bytes": 408720,
+          "calls": 60,
+          "cpu_us": 594,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 2866,
+          "wall_us": 3433
+        },
+        "sqlite_encode": {
+          "bytes": 611324,
+          "calls": 87,
+          "cpu_us": 709992,
+          "errors": 0,
+          "last_cx": -15,
+          "last_cz": 4,
+          "max_wall_us": 61730,
+          "wall_us": 897219
+        },
+        "sqlite_lookup": {
+          "bytes": 28322,
+          "calls": 60,
+          "cpu_us": 3235,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 317,
+          "wall_us": 3424
+        },
+        "sqlite_read": {
+          "bytes": 408720,
+          "calls": 127,
+          "cpu_us": 14548,
+          "errors": 67,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 3201,
+          "wall_us": 18096
+        },
+        "sqlite_transaction": {
+          "bytes": 611324,
+          "calls": 21,
+          "cpu_us": 29992,
+          "errors": 0,
+          "last_cx": 1,
+          "last_cz": 55,
+          "max_wall_us": 67139,
+          "wall_us": 829303
+        },
+        "storage_load": {
+          "bytes": 0,
+          "calls": 126,
+          "cpu_us": 726138,
+          "errors": 67,
+          "last_cx": -18,
+          "last_cz": 7,
+          "max_wall_us": 60547,
+          "wall_us": 915536
+        },
+        "support_neighbors": {
+          "bytes": 732,
+          "calls": 122,
+          "cpu_us": 781,
+          "errors": 0,
+          "last_cx": -232,
+          "last_cz": 64,
+          "max_wall_us": 15,
+          "wall_us": 810
+        }
+      },
+      "latencies": [
+        {
+          "0.5": 51.07074299303349,
+          "0.95": 51.196597996749915,
+          "0.99": 51.196597996749915
+        }
+      ]
+    },
+    {
+      "bots": 25,
+      "utc": "2026-11-05T22:23:09Z",
+      "elapsed_s": 100.79714490800689,
+      "tps": 19.933333333333334,
+      "mspt": {
+        "p50_ms": 0.532,
+        "p95_ms": 16.82,
+        "p99_ms": 52.263,
+        "max_ms": 102.156,
+        "over_50ms": 7,
+        "busy_max_ms": 125.04999999999998,
+        "busy_over_50ms": 17
+      },
+      "tick_samples": 598,
+      "server_cpu_percent": 5.542132233113669,
+      "generator_workers_cpu_percent": 2.10218808842243,
+      "server_memory": {
+        "Threads": "7",
+        "VmHWM": "36712 kB",
+        "VmRSS": "33012 kB",
+        "VmSize": "475540 kB",
+        "VmSwap": "0 kB"
+      },
+      "generator_sum_rss_kib": 102128,
+      "counts": {
+        "artificial_replenishments": 25,
+        "breaks_confirmed": 33,
+        "breaks_proposed": 35,
+        "breaks_sent": 35,
+        "connections_succeeded": 25,
+        "cycles": 33,
+        "entity_spawn_packets": 1400,
+        "movement_position_checks": 35,
+        "movements_sent": 431,
+        "pickup_packets": 100,
+        "placements_confirmed": 35,
+        "placements_proposed": 35,
+        "placements_sent": 35,
+        "support_attachments_prepared": 3,
+        "support_losses_confirmed": 3
+      },
+      "guard": {
+        "available_mib": 110377,
+        "disk_free_mib": 44601,
+        "io_full_avg10": 0.35,
+        "memory_full_avg10": 0.0,
+        "oom": false,
+        "public_latency_ms": 1.0750939982244745,
+        "public_unchanged": true,
+        "storage_errors": false,
+        "wal_bytes": 671592,
+        "worker_stale": false,
+        "world_bytes": 727915
+      },
+      "cgroups": {
+        "goatcore-endurance.service": {
+          "cpu.stat": "usage_usec 7267173\nuser_usec 5963508\nsystem_usec 1303664\nnice_usec 5901000\ncore_sched.force_idle_usec 0\nnr_periods 707\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "109604864",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.peak": "110542848",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        },
+        "goatcore-test.service": {
+          "cpu.stat": "usage_usec 15337432\nuser_usec 14160354\nsystem_usec 1177078\nnice_usec 13590000\ncore_sched.force_idle_usec 0\nnr_periods 843\nnr_throttled 36\nthrottled_usec 1779085\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "40759296",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "8589934592",
+          "memory.peak": "44150784",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        }
+      },
+      "io": {
+        "cancelled_write_bytes": 0,
+        "rchar": 4554900,
+        "read_bytes": 0,
+        "syscr": 15312,
+        "syscw": 16344,
+        "wchar": 1834272,
+        "write_bytes": 1949696
+      },
+      "saves": {
+        "atomic_directory_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 23,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11940,
+          "wall_us": 11940
+        },
+        "atomic_file_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 145,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11845,
+          "wall_us": 11845
+        },
+        "atomic_rename": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 96,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 96,
+          "wall_us": 96
+        },
+        "cache_invalidate": {
+          "bytes": 364994,
+          "calls": 71,
+          "cpu_us": 268,
+          "errors": 0,
+          "last_cx": -13,
+          "last_cz": 4,
+          "max_wall_us": 10,
+          "wall_us": 310
+        },
+        "enqueue_break": {
+          "bytes": 374,
+          "calls": 34,
+          "cpu_us": 102,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 45465,
+          "wall_us": 158768
+        },
+        "enqueue_place": {
+          "bytes": 850,
+          "calls": 34,
+          "cpu_us": 108,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 1050,
+          "wall_us": 19743
+        },
+        "handler_break": {
+          "bytes": 374,
+          "calls": 34,
+          "cpu_us": 2372,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 477,
+          "wall_us": 2617
+        },
+        "handler_place": {
+          "bytes": 850,
+          "calls": 34,
+          "cpu_us": 41962,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 66348,
+          "wall_us": 1463581
+        },
+        "player_file_save": {
+          "bytes": 116338,
+          "calls": 172,
+          "cpu_us": 151410,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 70510,
+          "wall_us": 7042260
+        },
+        "player_hotbar": {
+          "bytes": 43,
+          "calls": 68,
+          "cpu_us": 284,
+          "errors": 0,
+          "last_cx": 5,
+          "last_cz": 1,
+          "max_wall_us": 8,
+          "wall_us": 361
+        },
+        "player_immediate_request": {
+          "bytes": 162,
+          "calls": 162,
+          "cpu_us": 505,
+          "errors": 0,
+          "last_cx": 5,
+          "last_cz": 0,
+          "max_wall_us": 7,
+          "wall_us": 606
+        },
+        "save_backpressure": {
+          "bytes": 0,
+          "calls": 49,
+          "cpu_us": 109,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 5,
+          "wall_us": 120
+        },
+        "save_batch_done": {
+          "bytes": 3279583,
+          "calls": 96,
+          "cpu_us": 777,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 35,
+          "wall_us": 802
+        },
+        "save_batch_submit": {
+          "bytes": 3301762,
+          "calls": 97,
+          "cpu_us": 201,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 19,
+          "wall_us": 235
+        },
+        "save_snapshot": {
+          "bytes": 3301762,
+          "calls": 200,
+          "cpu_us": 3352,
+          "errors": 0,
+          "last_cx": -15,
+          "last_cz": 4,
+          "max_wall_us": 48,
+          "wall_us": 3391
+        },
+        "sqlite_commit": {
+          "bytes": 0,
+          "calls": 96,
+          "cpu_us": 39116,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 61566,
+          "wall_us": 2891394
+        },
+        "sqlite_compress": {
+          "bytes": 110970,
+          "calls": 199,
+          "cpu_us": 25992,
+          "errors": 0,
+          "last_cx": -16,
+          "last_cz": 4,
+          "max_wall_us": 2544,
+          "wall_us": 26061
+        },
+        "sqlite_decode": {
+          "bytes": 3269760,
+          "calls": 480,
+          "cpu_us": 5328727,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 60390,
+          "wall_us": 5991526
+        },
+        "sqlite_decompress": {
+          "bytes": 3269760,
+          "calls": 480,
+          "cpu_us": 4382,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 2866,
+          "wall_us": 7188
+        },
+        "sqlite_encode": {
+          "bytes": 1548548,
+          "calls": 199,
+          "cpu_us": 1449392,
+          "errors": 0,
+          "last_cx": -16,
+          "last_cz": 4,
+          "max_wall_us": 61730,
+          "wall_us": 1740603
+        },
+        "sqlite_lookup": {
+          "bytes": 226505,
+          "calls": 480,
+          "cpu_us": 23894,
+          "errors": 0,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 14793,
+          "wall_us": 40859
+        },
+        "sqlite_read": {
+          "bytes": 3269760,
+          "calls": 559,
+          "cpu_us": 88514,
+          "errors": 79,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 17915,
+          "wall_us": 129597
+        },
+        "sqlite_transaction": {
+          "bytes": 1548548,
+          "calls": 96,
+          "cpu_us": 102396,
+          "errors": 0,
+          "last_cx": 1,
+          "last_cz": 158,
+          "max_wall_us": 80416,
+          "wall_us": 3623998
+        },
+        "storage_load": {
+          "bytes": 0,
+          "calls": 559,
+          "cpu_us": 5426761,
+          "errors": 79,
+          "last_cx": -19,
+          "last_cz": 7,
+          "max_wall_us": 60547,
+          "wall_us": 6245949
+        },
+        "support_neighbors": {
+          "bytes": 2748,
+          "calls": 455,
+          "cpu_us": 2554,
+          "errors": 0,
+          "last_cx": -238,
+          "last_cz": 64,
+          "max_wall_us": 25,
+          "wall_us": 2670
+        },
+        "support_removed": {
+          "bytes": 3,
+          "calls": 3,
+          "cpu_us": 6,
+          "errors": 0,
+          "last_cx": -238,
+          "last_cz": 76,
+          "max_wall_us": 2,
+          "wall_us": 6
+        }
+      },
+      "latencies": [
+        {
+          "0.5": 51.07074299303349,
+          "0.95": 51.42903499654494,
+          "0.99": 51.42903499654494
+        },
+        {
+          "0.5": 51.12642899621278,
+          "0.95": 51.95329600246623,
+          "0.99": 54.729510011384264
+        }
+      ]
+    },
+    {
+      "bots": 50,
+      "utc": "2026-11-05T22:24:07Z",
+      "elapsed_s": 158.97022842199658,
+      "tps": 18.933333333333334,
+      "mspt": {
+        "p50_ms": 2.61,
+        "p95_ms": 46.761,
+        "p99_ms": 85.521,
+        "max_ms": 464.79,
+        "over_50ms": 23,
+        "busy_max_ms": 952.7750000000001,
+        "busy_over_50ms": 51
+      },
+      "tick_samples": 568,
+      "server_cpu_percent": 14.859037667487629,
+      "generator_workers_cpu_percent": 14.09703573582157,
+      "server_memory": {
+        "Threads": "7",
+        "VmHWM": "42324 kB",
+        "VmRSS": "41272 kB",
+        "VmSize": "481492 kB",
+        "VmSwap": "0 kB"
+      },
+      "generator_sum_rss_kib": 153084,
+      "counts": {
+        "artificial_replenishments": 50,
+        "breaks_confirmed": 90,
+        "breaks_proposed": 93,
+        "breaks_sent": 93,
+        "connections_succeeded": 50,
+        "cycles": 90,
+        "entity_spawn_packets": 6660,
+        "movement_position_checks": 93,
+        "movements_sent": 1242,
+        "pickup_packets": 800,
+        "placements_confirmed": 93,
+        "placements_proposed": 93,
+        "placements_sent": 93,
+        "support_attachments_prepared": 10,
+        "support_losses_confirmed": 10
+      },
+      "guard": {
+        "available_mib": 110328,
+        "disk_free_mib": 44599,
+        "io_full_avg10": 1.72,
+        "memory_full_avg10": 0.0,
+        "oom": false,
+        "public_latency_ms": 0.7988559955265373,
+        "public_unchanged": true,
+        "storage_errors": false,
+        "wal_bytes": 1450272,
+        "worker_stale": false,
+        "world_bytes": 1518430
+      },
+      "cgroups": {
+        "goatcore-endurance.service": {
+          "cpu.stat": "usage_usec 17544321\nuser_usec 14122505\nsystem_usec 3421815\nnice_usec 13855000\ncore_sched.force_idle_usec 0\nnr_periods 1281\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "150982656",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.peak": "152252416",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        },
+        "goatcore-test.service": {
+          "cpu.stat": "usage_usec 34398355\nuser_usec 30447597\nsystem_usec 3950757\nnice_usec 29459000\ncore_sched.force_idle_usec 0\nnr_periods 1422\nnr_throttled 76\nthrottled_usec 3828716\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "52092928",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "8589934592",
+          "memory.peak": "52781056",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        }
+      },
+      "io": {
+        "cancelled_write_bytes": 0,
+        "rchar": 9589696,
+        "read_bytes": 0,
+        "syscr": 79358,
+        "syscw": 74241,
+        "wchar": 4124453,
+        "write_bytes": 4333568
+      },
+      "saves": {
+        "atomic_directory_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 23,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11940,
+          "wall_us": 11940
+        },
+        "atomic_file_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 145,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11845,
+          "wall_us": 11845
+        },
+        "atomic_rename": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 96,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 96,
+          "wall_us": 96
+        },
+        "cache_invalidate": {
+          "bytes": 870060,
+          "calls": 164,
+          "cpu_us": 737,
+          "errors": 0,
+          "last_cx": -13,
+          "last_cz": 4,
+          "max_wall_us": 545,
+          "wall_us": 1342
+        },
+        "enqueue_break": {
+          "bytes": 1023,
+          "calls": 93,
+          "cpu_us": 255,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 437719,
+          "wall_us": 1171827
+        },
+        "enqueue_place": {
+          "bytes": 2325,
+          "calls": 93,
+          "cpu_us": 322,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 461479,
+          "wall_us": 819251
+        },
+        "handler_break": {
+          "bytes": 1023,
+          "calls": 93,
+          "cpu_us": 7084,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 795,
+          "wall_us": 8031
+        },
+        "handler_place": {
+          "bytes": 2325,
+          "calls": 93,
+          "cpu_us": 113114,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 487565,
+          "wall_us": 4696983
+        },
+        "player_file_save": {
+          "bytes": 277953,
+          "calls": 412,
+          "cpu_us": 376022,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 487376,
+          "wall_us": 18517809
+        },
+        "player_hotbar": {
+          "bytes": 136,
+          "calls": 186,
+          "cpu_us": 727,
+          "errors": 0,
+          "last_cx": 22,
+          "last_cz": 1,
+          "max_wall_us": 9,
+          "wall_us": 919
+        },
+        "player_immediate_request": {
+          "bytes": 362,
+          "calls": 362,
+          "cpu_us": 1171,
+          "errors": 0,
+          "last_cx": 22,
+          "last_cz": 0,
+          "max_wall_us": 152,
+          "wall_us": 1508
+        },
+        "save_backpressure": {
+          "bytes": 0,
+          "calls": 94,
+          "cpu_us": 218,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 9,
+          "wall_us": 246
+        },
+        "save_batch_done": {
+          "bytes": 6979390,
+          "calls": 234,
+          "cpu_us": 1793,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 37,
+          "wall_us": 1835
+        },
+        "save_batch_submit": {
+          "bytes": 7001625,
+          "calls": 235,
+          "cpu_us": 513,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 21,
+          "wall_us": 595
+        },
+        "save_snapshot": {
+          "bytes": 7001625,
+          "calls": 383,
+          "cpu_us": 6837,
+          "errors": 0,
+          "last_cx": -13,
+          "last_cz": 4,
+          "max_wall_us": 107,
+          "wall_us": 6940
+        },
+        "sqlite_commit": {
+          "bytes": 0,
+          "calls": 235,
+          "cpu_us": 93744,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 211364,
+          "wall_us": 6922678
+        },
+        "sqlite_compress": {
+          "bytes": 231678,
+          "calls": 383,
+          "cpu_us": 53381,
+          "errors": 0,
+          "last_cx": -13,
+          "last_cz": 4,
+          "max_wall_us": 2544,
+          "wall_us": 53627
+        },
+        "sqlite_decode": {
+          "bytes": 7213908,
+          "calls": 1059,
+          "cpu_us": 11391998,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 60390,
+          "wall_us": 12970394
+        },
+        "sqlite_decompress": {
+          "bytes": 7213908,
+          "calls": 1059,
+          "cpu_us": 9547,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 2866,
+          "wall_us": 12345
+        },
+        "sqlite_encode": {
+          "bytes": 3128129,
+          "calls": 383,
+          "cpu_us": 2862803,
+          "errors": 0,
+          "last_cx": -13,
+          "last_cz": 4,
+          "max_wall_us": 61730,
+          "wall_us": 3286488
+        },
+        "sqlite_lookup": {
+          "bytes": 499728,
+          "calls": 1059,
+          "cpu_us": 51688,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 16954,
+          "wall_us": 105279
+        },
+        "sqlite_read": {
+          "bytes": 7213908,
+          "calls": 1147,
+          "cpu_us": 189235,
+          "errors": 88,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 17915,
+          "wall_us": 270669
+        },
+        "sqlite_transaction": {
+          "bytes": 3118574,
+          "calls": 234,
+          "cpu_us": 236273,
+          "errors": 0,
+          "last_cx": 1,
+          "last_cz": 348,
+          "max_wall_us": 272989,
+          "wall_us": 8814281
+        },
+        "storage_load": {
+          "bytes": 0,
+          "calls": 1147,
+          "cpu_us": 11601490,
+          "errors": 88,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 60547,
+          "wall_us": 13517526
+        },
+        "support_neighbors": {
+          "bytes": 5076,
+          "calls": 836,
+          "cpu_us": 5070,
+          "errors": 0,
+          "last_cx": -202,
+          "last_cz": 64,
+          "max_wall_us": 74,
+          "wall_us": 5384
+        },
+        "support_removed": {
+          "bytes": 10,
+          "calls": 10,
+          "cpu_us": 21,
+          "errors": 0,
+          "last_cx": -214,
+          "last_cz": 64,
+          "max_wall_us": 3,
+          "wall_us": 23
+        }
+      },
+      "latencies": [
+        {
+          "0.5": 50.82838100497611,
+          "0.95": 51.42903499654494,
+          "0.99": 51.796828003716655
+        },
+        {
+          "0.5": 51.15502800617833,
+          "0.95": 101.32513000280596,
+          "0.99": 510.2992210013326
+        },
+        {
+          "0.5": 51.05767599889077,
+          "0.95": 102.12849399249535,
+          "0.99": 102.56330200354569
+        }
+      ]
+    },
+    {
+      "bots": 100,
+      "utc": "2026-11-05T22:25:32Z",
+      "elapsed_s": 243.94064059799712,
+      "tps": 18.766666666666666,
+      "mspt": {
+        "p50_ms": 12.831,
+        "p95_ms": 68.791,
+        "p99_ms": 108.933,
+        "max_ms": 176.977,
+        "over_50ms": 63,
+        "busy_max_ms": 190.798,
+        "busy_over_50ms": 115
+      },
+      "tick_samples": 563,
+      "server_cpu_percent": 50.880281910670064,
+      "generator_workers_cpu_percent": 47.450150545905736,
+      "server_memory": {
+        "Threads": "7",
+        "VmHWM": "56404 kB",
+        "VmRSS": "55520 kB",
+        "VmSize": "493972 kB",
+        "VmSwap": "0 kB"
+      },
+      "generator_sum_rss_kib": 254984,
+      "counts": {
+        "artificial_replenishments": 100,
+        "breaks_confirmed": 262,
+        "breaks_proposed": 272,
+        "breaks_sent": 272,
+        "connections_succeeded": 100,
+        "cycles": 262,
+        "entity_spawn_packets": 32727,
+        "movement_position_checks": 272,
+        "movements_sent": 3495,
+        "pickup_packets": 4934,
+        "placements_confirmed": 272,
+        "placements_proposed": 272,
+        "placements_sent": 272,
+        "support_attachments_prepared": 31,
+        "support_losses_confirmed": 30
+      },
+      "guard": {
+        "available_mib": 110234,
+        "disk_free_mib": 44594,
+        "io_full_avg10": 3.03,
+        "memory_full_avg10": 0.0,
+        "oom": false,
+        "public_latency_ms": 0.9997550077969208,
+        "public_unchanged": true,
+        "storage_errors": false,
+        "wal_bytes": 3621512,
+        "worker_stale": false,
+        "world_bytes": 3712278
+      },
+      "cgroups": {
+        "goatcore-endurance.service": {
+          "cpu.stat": "usage_usec 57222293\nuser_usec 44992410\nsystem_usec 12229882\nnice_usec 43937000\ncore_sched.force_idle_usec 0\nnr_periods 2131\nnr_throttled 1\nthrottled_usec 56762\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "235515904",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.peak": "237625344",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        },
+        "goatcore-test.service": {
+          "cpu.stat": "usage_usec 88044852\nuser_usec 72946296\nsystem_usec 15098556\nnice_usec 70970000\ncore_sched.force_idle_usec 0\nnr_periods 2271\nnr_throttled 159\nthrottled_usec 9481866\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "71860224",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "8589934592",
+          "memory.peak": "72568832",
+          "memory.pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memory.swap.current": "0"
+        }
+      },
+      "io": {
+        "cancelled_write_bytes": 0,
+        "rchar": 20541800,
+        "read_bytes": 0,
+        "syscr": 393298,
+        "syscw": 351405,
+        "wchar": 10983234,
+        "write_bytes": 10420224
+      },
+      "saves": {
+        "atomic_directory_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 23,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11940,
+          "wall_us": 11940
+        },
+        "atomic_file_sync": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 145,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 11845,
+          "wall_us": 11845
+        },
+        "atomic_rename": {
+          "bytes": 0,
+          "calls": 1,
+          "cpu_us": 96,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 96,
+          "wall_us": 96
+        },
+        "cache_invalidate": {
+          "bytes": 1782012,
+          "calls": 334,
+          "cpu_us": 1332,
+          "errors": 0,
+          "last_cx": -5,
+          "last_cz": 4,
+          "max_wall_us": 545,
+          "wall_us": 2056
+        },
+        "enqueue_break": {
+          "bytes": 2948,
+          "calls": 268,
+          "cpu_us": 676,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 437719,
+          "wall_us": 5955285
+        },
+        "enqueue_place": {
+          "bytes": 6700,
+          "calls": 268,
+          "cpu_us": 865,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 461479,
+          "wall_us": 3554604
+        },
+        "handler_break": {
+          "bytes": 2948,
+          "calls": 268,
+          "cpu_us": 26428,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 1387,
+          "wall_us": 29874
+        },
+        "handler_place": {
+          "bytes": 6700,
+          "calls": 268,
+          "cpu_us": 310672,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 487565,
+          "wall_us": 12564189
+        },
+        "player_file_save": {
+          "bytes": 678224,
+          "calls": 1007,
+          "cpu_us": 921819,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 487376,
+          "wall_us": 44393445
+        },
+        "player_hotbar": {
+          "bytes": 436,
+          "calls": 536,
+          "cpu_us": 1972,
+          "errors": 0,
+          "last_cx": 67,
+          "last_cz": 1,
+          "max_wall_us": 31,
+          "wall_us": 2437
+        },
+        "player_immediate_request": {
+          "bytes": 834,
+          "calls": 834,
+          "cpu_us": 2768,
+          "errors": 0,
+          "last_cx": 67,
+          "last_cz": 0,
+          "max_wall_us": 152,
+          "wall_us": 3413
+        },
+        "save_backpressure": {
+          "bytes": 0,
+          "calls": 208,
+          "cpu_us": 470,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 0,
+          "max_wall_us": 9,
+          "wall_us": 519
+        },
+        "save_batch_done": {
+          "bytes": 17435189,
+          "calls": 570,
+          "cpu_us": 4231,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 37,
+          "wall_us": 4351
+        },
+        "save_batch_submit": {
+          "bytes": 17457162,
+          "calls": 571,
+          "cpu_us": 1262,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 21,
+          "wall_us": 1394
+        },
+        "save_snapshot": {
+          "bytes": 17457162,
+          "calls": 906,
+          "cpu_us": 15334,
+          "errors": 0,
+          "last_cx": -14,
+          "last_cz": 4,
+          "max_wall_us": 6923,
+          "wall_us": 22488
+        },
+        "sqlite_commit": {
+          "bytes": 0,
+          "calls": 571,
+          "cpu_us": 224487,
+          "errors": 0,
+          "last_cx": 0,
+          "last_cz": 1,
+          "max_wall_us": 211364,
+          "wall_us": 16994413
+        },
+        "sqlite_compress": {
+          "bytes": 578441,
+          "calls": 906,
+          "cpu_us": 128332,
+          "errors": 0,
+          "last_cx": -14,
+          "last_cz": 4,
+          "max_wall_us": 2544,
+          "wall_us": 129961
+        },
+        "sqlite_decode": {
+          "bytes": 14734356,
+          "calls": 2163,
+          "cpu_us": 23239468,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 60763,
+          "wall_us": 27084243
+        },
+        "sqlite_decompress": {
+          "bytes": 14734356,
+          "calls": 2163,
+          "cpu_us": 19360,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 3450,
+          "wall_us": 29506
+        },
+        "sqlite_encode": {
+          "bytes": 7657691,
+          "calls": 906,
+          "cpu_us": 6788910,
+          "errors": 0,
+          "last_cx": -14,
+          "last_cz": 4,
+          "max_wall_us": 61730,
+          "wall_us": 7540766
+        },
+        "sqlite_lookup": {
+          "bytes": 1020692,
+          "calls": 2163,
+          "cpu_us": 103110,
+          "errors": 0,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 16954,
+          "wall_us": 211061
+        },
+        "sqlite_read": {
+          "bytes": 14734356,
+          "calls": 2307,
+          "cpu_us": 381625,
+          "errors": 144,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 24103,
+          "wall_us": 607481
+        },
+        "sqlite_transaction": {
+          "bytes": 7657691,
+          "calls": 571,
+          "cpu_us": 571937,
+          "errors": 0,
+          "last_cx": 1,
+          "last_cz": 867,
+          "max_wall_us": 272989,
+          "wall_us": 21865683
+        },
+        "storage_load": {
+          "bytes": 0,
+          "calls": 2307,
+          "cpu_us": 23662425,
+          "errors": 144,
+          "last_cx": -11,
+          "last_cz": 8,
+          "max_wall_us": 60954,
+          "wall_us": 28375140
+        },
+        "support_neighbors": {
+          "bytes": 11358,
+          "calls": 1863,
+          "cpu_us": 11210,
+          "errors": 0,
+          "last_cx": -214,
+          "last_cz": 76,
+          "max_wall_us": 74,
+          "wall_us": 11968
+        },
+        "support_removed": {
+          "bytes": 30,
+          "calls": 30,
+          "cpu_us": 62,
+          "errors": 0,
+          "last_cx": -110,
+          "last_cz": 70,
+          "max_wall_us": 3,
+          "wall_us": 64
+        }
+      },
+      "latencies": [
+        {
+          "0.5": 50.8606060029706,
+          "0.95": 151.74590499373153,
+          "0.99": 202.8814289951697
+        },
+        {
+          "0.5": 51.20629801240284,
+          "0.95": 102.01750899432227,
+          "0.99": 510.2992210013326
+        },
+        {
+          "0.5": 51.15482700057328,
+          "0.95": 103.44796300341841,
+          "0.99": 157.78649400454015
+        },
+        {
+          "0.5": 51.275442994665354,
+          "0.95": 152.27076699375175,
+          "0.99": 153.1857219961239
+        },
+        {
+          "0.5": 51.59683799138293,
+          "0.95": 153.11303900671192,
+          "0.99": 153.21633900748566
+        }
+      ]
+    }
+  ],
+  "interrupted_150": {
+    "connected": 150,
+    "active": 137,
+    "inflight": 16,
+    "counts": {
+      "artificial_replenishments": 150,
+      "breaks_confirmed": 463,
+      "breaks_proposed": 479,
+      "breaks_sent": 479,
+      "connections_succeeded": 150,
+      "cycles": 463,
+      "entity_spawn_packets": 77683,
+      "movement_position_checks": 479,
+      "movements_sent": 6074,
+      "pickup_packets": 11995,
+      "placements_confirmed": 479,
+      "placements_proposed": 479,
+      "placements_sent": 479,
+      "support_attachments_prepared": 56,
+      "support_losses_confirmed": 54
+    },
+    "tick": {
+      "boundary_ticks": 0,
+      "busy_boundary_intervals": 1,
+      "busy_max_ms": 463.26099999999997,
+      "busy_over_50ms": 187,
+      "busy_samples": 293,
+      "costs_s": {
+        "evict_us": 0.011191,
+        "fast_us": 7.050209,
+        "flush_us": 0.0,
+        "furnace_lock_us": 4.3e-05,
+        "handlers_us": 10.399497,
+        "integrate_us": 0.005146,
+        "items_lock_us": 6.1e-05,
+        "items_us": 2.056581,
+        "proto_us": 5.485665,
+        "remote_us": 8.143879,
+        "tasks_us": 3.591377,
+        "updates_us": 0.064959,
+        "world_save_us": 0.00995,
+        "world_us": 0.029892
+      },
+      "covered_fast_s": 7.050209,
+      "duration_s": 30.0,
+      "interarrival_ms": {
+        "0.5": 71.365,
+        "0.95": 234.443,
+        "0.99": 278.946
+      },
+      "item_entities_max": 98,
+      "max_ms": 279.468,
+      "over_50ms": 140,
+      "p50_ms": 45.783,
+      "p95_ms": 163.652,
+      "p99_ms": 206.816,
+      "ready_max": 150,
+      "ready_min": 126,
+      "scheduled_tick_cpu_s": 9.737237,
+      "scheduled_tick_wall_s": 19.459222,
+      "task_queue_depth_max": 45,
+      "task_queue_peak": 45,
+      "task_wait_max_ms": 295.0,
+      "tick_and_fast_ms": {
+        "0.5": 77.005,
+        "0.95": 213.689,
+        "0.99": 308.78700000000003
+      },
+      "tick_thread_interval_cpu_s": 10.519087,
+      "ticks_overlapping": 293,
+      "ticks_started": 293,
+      "tps": 9.766666666666667
+    },
+    "guard": {
+      "available_mib": 110139,
+      "disk_free_mib": 44590,
+      "io_full_avg10": 4.85,
+      "memory_full_avg10": 0.0,
+      "oom": false,
+      "public_latency_ms": 0.8949149923864752,
+      "public_unchanged": true,
+      "storage_errors": false,
+      "wal_bytes": 5953432,
+      "worker_stale": false,
+      "world_bytes": 6066176
+    },
+    "processes": [
+      {
+        "cpu_percent": 83.28332808429683,
+        "cpu_s": 140.06,
+        "io": {
+          "cancelled_write_bytes": 0,
+          "rchar": 30642192,
+          "read_bytes": 0,
+          "syscr": 829580,
+          "syscw": 762135,
+          "wchar": 18730599,
+          "write_bytes": 16805888
+        },
+        "pid": 55330,
+        "status": {
+          "Threads": "7",
+          "VmHWM": "74000 kB",
+          "VmRSS": "70476 kB",
+          "VmSize": "508820 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55330": 0.04,
+          "55332": 23.71,
+          "55333": 23.7,
+          "55334": 12.47,
+          "55335": 46.77,
+          "55336": 16.63,
+          "55337": 16.68
+        }
+      },
+      {
+        "cpu_percent": 3.588170597736138,
+        "cpu_s": 7.35,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9389448,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 155,
+          "wchar": 190296,
+          "write_bytes": 696320
+        },
+        "pid": 55350,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "53784 kB",
+          "VmRSS": "51464 kB",
+          "VmSize": "57812 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55350": 7.35
+        }
+      },
+      {
+        "cpu_percent": 12.275320465939425,
+        "cpu_s": 20.95,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 128,
+          "wchar": 117772,
+          "write_bytes": 524288
+        },
+        "pid": 55384,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52084 kB",
+          "VmRSS": "50700 kB",
+          "VmSize": "56724 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55384": 20.95
+        }
+      },
+      {
+        "cpu_percent": 15.108086727310107,
+        "cpu_s": 23.03,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 4096,
+          "syscr": 261,
+          "syscw": 101,
+          "wchar": 92560,
+          "write_bytes": 413696
+        },
+        "pid": 55416,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52164 kB",
+          "VmRSS": "51004 kB",
+          "VmSize": "57748 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55416": 23.03
+        }
+      },
+      {
+        "cpu_percent": 15.48578889549285,
+        "cpu_s": 18.93,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 72,
+          "wchar": 64992,
+          "write_bytes": 294912
+        },
+        "pid": 55451,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52144 kB",
+          "VmRSS": "50908 kB",
+          "VmSize": "57748 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55451": 18.93
+        }
+      },
+      {
+        "cpu_percent": 15.48578889549285,
+        "cpu_s": 15.73,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 72,
+          "wchar": 58293,
+          "write_bytes": 294912
+        },
+        "pid": 55453,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52180 kB",
+          "VmRSS": "51012 kB",
+          "VmSize": "57748 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55453": 15.73
+        }
+      },
+      {
+        "cpu_percent": 15.863491063675594,
+        "cpu_s": 8.17,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 30,
+          "wchar": 25390,
+          "write_bytes": 122880
+        },
+        "pid": 55503,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52296 kB",
+          "VmRSS": "51076 kB",
+          "VmSize": "56852 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55503": 8.17
+        }
+      },
+      {
+        "cpu_percent": 14.730384559127339,
+        "cpu_s": 4.51,
+        "io": {
+          "cancelled_write_bytes": 4096,
+          "rchar": 9418655,
+          "read_bytes": 0,
+          "syscr": 261,
+          "syscw": 30,
+          "wchar": 18721,
+          "write_bytes": 122880
+        },
+        "pid": 55505,
+        "status": {
+          "Threads": "1",
+          "VmHWM": "52104 kB",
+          "VmRSS": "50888 kB",
+          "VmSize": "57748 kB",
+          "VmSwap": "0 kB"
+        },
+        "threads": {
+          "55505": 4.51
+        }
+      }
+    ],
+    "saves": {
+      "atomic_directory_sync": {
+        "bytes": 0,
+        "calls": 1,
+        "cpu_us": 23,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 11940,
+        "wall_us": 11940
+      },
+      "atomic_file_sync": {
+        "bytes": 0,
+        "calls": 1,
+        "cpu_us": 145,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 11845,
+        "wall_us": 11845
+      },
+      "atomic_rename": {
+        "bytes": 0,
+        "calls": 1,
+        "cpu_us": 96,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 96,
+        "wall_us": 96
+      },
+      "cache_invalidate": {
+        "bytes": 2640821,
+        "calls": 496,
+        "cpu_us": 1936,
+        "errors": 0,
+        "last_cx": 1,
+        "last_cz": 4,
+        "max_wall_us": 545,
+        "wall_us": 2773
+      },
+      "enqueue_break": {
+        "bytes": 5236,
+        "calls": 476,
+        "cpu_us": 1185,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 437719,
+        "wall_us": 18062663
+      },
+      "enqueue_place": {
+        "bytes": 11950,
+        "calls": 478,
+        "cpu_us": 1470,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 461479,
+        "wall_us": 12017768
+      },
+      "handler_break": {
+        "bytes": 5236,
+        "calls": 476,
+        "cpu_us": 58366,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 2630,
+        "wall_us": 66202
+      },
+      "handler_place": {
+        "bytes": 11925,
+        "calls": 477,
+        "cpu_us": 541745,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 487565,
+        "wall_us": 21630450
+      },
+      "player_file_save": {
+        "bytes": 1124770,
+        "calls": 1672,
+        "cpu_us": 1531848,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 487376,
+        "wall_us": 73838540
+      },
+      "player_hotbar": {
+        "bytes": 814,
+        "calls": 954,
+        "cpu_us": 3354,
+        "errors": 0,
+        "last_cx": 586,
+        "last_cz": 0,
+        "max_wall_us": 507,
+        "wall_us": 4572
+      },
+      "player_immediate_request": {
+        "bytes": 1348,
+        "calls": 1348,
+        "cpu_us": 4522,
+        "errors": 0,
+        "last_cx": 586,
+        "last_cz": 0,
+        "max_wall_us": 152,
+        "wall_us": 5494
+      },
+      "save_backpressure": {
+        "bytes": 0,
+        "calls": 276,
+        "cpu_us": 630,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 0,
+        "max_wall_us": 9,
+        "wall_us": 700
+      },
+      "save_batch_done": {
+        "bytes": 29321951,
+        "calls": 878,
+        "cpu_us": 6641,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 1,
+        "max_wall_us": 43,
+        "wall_us": 6818
+      },
+      "save_batch_submit": {
+        "bytes": 29344016,
+        "calls": 879,
+        "cpu_us": 1945,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 1,
+        "max_wall_us": 21,
+        "wall_us": 2128
+      },
+      "save_snapshot": {
+        "bytes": 29344016,
+        "calls": 1491,
+        "cpu_us": 24529,
+        "errors": 0,
+        "last_cx": -14,
+        "last_cz": 5,
+        "max_wall_us": 6923,
+        "wall_us": 33464
+      },
+      "sqlite_commit": {
+        "bytes": 0,
+        "calls": 879,
+        "cpu_us": 350402,
+        "errors": 0,
+        "last_cx": 0,
+        "last_cz": 1,
+        "max_wall_us": 211364,
+        "wall_us": 26700083
+      },
+      "sqlite_compress": {
+        "bytes": 974978,
+        "calls": 1491,
+        "cpu_us": 216847,
+        "errors": 0,
+        "last_cx": -14,
+        "last_cz": 5,
+        "max_wall_us": 3516,
+        "wall_us": 223452
+      },
+      "sqlite_decode": {
+        "bytes": 18903300,
+        "calls": 2775,
+        "cpu_us": 31114526,
+        "errors": 0,
+        "last_cx": 4,
+        "last_cz": 8,
+        "max_wall_us": 67292,
+        "wall_us": 37243643
+      },
+      "sqlite_decompress": {
+        "bytes": 18903300,
+        "calls": 2775,
+        "cpu_us": 25758,
+        "errors": 0,
+        "last_cx": 4,
+        "last_cz": 8,
+        "max_wall_us": 3450,
+        "wall_us": 38695
+      },
+      "sqlite_encode": {
+        "bytes": 12789419,
+        "calls": 1491,
+        "cpu_us": 11340152,
+        "errors": 0,
+        "last_cx": -14,
+        "last_cz": 5,
+        "max_wall_us": 61730,
+        "wall_us": 12399449
+      },
+      "sqlite_lookup": {
+        "bytes": 1309478,
+        "calls": 2775,
+        "cpu_us": 138962,
+        "errors": 0,
+        "last_cx": 4,
+        "last_cz": 8,
+        "max_wall_us": 16954,
+        "wall_us": 324304
+      },
+      "sqlite_read": {
+        "bytes": 18903300,
+        "calls": 2970,
+        "cpu_us": 512163,
+        "errors": 195,
+        "last_cx": 4,
+        "last_cz": 8,
+        "max_wall_us": 24103,
+        "wall_us": 848880
+      },
+      "sqlite_transaction": {
+        "bytes": 12789419,
+        "calls": 879,
+        "cpu_us": 913003,
+        "errors": 0,
+        "last_cx": 1,
+        "last_cz": 1428,
+        "max_wall_us": 272989,
+        "wall_us": 34876237
+      },
+      "storage_load": {
+        "bytes": 0,
+        "calls": 2970,
+        "cpu_us": 31682324,
+        "errors": 195,
+        "last_cx": 4,
+        "last_cz": 8,
+        "max_wall_us": 93942,
+        "wall_us": 39053406
+      },
+      "support_neighbors": {
+        "bytes": 18162,
+        "calls": 2973,
+        "cpu_us": 18669,
+        "errors": 0,
+        "last_cx": 54,
+        "last_cz": 82,
+        "max_wall_us": 19473,
+        "wall_us": 39818
+      },
+      "support_removed": {
+        "bytes": 54,
+        "calls": 54,
+        "cpu_us": 114,
+        "errors": 0,
+        "last_cx": 30,
+        "last_cz": 82,
+        "max_wall_us": 4,
+        "wall_us": 117
+      }
+    }
+  },
+  "failed_fixture_attempt": {
+    "all_generators_stopped": true,
+    "elapsed_s": 206.82118161000835,
+    "final_target": 100,
+    "qualified_plateaus": [
+      5,
+      25,
+      50
+    ],
+    "reason": "unconfirmed-action-error",
+    "restart_counts": {},
+    "server_exit": {
+      "returncode": 0,
+      "shutdown_s": 3.2257576979900477,
+      "trace_errors": [],
+      "utc": "2026-11-05T22:06:24Z"
+    },
+    "test_stop_elapsed_s": 3.3246916589996545,
+    "test_stop_returncode": 0,
+    "utc": "2026-11-05T22:06:24Z"
+  },
+  "corrected_cold_lanes": {
+    "completed_cycles": 50,
+    "counts": {
+      "artificial_replenishments": 25,
+      "breaks_confirmed": 50,
+      "breaks_proposed": 52,
+      "breaks_sent": 52,
+      "cancelled_inflight_actions": 2,
+      "connections_succeeded": 25,
+      "cycles": 50,
+      "entity_spawn_packets": 2000,
+      "movement_position_checks": 52,
+      "movements_sent": 821,
+      "pickup_packets": 300,
+      "placements_confirmed": 52,
+      "placements_proposed": 52,
+      "placements_sent": 52,
+      "support_attachments_prepared": 6,
+      "support_losses_confirmed": 6
+    },
+    "errors": []
+  },
+  "validated_campaign_ceiling": 100,
+  "not_qualified": [
+    150,
+    200,
+    250
+  ],
+  "public_after": {
+    "public_pid": 147,
+    "public_restarts": 0,
+    "public_active": "active",
+    "protected_sha256": {
+      "/opt/goatcore/app/mc_server": "f840ed3f535d80d8b87293b1ada6fdf88cacd6c681740f1dcfa3b06bd1dc423c",
+      "/opt/goatcore/app/instances/online/server.config": "59a6b486122324c914563879fd8f43b2498695392498bc149858a7b25b423abd",
+      "/etc/goatcore/server1.setup.conf": "cdfd83d0a3a4fa5be38ad11b6cc7e5fa3eb02865665b711795a9cc253616b47d",
+      "/etc/systemd/system/goatcore.service": "6c528b64968c99abe75f6857a33c157f4b75bfdf59bde652c11038d72741113e"
+    }
+  },
+  "evidence_sha256": {
+    "preflight/metrics/final.json": "807462aa6894a7abcdcb7480eba65ca9f74bf43de43284170a02b1a31e378f97",
+    "preflight/metrics/resilience-after-generator-restart.json": "2c92d10607175648b008e6d8e05b0c8ca4a691dc7a7692d6befe3e11c61deba7",
+    "preflight/metrics/resilience-before-generator-kill.json": "a8e3f383faa9ad371ef2cfa14093ab2d07917f6c33bb2d68c33f8ebf200192ca",
+    "version/metrics/final.json": "68279032b7c904502d265d8ade33c1fe9c7ddd629e17f64d9003c8c4ae2bddb9",
+    "regression/proof.json": "f834f1298d0ee4c5c654689b53e7221836c6888971c7b7e33af0bd26c22a23e0",
+    "precommit-endurance.log": "4b3e444d32ac567ae881e4afd79b9f7e3fa87b185a087a87d3b7a5f829ebd7ef",
+    "candidate/metrics/manifest.json": "a039d56874897c242a35646c6060a298bbde84fba1c26b1d1b98149dbfdc8a8d",
+    "candidate/metrics/final.json": "05ff0cdf76261386cc5f4eb12a4b7913ffdc3884597cc36610bba02ffff18f52",
+    "candidate/metrics/ramp.json": "298c7cf7e13162d02354106c6bb4258b2a301df6b3ed709773e335f362140abd",
+    "candidate/integrity.json": "3c538e74f21a511eb2bd2e303b349354b3a039158550b0371c5c80b6d18ffe2e",
+    "candidate/restart-proof.json": "e6a0e067bcaa6a3865b85ac780a5536e8e8fe020ea6df89925463ed6875493f3",
+    "candidate/metrics/latest.json": "d906cdc8afc591d176a66728ca43721ae9ae154779609ef28a1603a9edac1de8",
+    "failed-ramp/metrics/final.json": "4a5bec574e0adb2aca993e38987b4fae4e4280ba713056f3b4aa1d3c96efc1b2",
+    "cold-lanes/metrics/cold-lanes-proof.json": "537c09a1bae031630ddbce346ba595be558a21f672564846dde3d31456aae4b3",
+    "initial.json": "7a672f2ba8a5d77e03ef63286da4ca87329bb6e6d8a50432f9e6110b656d37de",
+    "after-validation.json": "5b187f150473d97c9ce8028e2e1f1b894ea90c148a3be464b5ad083fb27c399a"
+  },
+  "limits": [
+    "Short buffered tick windows, not plateau medians or constant 20 TPS",
+    "Paced scripted Survival with artificial inventory/food grants, not human capacity",
+    "No 1000-player qualification",
+    "No new C runtime changes; previous sanitizer results not rerun",
+    "Component allocation counts and true physical RAID latency unavailable",
+    "Published post-push campaign SHA and ongoing activity are in its runtime manifest, not this precommit evidence"
+  ]
+}

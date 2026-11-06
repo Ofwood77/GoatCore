@@ -37,6 +37,7 @@ REPORT*.md
 docs/*
 !docs/testing-minecraft-bot.md
 !docs/goatworld-g1.md
+!docs/endurance-testing.md
 llm/
 reports/
 test-results/

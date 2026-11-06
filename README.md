@@ -1,263 +1,227 @@
 # GoatCore
 
-![GoatCore mascot](assets/pp.png)
+GoatCore is an experimental Minecraft Java Edition **26.1.1** server
+implementation written in **C11 for Linux** (protocol **775**, DataVersion
+**4788**). Its priority is faithful, authoritative Vanilla behavior, with
+predictable ticks, efficient native networking and durable persistence.
+It is an independent implementation, not a wrapper around the official server.
+The server is under active development and is not a complete Survival replacement.
 
-**Fast ticks. Pure C.**
+## Project goals
 
-GoatCore is an experimental Minecraft server engine written in C, targeting
-Minecraft `26.1.1` and protocol `775`.
+- **Small servers:** excellent responsiveness for communities of 4–5 players,
+  without paying the permanent overhead of a large deployment.
+- **Long-term scaling:** work toward **1,000+ concurrent active Survival players
+  in one shared world**. This is an engineering ambition, **not a demonstrated
+  capability**. CPU, memory bandwidth, NUMA, storage, network, active chunks,
+  entities and gameplay complexity all affect capacity.
+- **Vanilla fidelity:** optimize implementation costs while preserving observable
+  Minecraft rules. Unsupported simulation is reported rather than counted as parity.
 
-It focuses on low-level networking, predictable ticks, and a lightweight
-architecture built around C11, `epoll`, `pthread`, and `zlib`. The goal is to
-control the whole server stack directly, from packet framing to gameplay state,
-without a JVM and without wrapping the official server.
+## Vanilla Java 26.1.1 and GoatCore
 
-GoatCore is still experimental. It is meant for protocol research, gameplay
-systems work, and aggressive iteration on a small, inspectable C codebase.
+Statuses describe the covered scenarios, not complete feature parity.
 
-## Status
+| Feature | Vanilla Java 26.1.1 | GoatCore | GoatCore status |
+|---|---|---|---|
+| Protocol | Complete official implementation | Handshake, status, login, configuration, partial Play | Implemented subset |
+| Authentication | Official account authentication | Offline and Mojang authentication paths | Positive online client validation remains required |
+| Chunk loading | Full dimensions and streaming | Generation workers, streaming, eviction, persistent reload | Implemented subset |
+| Ordinary block placement | Full block rules | Placement, refusal, consumption and updates | Differentially tested subset |
+| Slabs | Placement and merging | Top/bottom/double slabs | Differentially tested |
+| Stairs | Placement and neighbor shapes | 192 reference observations | Differentially tested |
+| Doors | Two halves, hinges, interaction | Placement, interaction, support loss, drops | Differentially tested subset |
+| Trapdoors | Placement, interaction, waterlogging | Facing, half, open, preserved properties | Differentially tested subset |
+| Torches | Standing/wall variants and light | Ordinary, soul and copper supports/placement | Differentially tested; lighting partial |
+| Lanterns | Standing/hanging variants | Support rules, state, waterlogging and drops | Differentially tested subset |
+| Ladders | Attachment and climbing | Facing, support, shape and waterlogging | Attachment tested; climbing incomplete |
+| Survival inventories | Complete Survival | Inventory, consumption, pickup, drops, crafting/cooking subsets | Partial |
+| Block entities | Full simulation | Selected containers; seven complex types preserved in opaque NBT tests | Partial; preservation is not full gameplay |
+| Entity simulation | Mobs, AI and full physics | Players and basic item entities | Partial |
+| Redstone | Complete circuits | No complete circuit simulation | Not implemented as a complete system |
+| Fluids | Flow and scheduled simulation | Some represented/waterlogged states | Partial; flow incomplete |
+| Lighting | Propagation and updates | Partial network/world lighting | Partial |
+| World generation | Full Vanilla worlds | Current native generator | Not Vanilla-complete |
+| Player physics | Full movement/collisions | Movement and partial block geometry | Partial; ladder climbing pending |
+| Persistence | Official world formats | Legacy, Anvil and GoatWorld; atomic player files | Experimental backends; multi-file atomicity absent |
+| Multiplayer | Complete game | Visibility, state broadcasts, reconnect and selected interactions | Differentially tested subset |
 
-Current focus:
-
-- Stabilize compilation and automated tests on Debian.
-- Keep Minecraft `26.1.1` / protocol `775` compatibility aligned.
-- Improve real Java client connection, movement visibility, inventory, and
-  container behavior.
-- Grow the QA tooling without changing the core architecture too quickly.
-
-Known limitations:
-
-- The PLAY protocol is partial and still evolving.
-- Advanced client behavior can expose missing packet details.
-- Compression, container sync, and long-term chunk/world format work still need
-  hardening.
-
-## Features
-
-- Standalone Minecraft server engine, not a fork and not a wrapper.
-- Modern protocol target: Minecraft `26.1.1`, protocol `775`.
-- Server-authoritative 20 TPS tick loop.
-- Non-blocking networking using `epoll`.
-- Tick and network work split across `pthread` based runtime paths.
-- Chunk streaming with async generation workers.
-- Custom world and player persistence.
-- Player inventory and containers, including chest and furnace paths.
-- Crafting and cooking MVP.
-- Health, hunger, death, and respawn systems.
-- Item entities with basic physics.
-- Server-authoritative mining with timing validation.
-- Local QA bot tooling for smoke, movement, inventory, and command checks.
-
-## Install
-
-Clone the repository:
-
-```bash
-git clone https://github.com/Ofwood77/GoatCore.git
-cd GoatCore
-```
-
-Install the Debian build dependencies:
-
-```bash
-sudo apt update
-sudo apt install build-essential make gcc git python3 zlib1g-dev pkg-config
-```
-
-OpenSSL is optional and only needed when building with `USE_OPENSSL=1`:
-
-```bash
-sudo apt install libssl-dev
-```
-
-Build GoatCore:
-
-```bash
-make
-```
-
-Optional QA bot setup, only needed for Minecraft client automation:
-
-```bash
-cd tests/minecraft-bot
-npm install
-cd ../..
-```
-
-Node.js `22` or newer is recommended for the Mineflayer / `minecraft-protocol`
-tooling.
-
-## Build
-
-Compile the server:
-
-```bash
-make
-```
-
-Clean generated build outputs:
-
-```bash
-make clean
-```
-
-## Run
-
-Default launch:
-
-```bash
-./mc_server
-```
-
-Useful runtime overrides:
-
-```bash
-MC_BIND_PORT=25566 ./mc_server
-MC_WORLD_PATH=/tmp/goatcore_world ./mc_server
-MC_PERF=1 ./mc_server
-```
-
-The default server port is normally `25565`, unless overridden by environment
-or configuration.
-
-### CPU setup per instance
-
-Edit `setup.conf` or select a separate file for each instance:
-
-```sh
-MC_SETUP_FILE=config/server1.setup.conf MC_BIND_PORT=25565 ./mc_server
-MC_SETUP_FILE=config/server2.setup.conf MC_BIND_PORT=25587 ./mc_server
-```
-
-The `[performance]` keys are `cpu_cores`, `cpu_affinity`, `network_workers`,
-`chunk_workers`, and `tick_rate`. `cpu_cores = 0` uses every logical CPU selected by Linux; a
-positive value keeps that many CPUs from the affinity list, in ascending CPU-ID
-order. `cpu_affinity = auto` uses the current Linux/cpuset mask; explicit lists
-accept `0-3`, `0,2,4,6`, etc. A CPU outside that mask is a startup error, not a
-silent fallback. The affinity is applied before thread creation, so network,
-tick, and chunk threads inherit it. `chunk_workers = auto` uses 1–4 workers
-based on the effective CPU count; explicit values 1–16 are supported.
-`network_workers` accepts 1, 2, or 4 independent epoll socket owners, selected
-round-robin at accept time; the acceptor itself is a separate thread. Only
-`tick_rate = 20` is currently valid.
-
-There is no asynchronous save-worker pool or parallel simulation-worker pool
-yet. `save_workers` and `simulation_workers` are rejected rather than
-pretending to control threads.
-Affinity limits where a process may run; it does **not** reserve physical cores
-or cap CPU time. Use a separate systemd `CPUQuota=` or cgroups v2 quota if a
-consumption limit is required. The server logs the effective CPU IDs and worker
-counts at startup; `MC_PERF=1` adds tick/MSPT and per-network-worker summaries.
-
-## Tests
-
-C tests:
-
-```bash
-make test
-```
-
-Server smoke start:
-
-```bash
-make smoke-start
-```
-
-Repository checks:
-
-```bash
-make hygiene-check
-make generated-check
-```
-
-Minecraft QA bot tests live under `tests/minecraft-bot` and require Node.js 22
-or newer:
-
-```bash
-cd tests/minecraft-bot
-npm install
-cd ../..
-RUN_MINECRAFT_E2E_TESTS=1 MC_HOST=127.0.0.1 MC_PORT=25565 MC_TEST_MODE=smoke ./scripts/minecraft-e2e-test.sh
-```
-
-The QA mode can drive GoatCore through chat commands and verify connection,
-movement, gamemode changes, health, inventory, and chest placement:
-
-```bash
-RUN_MINECRAFT_E2E_TESTS=1 RUN_DESTRUCTIVE_TESTS=1 MC_TEST_MODE=qa ./scripts/minecraft-e2e-test.sh
-```
-
-## QA Commands
-
-For a real Java client, the current debug command path uses normal chat messages
-prefixed with `!qa`:
-
-```text
-!qa state
-!qa creative
-!qa survival
-!qa damage 1
-!qa heal 20
-!qa give stone 8
-!qa chest
-```
-
-These commands are development helpers. They are intended for local worlds and
-test sessions, not public servers.
+The block corpora include **310 attached-block cases**, **335 door/trapdoor
+scenarios**, and **192 stair observations**. They are functional comparisons,
+not performance comparisons. See [compatibility reports](docs/vanilla-compatibility.md).
 
 ## Architecture
 
-Important areas:
+- C11, Linux `epoll`, `pthread`, bounded network work and configurable CPU affinity.
+- A coherent authoritative tick; modular placement, support, neighbor and shape rules.
+- Official-version registry data: 1,168 block types and 29,873 block states.
+- Experimental GoatWorld: private checksum-pinned SQLite, **WAL + synchronous FULL**,
+  LZ4 compression, indexed chunks and one asynchronous chunk writer.
+- Independent immutable chunk snapshots, dirty generations, bounded batches and
+  shutdown drainage. No parallel gameplay simulation is implied.
+- Connected player state stays in RAM. Hotbar-only changes coalesce on a 30-second
+  target deadline; inventory persistence barriers remain immediate.
+- Player NBT files retain atomic temporary-file publication, file `fsync`, rename
+  and directory `fsync`. Periodic/forced player flushes are still synchronous.
 
-- `src/`: main server implementation.
-- `include/`: public internal headers shared across modules.
-- `src/net/`: socket handling, `epoll`, connection lifecycle, task queue integration, and
-  server tick coordination.
-- `src/protocol/`: packet framing, VarInt handling, protocol states, and clientbound/serverbound
-  handlers.
-- `src/protocol/handlers/play.c`: main PLAY state implementation. Large today, and a candidate for progressive
-  slicing once behavior is stable.
-- `src/world/`: chunks, Anvil import, block storage, players, containers, NBT, and world
-  persistence.
-- `src/gameplay/`: mining, block drops, crafting, furnace/cooking logic.
-- `src/generated/`: generated registries and Minecraft data tables for the current target.
-- `tools/`: data generation, protocol utilities, ping tools, recorder tools.
-- `scripts/`: higher-level test wrappers and local automation.
-- `tests/`: focused C tests plus the Minecraft QA bot.
+## Storage backends
 
-The runtime is organized around three major flows:
+| Backend | Configuration | Characteristics | Status |
+|---|---|---|---|
+| Legacy `.bin` | `chunk-storage=bin` | Historical chunk files | **Default** |
+| Anvil | `chunk-storage=anvil-atomic-experimental` | Native `.mca`, preserved supported opaque data, atomic region rebuilds | Experimental |
+| GoatWorld SQLite | `chunk-storage=goatworld-sqlite-experimental` | Indexed compressed chunks, grouped WAL FULL transactions | Experimental, explicit opt-in |
 
-- Network path: accepts clients, reads sockets, decodes packet frames, and queues work.
-- Tick path: applies authoritative gameplay and protocol state at predictable intervals.
-- World worker path: loads, generates, streams, saves, and evicts chunks.
+`chunk-save-mode=async` enables the existing asynchronous pipeline on supported
+experimental backends. There is no automatic migration or implicit fallback.
+Use a **separate new world** when selecting a different backend. GoatWorld databases
+cannot be opened directly by Vanilla. Full-world import/export is not claimed.
 
-## Protocol
+## Performance and benchmarks
 
-Implemented states include:
+A fixed-work Xeon/HDD campaign compared the player-save fix with its parent,
+with three repetitions per population. Both versions used the same disposable
+world, block/support-loss workload, view/simulation distance 2, compilation and
+instrumentation. The temporary cgroup was limited to 4 GiB, without swap, with
+CPU affinity and reduced CPU/I/O priority. Hardware exposed a dual Xeon E5-2637 v2
+and an ext4/LVM volume on rotational storage; controller-level physical writes
+were not inferred from process counters.
 
-- Handshake
-- Status
-- Login in offline mode
-- Configuration
-- Play
+| Bots | Median TPS before → after | MSPT P99 before → after (ms) |
+|---:|---:|---:|
+| 1 | 20.023 → 20.042 | 0.356 → 0.616 |
+| 2 | 17.518 → 19.963 | 111.722 → 0.404 |
+| 10 | 3.506 → 20.007 | 869.524 → 3.346 |
+| 25 | 2.445 → 20.043 | 1,236.546 → 10.690 |
+| 50 | 1.969 → 19.965 | 1,918.757 → 15.057 |
 
-The protocol is implemented manually, including VarInt encoding, packet framing,
-selected registry/tag/chunk payloads, and partial PLAY packet handling.
+At 50 bots, player `fsync` calls during active load fell from **6,000 to zero**.
+Across the full execution, including final saves, they fell from **6,500 to 300**.
+Median total time fell from **173.336 to 53.608 seconds**. Each version confirmed
+**23,760 actions** across its 15 runs, with matching final inventories and verified
+restarts. This workload used controlled test inventories, not complete human Survival.
 
-## Mascot
+The Python generator approached one saturated core at 50 bots. These short
+windows **do not prove constant 20 TPS**, maximum player capacity, or equivalence
+to human gameplay. Values slightly above 20 reflect finite measurement windows.
+The new endurance profile is a separate workload and must not be compared directly.
 
-GoatCore's mascot is a charging voxel goat: cute enough to remember, aggressive
-enough to smash through slow ticks.
+Source: [player-save validation manifest](tests/fixtures/vanilla-26.1.1-player-save-validation.json),
+[methodology and detailed metrics](docs/vanilla-compatibility.md).
 
-The image in `assets/pp.png` is the public mascot/logo used by the project.
+### Vanilla performance comparison
 
-## AI Use
+A strictly comparable direct Vanilla-versus-GoatCore TPS benchmark is not yet
+published. Functional differential tests and storage microbenchmarks do not
+establish that GoatCore is faster than the official server. Direct comparisons
+require matching workloads, world state, resources, persistence and deferred work.
 
-Parts of the project documentation, QA workflow, and development planning have
-been assisted by AI tools. Code changes still need normal review, local testing,
-and project owner approval before being pushed or released.
+## Hardware and memory
 
-## License And Notice
+The target is **Linux x86-64**, including homelabs, older Xeon/dual-socket ECC
+servers, HDD RAID, SSD and NVMe. The official minimum target profile is **4 GiB
+available per instance**; configurable budgets cover 8, 16, 32, 64, **100 GiB and
+beyond**. This is a capacity budget, not an allocation requirement or player guarantee.
 
-GoatCore is an independent experimental server engine. Minecraft is a trademark
-of Mojang/Microsoft. This project is not affiliated with Mojang or Microsoft.
+`memory-budget-mib` defaults to `4096`. It is a conservative **virtual address-space
+ceiling**, adjusted for available memory, readable cgroup v2 headroom, inherited
+limits and a 512 MiB reserve. It is not complete RSS/cache accounting. Unsupported
+or unreadable cgroup hierarchies currently prevent startup. The server can consume
+far less RAM than its budget; it does not reserve the configured capacity.
+
+Use RAM where measured caching/batching benefits justify it, while preserving
+headroom for the OS, page cache and other services. Never infer 1,000-player
+capacity merely from a 100 GiB configuration.
+
+## Building and running
+
+On a Debian-compatible Linux system:
+
+```sh
+sudo apt install build-essential make git python3 pkg-config zlib1g-dev \
+  libcurl4-openssl-dev libssl-dev liblz4-1 libzstd1
+make
+make test
+```
+
+The build prepares a private, checksum-pinned SQLite SDK through
+`tools/prepare_storage_deps.py`; the initial preparation needs HTTPS access.
+OpenSSL authentication is enabled by default (`USE_OPENSSL=1`). Disabling it
+selects authentication stubs; libcrypto is still required for integrity checks.
+Node.js tooling under `tests/minecraft-bot` is optional; the protocol-775 Python
+stress clients require no Mineflayer installation.
+
+For a fresh, isolated runtime directory, provide `server.config`:
+
+```properties
+memory-budget-mib=4096
+online-mode=false
+offline-skins=false
+chunk-storage=goatworld-sqlite-experimental
+chunk-save-mode=async
+view-distance=2
+simulation-distance=2
+```
+
+Run from that directory with the repository assets linked and a separate
+`setup.conf` suitable for the host (use `cpu_affinity = auto` for a portable setup):
+
+```sh
+ln -s /path/to/GoatCore/assets assets
+MC_WORLD_PATH=/path/to/new-disposable-world MC_BIND_PORT=25587 \
+  MC_SETUP_FILE=/path/to/setup.conf /path/to/GoatCore/mc_server
+```
+
+The process creates a default config when absent. `MC_BIND_PORT` overrides the
+listen port (normally 25565). Keep separate worlds, configs and binaries per
+instance. Offline identities are spoofable: restrict access to offline/QA servers.
+`MC_ADMIN_USERNAME=Ofwood_` grants that offline identity administrator privileges;
+`MC_QA_MODE=1` exposes test commands to authorized users. Do not enable broad
+`MC_ADMIN_COMMANDS=1` test permissions on a public instance.
+
+CPU settings in `setup.conf` include `cpu_cores`, `cpu_affinity`,
+`network_workers` (1/2/4), `chunk_workers` (auto or 1–16) and `tick_rate=20`.
+Affinity restricts placement, not CPU consumption; use cgroups for quotas.
+There is one persistence worker where supported, not a parallel simulation pool.
+
+Repository development rules require Minecraft servers and bots to run on the
+dedicated remote test host, **never on the development laptop**. See
+[remote testing instructions](.agents/skills/remote-deploy/SKILL.md).
+
+## Validation and endurance
+
+```sh
+make -B precommit-check
+```
+
+The suite includes C tests, protocol/login checks and storage validation.
+Targeted ASan/UBSan and TSan runs, differential official-server fixtures, crash
+injection, restart tests and Xeon measurements are documented in
+[the compatibility report](docs/vanilla-compatibility.md).
+
+A supervised endurance harness uses real offline clients, paced movement and
+confirmed block actions on the test instance. It separates generator resources,
+rotates evidence, protects the public service and stops on a newly observable
+published commit. **Configured bot count is not evidence of active player count.**
+See [endurance operation and limits](docs/endurance-testing.md) for actual campaign
+results, safety thresholds, metric collection and emergency stop commands.
+The current guarded ramp qualified **100 active scripted clients**. Admission
+to 150 connections triggered the conservative sub-10-TPS stop; 150/200/250 are
+not qualified. The published endurance campaign is capped at 100, subject to
+ongoing guards. This is not a human-player capacity guarantee.
+
+## Current limitations and roadmap
+
+Survival gameplay, general player physics, entities/AI, world generation,
+Redstone, fluid flow, lighting and several interactions remain incomplete.
+Chunk/player/item persistence has no global transaction. SIGKILL tests do not
+prove universal physical power-loss durability. Authentication needs positive
+real-client validation before promotion to a public online deployment.
+
+Next work includes ladder climbing and partial player physics, advanced
+collisions, scheduled ticks, Redstone, fluids, lighting, entities and Vanilla
+world generation. Scalability qualification will progress through representative
+5/25/50/100/250/500/1,000-player targets, without invented delivery dates.
+
+Minecraft is a trademark of Mojang/Microsoft. GoatCore is independent and is not
+affiliated with Mojang or Microsoft.

@@ -7608,3 +7608,249 @@ faire au prochain lot. Le défaut hotbar mesuré est corrigé sans nouveau moteu
 de stockage. Les pics de flush périodique/forcé, l'usage de grands working sets,
 les centaines de joueurs et les environnements cgroup v1 restent des limites
 explicites, sans affirmation de parité Vanilla complète ni de 20 TPS permanents.
+
+# Scalability goals and sustained 250-bot endurance testing
+
+## Vision, périmètre et révision
+
+Départ : `7af270bb37c137ed521c169c5dfebc92a784197b`, correctif hotbar local
+non publié au début de ce lot. La référence GitHub vérifiée est alors
+`38696af6eb0634392324f88399b242983d2a50ca`. Cette mission ajoute exactement
+un commit, sans réécriture, et autorise le push normal des deux commits.
+
+`AGENTS.md` et les trois skills inscrivent la double priorité : efficacité
+avec 4–5 joueurs et objectif d'ingénierie de **1 000+ joueurs Survival actifs
+dans un monde partagé**. Ce dernier n'est pas une capacité démontrée. La
+politique mémoire 4–100 GiB et davantage est conservée ; aucune réservation
+massive, aucune simplification Vanilla pour améliorer artificiellement les TPS.
+Le README anglais présente les états réels, l'architecture, les backends, les
+mesures du manifeste hotbar et leurs limites. Aucun chiffre comparatif de TPS
+Vanilla n'est inventé ; les tests différentiels ne sont pas des benchmarks TPS.
+
+Aucun code C, codec, backend, comportement gameplay ou réglage par défaut du
+serveur n'est modifié. Les ajouts sont des outils Python et scripts de test,
+configuration d'exemple, documentation et directives. Le serveur compilé sur
+le distant conserve le SHA-256 :
+
+```text
+d606558a906ed71b07298525b422601562f7d18b10163f78e74482672de59d5e
+```
+
+## Isolation et profil d'activité
+
+L'autorisation concerne seulement **25587**, `goatcore-test.service`. Un drop-in
+choisit un binaire de test séparé, une configuration offline GoatWorld SQLite
+async et un monde neuf. Le binaire partagé `/opt/goatcore/app/mc_server`, la
+configuration online, le setup online et l'unité de 25565 ne sont pas remplacés.
+L'ancien monde offline est aussi conservé ; aucune migration n'est faite.
+
+Le host expose un dual Xeon E5-2637 v2, 16 CPU logiques et environ 108 GiB visibles
+au LXC. Le stockage observé est ext4/LVM, disques ROTA=1 ; ces observations ne
+prouvent pas les détails physiques du RAID. Le public reste sur CPU 0–3. Test :
+CPU 4,5,12,13, quota 200 %, mémoire 8 GiB, sans swap. Générateurs : 6,7,14,15,
+quota 200 %, 2 GiB, sans swap, priorités CPU/I/O réduites. Les frères SMT du
+public ne sont pas utilisés pour les bots. La contention disque/mémoire reste
+possible et surveillée.
+
+Le protocole/login existant est réutilisé. Au plus 25 clients par processus,
+avec dictionnaires/latences bornés et élimination des mises à jour sans intérêt
+pour la cible. Les clients entrent dans le même monde, dans cinq groupes
+spatiaux, incluant des coordonnées négatives. Ils marchent 18 blocs puis
+reviennent, vérifient la position autoritaire finale, posent et cassent un bloc.
+Torche, lanterne, dalle, escalier, porte, trappe, échelle et stone sont répartis
+entre identités. Type de bloc, état final attendu et ACK de séquence sont
+vérifiés ; les deux moitiés de porte sont contrôlées. Le cycle nominal est
+40 secondes, avec douze déplacements espacés d'une seconde et quatre secondes
+pour terminer le minage, sans rattrapage en rafale.
+Les mineurs de stone vérifient aussi une perte de support : une torche préparée
+par QA au-dessus doit disparaître après le minage. Les préparations QA et ces
+pertes de support sont comptées séparément des poses clientes.
+
+Les mutations mesurées sont en Survival mais les supports/chemins sont préparés
+par QA, les items/pioches et la nourriture sont fournis artificiellement. Les
+permissions QA larges sont **limitées au service offline de test**. Ofwood_ reste
+administrateur ; une connexion réelle de cette identité reçoit une réponse à
+une commande privilégiée. Cette charge n'est ni un Survival humain complet,
+ni un benchmark directement comparable au profil Phase 2B/hotbar précédent.
+Les mobs/IA, fermes, combat, Redstone, fluides et exploration imprévisible ne
+sont pas représentés.
+
+## Supervision et garde-fous
+
+La procédure détaillée, les seuils, les fichiers et les commandes sont dans
+[Endurance operation](endurance-testing.md). Les deux services de campagne
+survivent à SSH, sans boucle infinie de restart. Les bots ont des retries
+bornés avec backoff ; le contrôleur accepte au plus deux redémarrages d'un
+processus générateur. Il distingue connectés, monde chargé et clients ayant
+récemment terminé un cycle confirmé. Propositions, envois, confirmations,
+opérations en vol, timeouts et annulations ne sont pas confondus.
+
+Le contrôleur surveille 25565 par statut Minecraft readonly, état/PID/restarts
+et empreintes protégées. Il arrête la campagne en cas de dégradation persistante,
+pression mémoire/I/O critique, OOM, disque libre sous 8 GiB, monde au-delà de
+8 GiB, WAL au-delà de 512 MiB, erreurs de persistance ou perte de contrôle.
+Les limites exactes sont opérationnelles, pas des promesses de latence humaine.
+Une action ambiguë n'est pas rejouée silencieusement pour fabriquer un succès.
+
+Les logs serveur/traces et JSONL tournent avec rotation/compression/rétention
+bornées. Les FIFO évitent de tronquer un fichier que le serveur garde ouvert.
+Les fenêtres de ticks sont bornées en RAM et les traces bufferisées peuvent
+retarder la mesure. `/proc` distingue CPU/RSS/I/O du serveur et des générateurs,
+les cgroups donnent mémoire/pages/événements ; SQLite n'est pas un processus
+séparé. Les métriques absentes (allocations exhaustives, certains compteurs de
+chunks, drops uniques ou latences physiques RAID) restent explicitement absentes.
+
+Après push, le SHA publié est enregistré dans le manifeste runtime. L'API
+publique GitHub est sondée toutes les 120 secondes, sans clé ni token installé.
+Un SHA différent ou cinq échecs de lecture consécutifs arrêtent la campagne.
+Un commit local non publié est invisible. Une modification des scripts du
+chargement ou du binaire est également détectée. Le prochain agent doit
+récupérer les mesures et arrêter une version obsolète avant son nouveau commit.
+
+## Validation des contrôles
+
+Un premier préflight à cinq joueurs confirme placements, minage et déplacements.
+Une déconnexion volontaire est suivie d'une reconnexion ; un générateur tué
+par SIGKILL est redémarré une seule fois, puis retrouve cinq clients actifs.
+Le fichier `STOP` provoque la fermeture des générateurs et un shutdown natif
+réussi du serveur de test. Un second test fournit volontairement un SHA attendu
+nul : la véritable API renvoie le SHA GitHub réel et déclenche l'arrêt pour
+changement de version, avec serveur sorti 0. Aucun commit Git n'est créé pour
+simuler ce contrôle.
+
+Les cinq tests Python vérifient les seuils critiques, la rétention/compression,
+les cibles uniques, l'absence d'accumulation sur 10 000 mises à jour sans rapport,
+et le drainage d'un enfant simulé lorsque l'écriture des preuves échoue.
+Les scénarios de pression/WAL/disque des prédicats sont **simulés** : aucune
+panne physique ou saturation dangereuse du RAID n'est provoquée.
+
+`make -B precommit-check GOATWORLD_G1_CHECK=1` passe dans l'export distant neuf :
+34 suites C, réseau/login, migration/outils et injections de stockage. Une
+relance non nettoyée est rejetée par le contrôle d'hygiène des exports à cause
+des `.o/.d` produits par ce build ; ce refus d'environnement n'est pas un échec
+de gameplay et n'est pas masqué. Les tests Python nouveaux sont exécutés à part
+localement (sans serveur) et sur le distant. Aucun C n'est ajouté/modifié : les
+sanitizers du lot précédent sont référencés, pas présentés comme réexécutés.
+
+## Récupération et arrêt
+
+Avant le prochain commit :
+
+```sh
+scripts/remote-endurance.sh status
+scripts/remote-endurance.sh collect tests/stress/results/endurance/NOUVELLE-COLLECTE
+scripts/remote-endurance.sh stop
+```
+
+Les fichiers utiles sont sous `/var/lib/goatcore/endurance/current/metrics/` :
+manifest, latest, ramp, JSONL, worker status, événements et résumé final après
+arrêt. Le script de collecte exclut mondes/joueurs/FIFO. Conserver les données
+volumineuses hors Git et consolider les preuves légères avec
+`tools/summarize_endurance.py`. Les seuils et commandes sont documentés avant
+la fin de l'endurance ; l'arrêt manuel ne dépend pas de cette session Codex.
+
+## Résultats de montée en charge et décision de plafond
+
+Une première rampe a validé 5/25/50 puis rencontré deux placements d'échelles
+sans état attendu à 100 connexions. Un cas similaire se reproduit avec seulement
+25 clients dans des zones froides : ce n'est pas une preuve de limite à 100.
+Le harnais préparait les supports avant d'avoir attendu leur voisinage et
+plaçait le joueur échelle derrière la face cliquée. La correction attend les
+chunks, relit support/destination, approche la face exposée avec un point de
+clic cohérent et vérifie l'item sélectionné. Le watermark d'ACK reste monotone,
+comme dans le profileur existant. Le contrôle de disponibilité TCP de 25587
+précède aussi les admissions, évitant de traiter son démarrage comme un crash.
+Le contrôle à froid de 25 identités termine **50 cycles complets sans erreur** ;
+les opérations du cycle suivant annulées à son timeout restent distinguées.
+Aucun changement C n'a été nécessaire et les tentatives échouées sont conservées.
+
+Une rampe corrigée a ensuite validé 100 clients actifs puis déclenché le seuil
+préventif sous 10 TPS pendant l'admission de 150. La rampe finale de validation
+espace les nouvelles identités à **une par seconde** ; les 40 secondes de travail
+par cycle et les garde-fous restent inchangés. Elle confirme 100 actifs sans
+action en échec et s'arrête de nouveau à 150. Les résultats ci-dessous sont les
+**fenêtres de ticks bufferisées observées** aux points de qualification, pas des
+médianes de trois essais ni une mesure en régime permanent. Les confirmations
+sont cumulatives depuis le début, et les populations précédentes continuent.
+
+| Cible | Actifs au point observé | TPS | MSPT P99 (ms) | CPU serveur (% d'un CPU) | CPU workers bots (somme %) | RSS serveur (KiB) | Actions confirmées |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 5 | 20,000 | 0,219 | 4,9 | 0,8 | 32 680 | 10 |
+| 25 | 25 | 19,933 | 52,263 | 5,5 | 2,1 | 33 012 | 68 |
+| 50 | 50 | 18,933 | 85,521 | 14,9 | 14,1 | 41 272 | 183 |
+| 100 | 100 | 18,767 | 108,933 | 50,9 | 47,5 | 55 520 | 534 |
+| 150 — interrompu | 137 sur 150 connectés | 9,767 | 206,816 | 83,3 | 92,5 | 70 476 | 942 |
+| 200 | Non tenté après garde-fou | — | — | — | — | — | — |
+| 250 | Non tenté après garde-fou | — | — | — | — | — | — |
+
+Le dernier état à 150 contient 6 074 mouvements proposés, 479 vérifications de
+position, 479 poses confirmées et 463 destructions confirmées, 16 opérations en
+vol, **zéro timeout ou action en échec** dans cette rampe. Cinquante-quatre pertes
+de support sont confirmées. Les 11 995 notifications de pickup sont des
+**observations reçues**, pas 11 995 items uniques : ne pas les sommer comme un
+nombre d'entités. Les dernières annulations du shutdown ne sont pas requalifiées
+en confirmations. Le résumé final conserve ce motif d'arrêt.
+
+La dernière fenêtre de 30 s contient 293 ticks, MSPT P50/P95/P99
+45,783/163,652/206,816 ms, maximum 279,468 ms et 140 ticks au-dessus de 50 ms.
+Avec les passes fast, le P99 est 308,787 ms et le maximum 463,261 ms. Il n'est
+pas question de 20 TPS constants. Le seuil de 10 TPS est une protection
+opérationnelle conservatrice ; cette interruption ne prouve pas une capacité
+matérielle absolue ni la stabilité future de tout Survival à 100 humains.
+
+Les traces montrent des coûts restants, sans nouveau correctif dans ce lot :
+
+- 1 672 stores joueurs cumulés avant l'arrêt, sans erreur, 73,839 s de latence
+  totale, 1,532 s CPU, maximum 487,376 ms. Ils comprennent les barrières
+  d'inventaire et la préparation QA ; le temps n'est pas présenté comme du
+  fsync physique mesuré isolément. Le correctif hotbar n'est pas réimplémenté.
+- 879 commits SQLite, sans erreur, 26,700 s cumulées, maximum 211,364 ms ;
+  ce worker reste hors du tick normal. Ces temps ne s'ajoutent pas simplement
+  à ceux des stores joueurs pour reconstruire une latence disque physique.
+- Dans la dernière fenêtre, 8,144 s dans la synchronisation des observateurs,
+  2,057 s dans les items, 10,399 s agrégées de handlers et 5,486 s de protocole.
+  Certaines phases se chevauchent : ne pas les additionner comme des postes
+  indépendants. Le générateur n'est pas à sa limite de quota dans cet échantillon.
+
+La RAM visible disponible reste supérieure à 107 GiB, zéro OOM/swap dans les
+groupes, environ 43,5 GiB de disque libres. Le WAL observé avant arrêt vaut
+5 953 432 octets. La sonde publique vaut 0,895 ms dans ce dernier échantillon,
+avec état/empreintes inchangés. La campagne n'a pas rempli la RAM artificiellement.
+
+## Intégrité, redémarrage et publication
+
+Le shutdown de la rampe espacée termine en **4,190 s**, retour serveur 0 ; le
+contrôleur finit en 314,623 s, tous générateurs arrêtés. La relecture indépendante
+valide SQLite (`quick_check` et contrôle complet de l'oracle), **195 chunks**,
+leurs coordonnées, DataVersion, codec, générations, longueurs et checksums,
+ainsi que les **150 fichiers joueurs** gzip/NBT, UUID, sélection et mode Survival.
+Après redémarrage, cinq identités réparties retrouvent position, sélection et
+total d'inventaire ; Ofwood_ obtient une réponse privilégiée. Le service de test
+est ensuite arrêté proprement avant publication.
+
+La non-régression distante complète passe : **310 cas attachés, 335 portes/trappes,
+192 escaliers**, deux observateurs et deux redémarrages. Les 275 cas attachés
+principaux et les escaliers sont également rejoués sur le serveur officiel.
+Les 18 placements `.bin`, les 18 Anvil, les frontières de régions GoatWorld,
+100 ramassages et les sept block entities opaques passent. Les cinq tests Python
+nouveaux passent localement sans serveur et sur le distant. Le manifeste léger
+est [`vanilla-26.1.1-endurance-validation.json`](../tests/fixtures/vanilla-26.1.1-endurance-validation.json).
+
+**Décision : plafond de campagne publiée à 100 bots**, avec la rampe effective
+`[5,25,50,100]` enregistrée avant son premier démarrage. Les cibles 150, 200 et
+250 restent non qualifiées ; ne pas publier 250 bots actifs ni 1 000 joueurs
+supportés. Le script garde une cible expérimentale de 250 pour une future
+qualification, mais le workflow de cette mission utilise seulement le préfixe
+validé. Le SHA final publié et l'heure de la nouvelle campagne sont dans son
+manifeste runtime après le push ; aucune donnée future n'est fabriquée dans ce
+rapport précommit. Les garde-fous peuvent encore interrompre cette endurance.
+
+25565 reste actif, PID **147**, zéro restart. Le binaire partagé, la configuration
+online, son setup et son unité ont les mêmes empreintes qu'au départ. Aucun
+monde public n'est modifié. Les configurations des services principaux ne sont
+pas fusionnées ; seule l'instance test possède le nouveau drop-in et sa release.
+
+Le prochain lot commence par collecter/analyser l'endurance puis reprend
+l'escalade des échelles et la physique partielle. Les coûts de persistance
+immédiate d'inventaires et des synchronisations globales sont des observations
+à conserver, sans ouvrir ici une nouvelle refonte stockage/réseau.

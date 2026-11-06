@@ -49,6 +49,20 @@ mettre les services principaux en danger ; ne pas provoquer volontairement d'OOM
 Distinguer cache applicatif, SQLite et pages Linux. Qualifier les lectures à
 froid/chaud ; aucune purge globale des caches sur le serveur partagé.
 
+## Scalability and endurance
+
+Measure both 4–5-player efficiency and progressive larger populations. Record
+connected, authenticated, world-ready and recently active players separately;
+count movement position checks, sent/confirmed/rejected/missing mutations and
+received world updates. Describe spatial distribution, loaded chunks, entities,
+activity cadence, artificial inventory replenishment and omitted gameplay.
+Measure TPS/MSPT including tails, CPU server/generator, network, memory and I/O.
+Report generator saturation separately; bots are not equivalent to human Survival
+players. A plateau is qualified only by observed activity, never configured count.
+Use `docs/endurance-testing.md` for the supervised campaign, health thresholds,
+stop/collection procedure and version-change behavior. Retrieve prior campaign
+results before starting the next development commit. Preserve failed attempts.
+
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers

@@ -1,0 +1,32 @@
+{
+  "campaign": "/var/lib/goatcore/endurance/UNIQUE-ID/metrics",
+  "binary": "/opt/goatcore/endurance/releases/UNIQUE-ID/mc_server",
+  "binary_sha256": "REPLACE_WITH_TESTED_SHA256",
+  "world": "/var/lib/goatcore/endurance/UNIQUE-ID/runtime/world",
+  "published_sha": "REPLACE_WITH_CONFIRMED_ORIGIN_MAIN_SHA",
+  "watch_origin": true,
+  "port": 25587,
+  "generator_unit": "goatcore-endurance.service",
+  "ramp": [
+    5,
+    25,
+    50,
+    100,
+    150,
+    200,
+    250
+  ],
+  "plateau_s": 45,
+  "plateau_timeout_s": 300,
+  "period_s": 40,
+  "limits": {
+    "public_latency_ms": 250,
+    "minimum_available_mib": 2048,
+    "minimum_disk_free_mib": 8192,
+    "maximum_world_mib": 8192,
+    "maximum_wal_mib": 512,
+    "memory_full_avg10": 1,
+    "io_full_avg10": 20
+  },
+  "admission_interval_s": 1
+}

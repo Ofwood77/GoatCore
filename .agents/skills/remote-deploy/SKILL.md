@@ -102,6 +102,22 @@ Ne jamais présenter un déploiement comme réussi sans validation.
 
 Ne pas effectuer de merge ou de push forcé sans autorisation explicite.
 
+## Supervised endurance campaigns
+
+Apply `docs/endurance-testing.md` for authorized test-service campaigns. Updating
+25587 must not replace the shared binary used by 25565: install a separate test
+release and override only goatcore-test.service. Preserve offline mode and
+Ofwood_ administration. Main-service deployments still require their own scope.
+Use distinct bounded cgroups for server and generator; account for sibling CPU
+threads, storage contention, page cache and other services. Supervision must
+measure real activity, bound retries/backoff, rotate logs and stop on low disk,
+OOM/pressure, lost control, changed binary/version or public-service degradation.
+Record the public service baseline and verify it throughout. Keep manifests,
+UTC metrics and a manual emergency stop/collection command. Never install GitHub
+credentials for version polling; stop on the next publicly observable origin/main
+commit or document a manual workflow when safe polling is unavailable. An unseen
+local commit cannot be detected remotely. Do not run unbounded restart loops.
+
 ## Sauvegarde GitHub après commit
 
 Après chaque commit, effectuer un push normal depuis le dépôt local vers
